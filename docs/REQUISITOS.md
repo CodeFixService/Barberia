@@ -1,4 +1,4 @@
-# Barbería — Requisitos (v0.4 · aprobada para programar)
+# Barbería — Requisitos (v0.5 · aprobada para programar)
 
 Pedido por Josué (administrador general · CodeFix). Se programa la app completa de una vez cuando esto esté aprobado.
 
@@ -14,7 +14,10 @@ hora libre, abona y su barbero confirma. Cada barbero anota sus cortes en una **
 
 ## 2. Base técnica
 - PWA publicada desde `CodeFixService/Barberia`. **Supabase en cuenta nueva** (la crea Josué). Reglas en el servidor.
-- Push + correo (Gmail) + campanita. WhatsApp con mensaje ya escrito (`wa.me`).
+- **Todo por notificaciones push + campanita dentro de la app. Nada por correo** (sin Gmail). WhatsApp solo para enviar
+  accesos y keys con el mensaje ya escrito (`wa.me`).
+- Sin correo, **la contraseña olvidada la restablece quien creó la cuenta** (dueño → cliente/barbero, Josué → barbería)
+  y se envía por WhatsApp.
 - Se reutiliza de Aplicaciones: sesión, cuentas por invitación, Free/Premium con aprobación, "Ya pagué", chat con límite de 3,
   avisos, logo, temas, botón **Actualizar**, uso del servidor, y la Caja (adaptada a cortes).
 
@@ -107,16 +110,25 @@ hora libre, abona y su barbero confirma. Cada barbero anota sus cortes en una **
 
 ## 8. Mensajes
 
+**Regla de los 3 mensajes:** quien escribe "hacia arriba" puede mandar **máximo 3 seguidos**; cuando el otro contesta,
+el contador vuelve a 0. Quien contesta "hacia abajo" escribe **todo lo que quiera**.
+
 | Conversación | Regla |
 |---|---|
-| Cliente → barbero / dueño | Máximo **3 seguidos** hasta que respondan (cliente Premium: sin límite, llega con ⭐). |
-| Barbero ↔ barbero (mismo local) | Máximo **3 seguidos**. |
-| Barbero/dueño → cliente | Sin límite. |
-| Barbería ↔ Josué (soporte) | Se mantiene, como en las otras apps. |
+| Cliente → barbero / dueño | Máximo **3 seguidos** hasta que el barbero conteste (cliente Premium: sin límite, llega con ⭐). |
+| Barbero / dueño → cliente | **Sin límite.** |
+| Barbero ↔ barbero (mismo local) | Máximo **3 seguidos** cada uno. |
+| Barbería (dueño o barbero) → Josué | Máximo **3 seguidos** hasta que Josué conteste. |
+| Josué → barberías | **Sin límite.** |
+
+Al llegar al límite, la caja de texto se bloquea con: *"Ya enviaste 3 mensajes. Espera que te respondan 🙂"*.
 
 - El cliente puede escribir a cualquier barbero de su barbería y al dueño.
 - Cada reserva tiene **"Escribir sobre esta hora"**.
-- 100 mensajes al día, ✓ Enviado / ✓✓ Visto, bloquear y reportar.
+- **Vistos en todos los chats:** ✓ Enviado · ✓✓ Recibido · ✓✓ **azul = Visto** (con la hora en que lo vio).
+  "Escribiendo…" no (para ahorrar servidor).
+- En la lista de chats: puntito y contador de no leídos.
+- 100 mensajes al día, bloquear y reportar.
 
 ## 9. Privilegios del dueño sobre sus barberos
 
@@ -183,7 +195,7 @@ Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; 
 
 ### Cobro y activación (dos formas, siempre mensual)
 - Admin → Ajustes → link de Mercado Pago y precio ($4.900).
-- La persona toca **Comprar** → paga → **Ya pagué** → a Josué le llega correo y push.
+- La persona toca **Comprar** → paga → **Ya pagué** → a Josué le llega un push.
 - Josué activa de **una de dos formas**:
   1. **Key:** genera una key mensual, se la envía por WhatsApp y la persona la pega en **Mi plan → Activar key**.
   2. **Directo:** botón "Activar Premium 1 mes" en la ficha de esa cuenta.
@@ -206,18 +218,30 @@ Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; 
 - **Barberías:** crear, enviar acceso, Premium (key o directo), suspender, 👁️ ver su panel tal como lo ve el dueño.
 - **Clientes y barberos** de todas las barberías, con filtro y Premium.
 - **🔑 Keys:** generar, historial completo, revocar, renovar.
-- **Ajustes:** links de pago, precio, WhatsApp, Gmail, push, liberar versión. **Avisos** a barberías y/o clientes.
+- **Ajustes:** links de pago, precio, WhatsApp, push, liberar versión.
+- **Avisos** a barberías y/o clientes, con contador de **cuántos lo vieron** y lista de quién sí / quién no.
 
-## 13. Avisos automáticos
+## 13. Notificaciones (solo push + campanita) con visto
+- **Cada aviso tiene estado**, igual que el chat: **✓ Enviado · ✓✓ Visto** (con fecha y hora en que lo abrió).
+- **Quien envía ve si el otro lo vio**, en las dos direcciones:
+  - Cliente ↔ barbero/dueño (ej. el barbero ve que el cliente **vio** "✅ Tu hora está confirmada").
+  - Barbería ↔ Josué (ej. Josué ve que la barbería **vio** "Tu Premium vence en 3 días" o una recomendación).
+- Cada uno tiene su **🔔 campanita** con no vistos arriba; al tocar un aviso se marca **Visto** y lleva a donde corresponde
+  (la hora, el chat, Mi plan…). Botón "Marcar todo como visto".
+- En el detalle de una hora, el barbero ve el historial: *"Confirmada 14:02 · ✓✓ vista por el cliente 14:05"*.
+- Push con el ícono/logo de la barbería. Si el celular no tiene push activado, el aviso igual queda en la campanita.
+- Se pide activar notificaciones al entrar por primera vez (con explicación simple y botón de prueba).
+
+### Cuándo se avisa
 
 | Cuándo | A quién |
 |---|---|
-| Nueva reserva, "Ya aboné" o pide día "A consultar" | Barbero de la hora + dueño (push + correo + campanita) |
-| Confirma, aprueba, rechaza, mueve o anula | Cliente (push + campanita) |
+| Nueva reserva, "Ya aboné" o pide día "A consultar" | Barbero de la hora + dueño |
+| Confirma, aprueba, rechaza, mueve o anula | Cliente |
 | Recordatorio 24 h y 2 h antes (Premium) | Cliente |
 | Se liberó una hora (lista de espera) | Cliente Premium |
 | Mensaje nuevo | El otro |
-| "Ya pagué" Premium | Josué (correo + push) |
+| "Ya pagué" Premium | Josué |
 | Plan por vencer | Barbería / cliente |
 
 ## 14. Seguridad y límites
@@ -241,3 +265,5 @@ Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; 
 - Interruptor **"Mi agenda abierta a clientes"** para el dueño.
 - Funciones Premium visibles **en plateado con 🔒** para los Free.
 - Barberos creados por el dueño: versión tradicional (sus horas, su caja, sus chats).
+- **Solo push + campanita** (sin correo), con **estado Visto** en avisos y chats, en ambas direcciones.
+- Regla de 3 mensajes: cliente → barbero y barbería → Josué; el que responde escribe sin límite.
