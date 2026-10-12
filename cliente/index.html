@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#b07d2b">
+<meta name="robots" content="noindex, nofollow">
+<title>Mi barbería</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="apple-touch-icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/core.css">
+<style>
+  .hola { display: flex; align-items: center; gap: 14px; }
+  .hola h2 { margin: 0; font-size: 20px; }
+  .portada { height: 120px; border-radius: var(--radius); background: var(--brand-soft) center / cover no-repeat; margin-bottom: 14px; box-shadow: var(--shadow); }
+  .proxima { border: 1.5px solid var(--brand-line); }
+  .cuenta-reg { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 13px; color: var(--brand); }
+  .paso { display: flex; align-items: center; gap: 10px; margin: 18px 4px 10px; }
+  .paso .n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: var(--brand-ink); font-weight: 800; font-size: 14px; flex: none; }
+  .paso b { font-size: 16px; }
+  .reloj { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: center; letter-spacing: -.02em; }
+  .comprobante-prev { width: 100%; max-height: 260px; object-fit: contain; border-radius: 12px; background: var(--field); margin-top: 10px; }
+  .sellos { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 8px; }
+  .sellos i { aspect-ratio: 1 / 1; border-radius: 50%; border: 2px dashed var(--line); display: grid; place-items: center; font-style: normal; font-size: 20px; }
+  .sellos i.on { border: 0; background: var(--brand); color: var(--brand-ink); }
+  .oferta { position: relative; overflow: hidden; }
+  .oferta img { width: 100%; border-radius: 12px; margin-top: 8px; display: block; }
+  .oferta.vip { border: 1.5px solid var(--oro); }
+  .resumen-carro { display: grid; gap: 4px; font-size: 15px; }
+  .resumen-carro div { display: flex; justify-content: space-between; gap: 10px; }
+  #v-agendar { padding-bottom: 90px; }
+</style>
+</head>
+<body>
+<main>
+  <section class="view" id="v-inicio"></section>
+  <section class="view" id="v-agendar"></section>
+  <section class="view" id="v-horas"></section>
+  <section class="view" id="v-chat"></section>
+  <section class="view" id="v-perfil"></section>
+</main>
+<div class="carro-barra hidden" id="carroBarra"></div>
+<nav class="tabs">
+  <button data-v="inicio" class="on"><span>🏠</span>Inicio</button>
+  <button data-v="agendar"><span>📅</span>Agendar</button>
+  <button data-v="horas"><span>🗓️</span>Mis horas</button>
+  <button data-v="chat"><span>💬</span>Mensajes<i class="num" data-num="mensajes"></i></button>
+  <button data-v="perfil"><span>👤</span>Perfil</button>
+</nav>
+<script src="../shared/config.js"></script>
+<script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/core.js"></script>
+<script src="../shared/cuenta.js"></script>
+<script src="../shared/avisos.js"></script>
+<script src="../shared/chat.js"></script>
+<script src="../shared/agenda.js"></script>
+<script src="../shared/perfil.js"></script>
+<script src="cliente.js"></script>
+</body>
+</html>

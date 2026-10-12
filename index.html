@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#b07d2b">
+<meta name="robots" content="noindex, nofollow">
+<title>Barbería · Reserva tu hora</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="shared/core.css">
+<style>
+  body { padding-bottom: 20px; }
+  .entrar { max-width: 430px; margin: 6vh auto 0; padding: 26px 22px; }
+  .logo-grande { width: 92px; height: 92px; border-radius: 28px; margin: 0 auto 14px; display: grid; place-items: center; font-size: 46px;
+    background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 50%, #000)); color: var(--brand-ink);
+    background-size: cover; background-position: center; box-shadow: 0 12px 30px color-mix(in srgb, var(--brand) 35%, transparent); }
+  .logo-grande.img { background-color: #fff; }
+  .entrar h1 { text-align: center; font-size: 23px; margin: 0 0 4px; letter-spacing: -.02em; }
+  .entrar .sub { text-align: center; color: var(--muted); font-size: 14.5px; margin: 0 0 16px; }
+  .ver-clave { position: relative; }
+  .ver-clave button { position: absolute; right: 6px; top: 6px; padding: 6px 10px; background: transparent; color: var(--muted); box-shadow: none; }
+  .olvido { display: block; text-align: center; margin-top: 14px; font-size: 14.5px; }
+  #cargando { text-align: center; margin-top: 30vh; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <div id="cargando">💈 Cargando…</div>
+  <div id="cInstalar" class="banner marca hidden" style="max-width:430px;margin:12px auto">
+    <div class="grow"><b>📲 Instala la app</b><br><span class="chico">Queda en tu pantalla de inicio, como cualquier app.</span></div>
+    <button class="small" id="bInstalar">Instalar</button>
+  </div>
+  <div id="cIos" class="banner oscuro hidden" style="max-width:430px;margin:12px auto">
+    <div class="grow chico">📲 <b>Para instalarla en iPhone:</b> toca <b>Compartir</b> (□↑) y luego <b>"Agregar a inicio"</b>.</div>
+  </div>
+  <div class="card entrar hidden" id="cEntrar">
+    <div class="logo-grande" id="lgLogo">💈</div>
+    <h1 id="lgNombre">Reserva tu hora</h1>
+    <p class="sub" id="lgSub">Ingresa con la cuenta que te dio tu barbería</p>
+    <form id="fEntrar" autocomplete="on">
+      <label for="email">Correo</label>
+      <input id="email" type="email" autocomplete="username" inputmode="email" required placeholder="tu@correo.cl">
+      <label for="clave">Clave</label>
+      <div class="ver-clave"><input id="clave" type="password" autocomplete="current-password" required placeholder="••••••">
+        <button type="button" id="bVer" aria-label="Mostrar clave">👁️</button></div>
+      <p class="err" id="eEntrar"></p>
+      <button class="full grande" id="bEntrar">Entrar</button>
+    </form>
+    <a class="olvido" id="bOlvido" href="#" target="_blank" rel="noopener">🔑 ¿Olvidaste tu clave?</a>
+    <p class="muted chico centro" style="margin-top:16px">¿No tienes cuenta? Tu barbería te la crea y te la envía por WhatsApp.</p>
+  </div>
+</main>
+<script src="shared/config.js"></script>
+<script src="shared/vendor/supabase.js"></script>
+<script src="shared/core.js"></script>
+<script src="shared/cuenta.js"></script>
+<script>
+(async function () {
+  'use strict';
+  const C = Core, K = Cuenta, $ = C.$;
+  C.registrarSW();
+  const params = new URLSearchParams(location.search);
+  const ir = params.get('ir') || '';
+
+  // Instalar como app
+  let promptInstalar = null;
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); promptInstalar = e; $('cInstalar').classList.remove('hidden'); });
+  $('bInstalar').onclick = async () => { if (!promptInstalar) return; promptInstalar.prompt(); await promptInstalar.userChoice; $('cInstalar').classList.add('hidden'); };
+  if (K.esIOS() && !K.instalada()) $('cIos').classList.remove('hidden');
+
+  if (!K.listo) { $('cargando').textContent = 'Falta configurar el servidor (shared/config.js).'; return; }
+
+  // ¿Ya tiene sesión? → a su app.
+  let a = null;
+  try { a = await K.refrescar(); } catch (e) { a = K.cuenta; }
+  if (a) { location.replace(C.raiz() + K.paginaDe(a.role) + (ir ? '#' + ir : '')); return; }
+
+  // Barbería del enlace (?b=código) o la recordada en este celular: logo, nombre y WhatsApp.
+  let local = K.barberiaLocal();
+  const codigo = params.get('b');
+  if (codigo) {
+    try { const b = await K.rpc('barberia_publica', { p_codigo: codigo }); if (b) { K.recordarBarberia(b); local = b; } } catch (e) { /* sin red */ }
+  }
+  const ajustes = await K.ajustes();
+  if (local) {
+    $('lgNombre').textContent = local.nombre;
+    $('lgSub').textContent = 'Ingresa para reservar tu hora 💈';
+    if (local.logo) { $('lgLogo').classList.add('img'); $('lgLogo').style.cssText = C.fondo(local.logo); $('lgLogo').textContent = ''; }
+    if (local.color) C.aplicarColor(local.color);
+  }
+  const wsp = (local && local.whatsapp) || ajustes.whatsapp_admin;
+  const textoOlvido = () => 'Hola, olvidé mi clave de la app' + (local ? ' de ' + local.nombre : '') + '. ¿Me la pueden restablecer? Mi correo es ' + ($('email').value.trim() || '…');
+  if (wsp) $('bOlvido').onclick = (e) => { e.preventDefault(); open(C.wa(wsp, textoOlvido()), '_blank'); };
+  else $('bOlvido').onclick = (e) => { e.preventDefault(); C.toast('Pídele a tu barbería que te restablezca la clave'); };
+
+  $('cargando').classList.add('hidden');
+  $('cEntrar').classList.remove('hidden');
+  $('email').value = C.leer('ultimoEmail', '');
+  $('bVer').onclick = () => { const i = $('clave'); i.type = i.type === 'password' ? 'text' : 'password'; };
+  $('fEntrar').onsubmit = async (e) => {
+    e.preventDefault();
+    $('eEntrar').textContent = '';
+    const b = $('bEntrar');
+    b.disabled = true; b.textContent = 'Entrando…';
+    try {
+      const cta = await K.entrar($('email').value, $('clave').value);
+      C.guardar('ultimoEmail', $('email').value.trim().toLowerCase());
+      if (!cta) throw new Error('Tu cuenta no está lista. Pide ayuda a tu barbería.');
+      location.replace(C.raiz() + K.paginaDe(cta.role) + (ir ? '#' + ir : ''));
+    } catch (err) {
+      $('eEntrar').textContent = err.message;
+      b.disabled = false; b.textContent = 'Entrar';
+    }
+  };
+})();
+</script>
+</body>
+</html>

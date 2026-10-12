@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#18181b">
+<meta name="robots" content="noindex, nofollow">
+<title>Administración · CodeFix</title>
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/core.css">
+<style>
+  main { max-width: 1100px; }
+  .barb-card { cursor: pointer; }
+  .barb-card .metricas { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px 12px; margin-top: 10px; font-size: 13.5px; }
+  .barb-card .metricas b { display: block; font-size: 16px; }
+  .reco { padding: 10px 12px; border-radius: 12px; background: var(--field); margin-top: 8px; display: flex; gap: 10px; align-items: center; font-size: 14px; }
+  .solic { border-left: 4px solid var(--oro); }
+  .key-nueva { padding: 14px; border-radius: 14px; background: var(--field); text-align: center; margin: 10px 0; }
+</style>
+</head>
+<body>
+<main>
+  <section class="view" id="v-resumen"></section>
+  <section class="view" id="v-barberias"></section>
+  <section class="view" id="v-keys"></section>
+  <section class="view" id="v-chat"></section>
+  <section class="view" id="v-ajustes"></section>
+</main>
+<nav class="tabs">
+  <button data-v="resumen" class="on"><span>📊</span>Resumen<i class="num" data-num="pendientes"></i></button>
+  <button data-v="barberias"><span>💈</span>Barberías</button>
+  <button data-v="keys"><span>🔑</span>Keys</button>
+  <button data-v="chat"><span>💬</span>Mensajes<i class="num" data-num="mensajes"></i></button>
+  <button data-v="ajustes"><span>⚙️</span>Ajustes</button>
+</nav>
+<script src="../shared/config.js"></script>
+<script src="../shared/vendor/supabase.js"></script>
+<script src="../shared/vendor/qrcode.js"></script>
+<script src="../shared/core.js"></script>
+<script src="../shared/cuenta.js"></script>
+<script src="../shared/avisos.js"></script>
+<script src="../shared/chat.js"></script>
+<script src="../shared/agenda.js"></script>
+<script src="../shared/perfil.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>

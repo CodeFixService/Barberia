@@ -1,0 +1,1 @@
+{ "name": "barberia-pruebas-navegador", "private": true, "dependencies": { "pg": "8.11.3" } }
