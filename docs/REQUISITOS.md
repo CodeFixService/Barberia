@@ -1,217 +1,225 @@
-# Barbería — Requisitos (borrador v0.1, para revisar antes de programar)
+# Barbería — Requisitos (v0.2, casi listo para programar)
 
-Pedido por Josué (administrador general · CodeFix). Este documento se va corrigiendo hasta que esté todo claro;
+Pedido por Josué (administrador general · CodeFix). Este documento se corrige hasta que esté todo claro;
 recién ahí se programa la app completa de una vez.
 
-> Las marcas **❓** son decisiones que faltan. Cada una trae una **propuesta por defecto**: si te parece bien, queda así.
+> **❓** = falta tu confirmación (al final, en la sección 15). Todo lo demás ya está decidido.
 
 ---
 
 ## 1. Idea en una frase
-Una app web instalable (PWA), como FichaPro y Caja Rápida, donde **cada barbería tiene su calendario global de horas**.
-Sus clientes (a los que la barbería les crea la cuenta) eligen servicios, los agregan al carrito, eligen una hora
-libre y la reservan **abonando $4.000**. La barbería recibe un aviso al tiro y confirma la hora.
+Una app web instalable (PWA), como FichaPro y Caja Rápida. **Cada barbería administra todo lo suyo**: barberos,
+servicios, precios, horario, ofertas y clientes. **Cada barbero tiene su propio calendario.** Los clientes (con cuenta
+creada por la barbería) eligen servicios, los agregan al carrito, eligen barbero y hora libre, y reservan **abonando
+$4.000**. El barbero recibe un aviso al tiro y confirma la hora.
 
-## 2. Base técnica (la misma de las otras apps)
-- App web instalable (PWA), sin tiendas. Publicada desde este repositorio (GitHub Pages; más adelante Cloudflare Pages + repo privado).
-- Servidor **Supabase** con todas las reglas en el servidor (cada uno ve solo lo suyo).
-- Notificaciones **push** + **correo (Gmail)** + bandeja dentro de la app, con la función `enviar` que corre cada minuto.
-- WhatsApp con botones que abren el mensaje ya escrito (`wa.me`). Sin API de pago de Meta.
-- Se reutiliza de Aplicaciones: inicio de sesión, cuentas creadas por invitación, licencias Free/Premium, solicitudes
-  "Ya pagué", chat con límite de 3 mensajes, avisos, logo, temas, versión con botón **Actualizar** y uso del servidor.
-- ❓ **Proyecto Supabase nuevo y separado** de Aplicaciones. *Propuesta: sí.* El plan gratis permite 2 proyectos activos, así que con este se ocupan los dos.
+## 2. Base técnica
+- App web instalable (PWA), publicada desde este repositorio (`CodeFixService/Barberia`).
+- **Servidor Supabase en una cuenta nueva** (la crea Josué), separada de Aplicaciones. Todas las reglas se validan en el servidor.
+- Notificaciones **push** + **correo (Gmail)** + bandeja (campanita) dentro de la app.
+- WhatsApp con botones que abren el mensaje ya escrito (`wa.me`).
+- Se reutiliza lo que ya funciona en Aplicaciones: inicio de sesión, cuentas por invitación, Free/Premium con
+  aprobación del admin, "Ya pagué", chat con límite de 3, avisos, logo, temas, botón **Actualizar** y uso del servidor.
 
-## 3. Roles
+## 3. Roles y cuentas
 
 | Rol | Quién | Qué hace |
 |---|---|---|
-| **Super admin** | Solo Josué (`juanjosuecastilloloyola@gmail.com`) | Crea barberías y les entrega su usuario. Activa, renueva y corta Premium (de barberías y de clientes). Pone links de pago y precios, aprueba los "Ya pagué" (le llegan por correo y push), ve todas las barberías, avisa a todos y libera versiones. |
-| **Barbería** | El dueño | Su propio panel: calendario, clientes, servicios y precios, ofertas, mensajes, ajustes (logo, horario, abono, datos de pago). |
-| **Cliente** | Creado por la barbería | Ve el calendario global de su barbería, reserva y anula **solo sus horas**, chatea con la barbería y edita su perfil. |
+| **Super admin** | Solo Josué (`juanjosuecastilloloyola@gmail.com`) | Crea las barberías y les entrega su usuario. Activa, renueva y corta Premium de barberías **y** de clientes cuando le pagan. Pone links de pago y precios. Ve todo. |
+| **Barbería (dueño)** | El barbero principal, la cuenta que crea Josué | Administra **todo**: crea barberos, crea clientes, define servicios, precios, horario, abono, datos de pago, ofertas y apariencia. Ve el calendario de todos sus barberos. Él también puede atender (tiene su propia agenda). |
+| **Barbero** | Creado por el dueño | Tiene **su propia cuenta y su propia agenda**. Ve y gestiona solo sus horas y conversa con los clientes que reservan con él. No toca precios ni ajustes. |
+| **Cliente** | Creado por la barbería | Ve los calendarios, reserva y anula **solo sus horas**, chatea, edita su perfil y ve ofertas. |
 
-**Registro cerrado:** nadie se registra solo. El admin crea las barberías y la barbería crea a sus clientes. Cada cliente queda
-**asociado a una sola barbería**. Al crear la cuenta se abre WhatsApp con el enlace, el correo y la contraseña para enviárselos.
-Todos parten en **Free**.
+- **Registro cerrado. No hay página pública.** Nadie se registra solo y sin cuenta no se ve nada.
+  La cuenta de cliente **siempre** la crea la barbería y se envía por WhatsApp (enlace + correo + contraseña).
+- Cada cliente queda asociado a **una barbería**. Puede reservar con cualquiera de sus barberos.
+- Todos parten en **Free**.
+- **Barbería de un solo barbero:** funciona igual. El dueño no crea barberos y atiende con su propia agenda.
+- Límite de barberos (contando al dueño): **Free 3 · Premium 10**.
 
-❓ **Vitrina pública sin cuenta.** *Propuesta: sí.* Un link/QR de la barbería donde cualquiera ve logo, servicios, precios
-y horas libres (sin nombres). Abajo hay un botón **"Quiero agendar"** que abre WhatsApp a la barbería:
-*"Hola, quiero que me creen mi cuenta para agendar"*. Así la persona que no tiene cuenta igual llega, pero solo el barbero la crea.
+## 4. Calendario
 
-## 4. Calendario global
-
-- **Una sola agenda por barbería.** Todos sus clientes ven el mismo calendario.
-- **Vistas:** Día · Semana · Mes. El Año es solo un resumen para la barbería, con colores según qué tan lleno está cada mes.
+- **Un calendario por barbero.** Arriba el cliente elige **barbero** (con foto y nombre) o "El que esté disponible".
+  Nada se mezcla: cada hora pertenece a un solo barbero.
+- **Vistas:** Día · Semana · Mes. El Año es un resumen solo para el dueño.
+- **El dueño** tiene además la vista **"Todos"**, con una columna por barbero.
 - **Qué ve cada cliente:**
   - 🟢 **Libre**: puede tomarla.
-  - ⬛ **Ocupado**: sin nombre, sin servicio, sin nada. Nadie ve quién reservó.
-  - 🟦 **Mía**: sus propias horas, que puede ver, anular o reprogramar.
-  - 🟡 **A consultar**: días de fin de semana o especiales (ver 4.1).
+  - ⬛ **Ocupado**: sin nombre ni servicio. Nadie ve quién reservó.
+  - 🟦 **Mía**: puede verla y anularla (ver reglas).
+  - 🟡 **A consultar**: fines de semana.
   - ⚪ **Cerrado / bloqueado**.
-- **Qué ve la barbería:** todo, con nombre, servicio, estado y abono. Toca una hora y la confirma, la marca atendida, etc.
-- En la vista **Mes**, cada día muestra un puntito de color según su ocupación (libre / medio / lleno).
-- Las horas se calculan con la **duración de los servicios del carrito**. Ej.: corte 30 min + barba 15 min = bloque de 45 min.
+- **Qué ven barbero y dueño:** todo (nombre, servicio, estado, abono, comprobante).
+- En la vista Mes, cada día muestra un puntito según su ocupación (libre / medio / lleno).
+- Las horas se calculan con la **duración de los servicios del carrito**: corte 30 min + barba 15 min = 45 min.
 - Nadie puede tomar una hora ya tomada, aunque dos personas toquen al mismo tiempo. Lo impide el servidor.
-- Zona horaria fija: **America/Santiago**.
+- Zona horaria **America/Santiago**.
 
-### 4.1 Horario y días
-- **Lunes a viernes: Abierto** (ej. 10:00–20:00, con colación configurable).
-- **Sábado y domingo: "A consultar".** El cliente puede pedir la hora, pero queda **Por aprobar** y se abre el chat con
-  *"¿Están trabajando el sábado 18 a las 12:00?"*. Si la barbería acepta, la hora queda agendada. Si no, se libera.
-- La barbería puede cambiar **cada día** a Abierto / A consultar / Cerrado, y bloquear fechas (feriados, vacaciones,
-  "hoy cierro a las 17:00").
-- ❓ **Intervalo entre horas.** *Propuesta: cada 15 min.*
-- ❓ **Anticipación mínima.** *Propuesta: 1 hora.*
-- ❓ **Hasta cuántos días adelante se puede reservar.** *Propuesta: Free 14 días, Premium 45 días.*
+### 4.1 Horario
+- **Lunes a viernes: Abierto**, con horario y colación que define cada barbería. Cada barbero puede tener el suyo.
+- **Sábado y domingo: "A consultar".** El cliente pide la hora, queda **Por aprobar** y se abre el chat
+  (*"¿Están trabajando el sábado 18 a las 12:00?"*). Si el barbero acepta, se agenda. Si no, se libera.
+- Cada día se puede cambiar a Abierto / A consultar / Cerrado, y se pueden bloquear fechas (feriados, vacaciones, "hoy salgo a las 17:00").
+- Horas cada **15 min**.
+- Anticipación mínima de **1 hora**.
+- Reservar hasta **14 días adelante (Free)** o **45 días (Premium del cliente)**.
 
 ## 5. Reservar (cliente)
 
-1. **Catálogo** → elige servicios (corte, barba, cejas, tintura…) y los agrega al **🛒 carrito**. Ve el precio total y la duración.
-2. **Elige la hora** en el calendario. Solo se pueden tocar los bloques libres donde cabe la duración del carrito.
-3. **Elige cómo abona los $4.000:**
-   - **💳 Link de pago** (el Mercado Pago de la barbería) **o 🏦 transferencia** (los datos bancarios de la barbería, con botón copiar).
-     Luego toca **"Ya aboné"** y, si quiere, sube la foto del comprobante.
-   - **💵 Efectivo**: no hay abono. La hora queda **Por aprobar** y se abre el chat con la barbería para coordinar.
-     La barbería decide si la acepta.
-4. La hora queda marcada en el calendario y **a la barbería le llega un aviso al tiro** (push + correo + campanita).
-5. Cuando la barbería la revisa y toca **Confirmar**, al cliente le llega: *"✅ Tu hora está confirmada: sáb 18, 12:00. Te esperamos."*
-6. Botones **"Agregar a mi calendario"** (Google / archivo .ics) y **"Enviar por WhatsApp"**.
+1. **✂️ Servicios** → agrega uno o más al **🛒 carrito**. Ve el total y la duración.
+2. Elige **barbero** y **hora libre**. Solo se pueden tocar los bloques donde cabe el carrito.
+3. **Abono de $4.000** (cada barbería puede cambiar el monto):
+   - **💳 Link de pago** o **🏦 transferencia** (datos de la barbería, con botón copiar). Luego toca **"Ya aboné"**
+     y, si quiere, sube la foto del comprobante. **La hora queda apartada 15 min.** Si no toca "Ya aboné" en ese
+     tiempo, se libera sola.
+   - **💵 Efectivo**: sin abono. La hora queda **Por aprobar** y se abre el chat con el barbero. Él decide si lo atiende.
+4. Al barbero (y al dueño) le llega un aviso **al tiro**: push + correo + campanita.
+5. El barbero toca **Confirmar**. Al cliente le llega: *"✅ Tu hora está confirmada: jue 16, 18:30 con Pedro. Te esperamos."*
+6. Botones **"Agregar a mi calendario"** y **"Enviar por WhatsApp"**.
 
 - El abono **se descuenta del total** el día de la atención.
-- El monto del abono lo configura cada barbería (por defecto **$4.000**).
-- ❓ **Horas activas a la vez.** *Propuesta: Free 1, Premium 3.*
+- El abono va **directo a la barbería**. No pasa por Josué.
 
 ### 5.1 Estados de una hora
 
-| Estado | Qué significa | Se ve como |
-|---|---|---|
-| **Esperando abono** | Eligió hora y "link/transferencia", pero aún no toca "Ya aboné". La hora queda **apartada 20 min** y, si no abona, se libera sola. | Ocupado |
-| **Por aprobar** | Pago en efectivo o día "A consultar". Espera a la barbería. | Ocupado |
-| **Agendada** | Dijo que abonó (o la barbería la aprobó). Ya avisó a la barbería. | Ocupado |
-| **Confirmada** | La barbería la revisó (y vio el abono). Se avisa al cliente. | Ocupado |
-| **Atendida** / **No vino** | La marca la barbería después. | (historial) |
-| **Anulada** | La anuló el cliente o la barbería. Se libera la hora. | Libre |
+| Estado | Qué significa |
+|---|---|
+| **Esperando abono** | Hora apartada por 15 min. Si no abona, se libera sola. |
+| **Por aprobar** | Efectivo o fin de semana. Espera al barbero (ver ❓ 3). |
+| **Agendada** | El cliente dijo "Ya aboné", o el barbero la aprobó. El barbero ya fue avisado. |
+| **Confirmada** | El barbero la revisó y vio el abono. Se avisa al cliente. |
+| **Atendida** / **No vino** | La marca el barbero después. |
+| **Anulada** | Se libera la hora. |
 
-❓ **Si la barbería no aprueba una hora "Por aprobar".** *Propuesta: se libera sola a las 12 horas, o 1 hora antes de la cita.*
-
-### 5.2 Anular y reprogramar (políticas)
+### 5.2 Anular (decidido)
 - El cliente solo puede anular **sus propias** horas.
-- ❓ **Anular con 24 horas o más de anticipación.** *Propuesta: el abono queda como **saldo a favor** para la próxima reserva.*
-- ❓ **Anular con menos de 24 horas, o no llegar.** *Propuesta: **se pierde el abono**.* Con 3 "No vino" la barbería puede bloquear al cliente.
-- Reprogramar = cambiar a otra hora libre manteniendo el abono. *Propuesta: Free 1 vez por reserva; Premium sin límite (respetando las 24 h).*
+- **Con 24 horas o más de anticipación:** el abono queda como **saldo a favor**, que se usa solo en su próxima reserva.
+- **Con menos de 24 horas, o si no llega:** **pierde el abono**. Así se compromete a llegar.
+- El barbero siempre puede mover o anular una hora. Si anula él, el abono queda a favor del cliente.
+- Con 3 "No vino", la barbería puede bloquear al cliente para reservar.
 
-## 6. Mensajes (cliente ↔ barbería)
-- Chat dentro de la app, igual al de Aplicaciones: **máximo 3 mensajes seguidos** hasta que la barbería responda,
-  100 al día, ✓ Enviado / ✓✓ Visto, bloquear y reportar.
-- La barbería no tiene límite con sus clientes. El cliente solo chatea con su barbería.
-- Cada reserva tiene un botón **"Escribir sobre esta hora"**, que manda un mensaje con la hora adjunta.
-- La barbería chatea con el admin (soporte), que tampoco tiene límite.
+## 6. Mensajes
+- Chat cliente ↔ barbería: **máximo 3 mensajes seguidos** hasta que respondan, 100 al día, ✓ Enviado / ✓✓ Visto,
+  bloquear y reportar.
+- El cliente le escribe a **la barbería**. Lo ven el dueño y el barbero de esa hora.
+- Cada reserva tiene **"Escribir sobre esta hora"**, que manda el mensaje con la hora adjunta.
+- La barbería no tiene límite. La barbería chatea con Josué (soporte).
 
-## 7. Panel de la barbería
+## 7. Panel de la barbería (dueño)
 - **Inicio:** horas de hoy, pendientes por confirmar o aprobar, abonos por revisar y mensajes nuevos.
-- **📅 Calendario:** Día / Semana / Mes / Año. Puede crear una hora interna (cliente que llamó o llegó sin reserva),
-  mover horas, bloquear, confirmar, marcar atendida o "No vino" y ver el comprobante.
-- **👥 Clientes:** crear (nombre, WhatsApp, correo opcional), enviar el acceso por WhatsApp, ver historial, notas
-  ("corte 2 al costado"), saldo a favor, bloquear y ver si es Premium.
-- **✂️ Servicios y precios:** nombre, precio, duración, foto, categoría y visible/oculto.
-- **🏷️ Ofertas:** promos que ven sus clientes (normales o ⭐ solo Premium).
+- **📅 Calendario:** por barbero o "Todos". Puede crear una hora interna (cliente que llamó), mover, bloquear,
+  confirmar, marcar atendida o "No vino" y ver el comprobante.
+- **💈 Barberos:** crear (nombre, foto, correo, contraseña, horario propio), activar o desactivar y enviar el acceso por WhatsApp.
+- **👥 Clientes:** crear (nombre, WhatsApp, correo opcional), enviar el acceso por WhatsApp, ver historial, notas,
+  saldo a favor, bloquear y ver si es Premium.
+- **✂️ Servicios y precios:** él los crea, edita, ordena y oculta (nombre, precio, duración, categoría y foto en Premium).
+- **🏷️ Ofertas:** promos para sus clientes (normales o ⭐ solo clientes Premium).
 - **💬 Mensajes**.
-- **⚙️ Ajustes:** nombre, logo, colores, dirección, WhatsApp, horario por día, abono, link de pago, datos de transferencia,
-  políticas, mensaje de bienvenida, y el link/QR de la vitrina.
-- **💎 Mi plan:** Comprar Premium / Ya pagué / vencimiento.
+- **⚙️ Ajustes:** nombre, logo, dirección, WhatsApp, horario por día, monto del abono, link de pago, datos de
+  transferencia, mensaje de bienvenida. En Premium también colores, portada y galería.
+- **💎 Mi plan:** Comprar Premium, Ya pagué, Probar 7 días y vencimiento.
+
+**El barbero (no dueño)** ve una versión simple: su calendario, sus horas, mensajes y su perfil.
 
 ## 8. App del cliente
-- **Inicio:** su próxima hora con cuenta regresiva, botón **Agendar** y ofertas.
-- **📅 Calendario global** (con sus horas destacadas) y **Mis horas** (próximas e historial).
+- **Inicio:** su próxima hora con cuenta regresiva, botón grande **Agendar**, ofertas y saldo a favor.
+- **📅 Calendarios** de los barberos y **Mis horas** (próximas e historial).
 - **✂️ Servicios** con precios y 🛒 carrito, y **⭐ Repetir mi último corte** con un toque.
 - **💬 Mensajes** con su barbería.
-- **👤 Mi perfil:** nombre, foto o **ícono/emoji** de avatar, color de la app, WhatsApp, cumpleaños, contraseña y notificaciones.
+- **👤 Mi perfil:** nombre, foto o ícono/emoji, color de la app, WhatsApp, cumpleaños, contraseña y notificaciones.
 - **💎 Hazte Premium**.
+- **Didáctico:** la primera vez se muestra un recorrido de 3 pasos ("Elige tu corte → Elige tu hora → Abona y listo").
+  Cada pantalla tiene textos cortos de ayuda.
 
-## 9. Planes (todos parten en Free · se paga a Josué)
+## 9. Planes — todos parten en Free · Premium se paga a Josué
 
-Premium mensual: ❓ **precio** (dijiste "4.009"). *Propuesta: **$4.990 / mes**, igual para barbería y cliente.* Lo cambias cuando quieras en Ajustes del admin.
+**Precio Premium: el mismo para barbería y cliente** (❓ 1: monto exacto). Se cambia en los Ajustes del admin.
+La idea: **Free bueno, Premium mucho mejor.**
 
 ### Barbería
 
-| | Free | Premium |
+| | Free | ⭐ Premium |
 |---|---|---|
-| Calendario Día / Semana | ✅ | ✅ |
-| Calendario Mes / Año | Solo Mes | ✅ |
-| Clientes | 30 | 300 |
-| Servicios | 8 | Ilimitados |
+| Barberos (con el dueño) | 3 | 10 |
+| Clientes | 40 | 500 |
+| Servicios | 8 | Ilimitados, con foto |
+| Calendario Día / Semana / Mes | ✅ | ✅ + Año y vista "Todos" en columnas |
 | Abono con link / transferencia / efectivo | ✅ | ✅ |
-| Logo | ✅ | ✅ + colores y portada |
-| Ofertas para clientes | 2 activas | Ilimitadas + ⭐ VIP |
-| Recordatorio automático al cliente (push/correo 24 h y 2 h antes) | — | ✅ |
+| Logo | ✅ | ✅ |
+| Colores, portada, galería de trabajos, fotos de barberos | — | ✅ |
+| Ofertas para clientes | 1 activa | Ilimitadas + ⭐ VIP |
+| Recordatorio automático al cliente 24 h y 2 h antes (push/correo) | — | ✅ |
 | Tarjeta de sellos (ej. 10 cortes = 1 gratis) | — | ✅ |
-| Estadísticas: ingresos, abonos, horas más pedidas, "No vino", mejores clientes | — | ✅ |
 | Lista de espera (avisa cuando se libera una hora) | — | ✅ |
+| Estadísticas: ingresos, abonos, horas más pedidas, "No vino", mejores clientes, por barbero | — | ✅ |
+| Bloquear clientes por "No vino" | ✅ | ✅ |
 | Marca "CodeFix" | Visible | Discreta |
 
 ### Cliente
 
-| | Free | Premium |
+| | Free | ⭐ Premium |
 |---|---|---|
-| Ver calendario y reservar | ✅ (14 días adelante) | ✅ (45 días adelante) |
+| Ver calendarios y reservar | ✅ 14 días adelante | ✅ 45 días adelante |
 | Horas activas a la vez | 1 | 3 |
-| Mensajes a la barbería | 3 seguidos | **Mensaje directo prioritario** (sin límite de 3, llega marcado ⭐) |
-| Reprogramar | 1 vez | Sin límite |
+| Mensajes | 3 seguidos | **Mensaje directo prioritario**: sin límite de 3, llega arriba con ⭐ |
 | Ofertas ⭐ exclusivas | Bloqueadas ("Hazte Premium") | ✅ |
 | Recordatorios push/correo | — | ✅ |
 | Lista de espera en días llenos | — | ✅ |
+| Barbero favorito (se elige solo al agendar) | — | ✅ |
 | Íconos, colores y marco ⭐ en su perfil | Básicos | Todos |
 | Repetir mi último corte | ✅ | ✅ |
 
-### Cómo se cobra (igual que en las otras apps)
-- Admin → Ajustes → Venta: **link de Mercado Pago** y precio para Premium barbería y Premium cliente.
+### Cobro (igual que en las otras apps)
+- Admin → Ajustes → Venta: **link de Mercado Pago** y precio.
 - La persona toca **Comprar** → paga → **Ya pagué**. **A Josué le llega un correo y un push.** Lo aprueba con un toque y se activa al instante.
-- Vence solo a los 30 días, con aviso 3 días antes. ❓ **Prueba gratis de 7 días.** *Propuesta: sí, una vez por cuenta.*
-- El abono de $4.000 **no pasa por Josué**: va directo a la barbería, con su link o su transferencia.
+- Dura 30 días. Avisa 3 días antes de vencer y se corta solo.
+- **Prueba Premium de 7 días**, una sola vez por cuenta (barbería o cliente).
+- La barbería **no gana** por sus clientes Premium. Solo recibe los abonos.
 
 ## 10. Panel del super admin
-- **Barberías:** crear (nombre, correo, contraseña, WhatsApp), enviar acceso por WhatsApp, Premium on/off,
-  vencimiento, suspender, 👁️ ver su panel.
-- **Clientes** de todas las barberías (con filtro por barbería), con su Premium.
-- **Solicitudes de pago** y prueba.
+- **Barberías:** crear (nombre, correo, contraseña, WhatsApp), enviar acceso, Premium on/off, vencimiento,
+  suspender, 👁️ ver su panel.
+- **Clientes y barberos** de todas las barberías (con filtro), con su Premium.
+- **Solicitudes** de pago y de prueba.
 - **Ingresos** del mes.
-- **Ajustes:** links de pago, precios, WhatsApp de contacto, Gmail, claves push, liberar versión.
-- **Avisos** a todas las barberías o a todos.
-- **🖥️ Uso del servidor** (🟢 / 🟡 / 🔴).
+- **Ajustes:** links de pago, precio, WhatsApp de contacto, Gmail, claves push, liberar versión.
+- **Avisos** a barberías y/o clientes.
+- **🖥️ Uso del servidor**.
 
 ## 11. Avisos automáticos
 
 | Cuándo | A quién | Cómo |
 |---|---|---|
-| Nueva reserva / "Ya aboné" / pide efectivo / pide fin de semana | Barbería | Push + correo + campanita |
-| Barbería confirma, aprueba, rechaza, mueve o anula | Cliente | Push + campanita (+ correo si tiene) |
-| Recordatorio 24 h y 2 h antes (Premium) | Cliente | Push + correo |
-| Se liberó una hora (lista de espera, Premium) | Cliente | Push |
+| Nueva reserva / "Ya aboné" / pide efectivo / pide fin de semana | Barbero de la hora + dueño | Push + correo + campanita |
+| Confirma, aprueba, rechaza, mueve o anula | Cliente | Push + campanita (+ correo) |
+| Recordatorio 24 h y 2 h antes (barbería Premium o cliente Premium) | Cliente | Push + correo |
+| Se liberó una hora (lista de espera) | Cliente Premium | Push |
 | Mensaje nuevo | El otro | Push |
 | "Ya pagué" Premium | Josué | Correo + push |
 | Plan por vencer (3 días) | Barbería / cliente | Push + correo |
 
 ## 12. Seguridad y límites
-- Todo validado en el servidor: el cliente no puede ver datos de otros clientes ni tocar horas ajenas.
-- Límites contra abuso: máximo 5 reservas o anulaciones por día por cliente, y el chat con 3 seguidos.
+- Todo validado en el servidor: un cliente nunca ve datos de otro ni toca horas ajenas.
+  Un barbero no ve las horas privadas de otra barbería.
+- Contra abuso: máximo 5 reservas o anulaciones al día por cliente, y el chat con 3 seguidos.
 - El comprobante se guarda comprimido (~100 KB) y se borra a los 30 días.
-- El calendario guarda solo lo necesario. El historial de más de 1 año se resume.
 
-## 13. Cómo se construye
-Como pediste, **todo de una vez** cuando este documento esté aprobado. Internamente en este orden, para probar cada parte:
-1. Servidor: tablas, reglas y funciones (`supabase/instalar.sql`) + función `enviar`.
-2. Inicio de sesión, roles, admin, creación de barberías y clientes.
-3. Servicios, carrito, motor de horas y calendario (Día / Semana / Mes / Año).
+## 13. Cómo se construye (todo de una vez, probado por partes)
+1. Servidor: `supabase/instalar.sql` (tablas, reglas y funciones) + función `enviar` + tareas automáticas
+   (liberar horas a los 15 min, recordatorios, vencimientos).
+2. Inicio de sesión, roles, admin, barberías, barberos y clientes.
+3. Servicios, carrito, motor de horas y calendarios.
 4. Reserva con abono, estados, confirmar y avisos.
-5. Chat, perfil, ofertas, Premium y cobros.
-6. Pruebas completas con 1 barbería y 3 clientes de prueba, y la guía `docs/CONFIGURAR.md` paso a paso.
+5. Chat, perfil, ofertas, Premium, prueba de 7 días y cobros.
+6. Pruebas completas (1 barbería, 2 barberos, 3 clientes) y guía `docs/CONFIGURAR.md` paso a paso.
 
-## 14. Preguntas abiertas (resumen)
-1. ¿Proyecto Supabase nuevo y separado? (propuesta: sí)
-2. ¿Vitrina pública sin cuenta con "Quiero agendar" por WhatsApp? (propuesta: sí)
-3. ¿Un solo barbero/agenda por barbería, o varios barberos (sillas) desde ya? (propuesta: uno en v1; varios como Premium después)
-4. Precio Premium: ¿$4.990/mes? ¿El mismo para barbería y cliente?
-5. Anulación y "No vino": ¿saldo a favor con 24 h, y se pierde con menos? (propuesta: sí)
-6. Horas "Por aprobar" sin respuesta: ¿se liberan a las 12 h? (propuesta: sí)
-7. Intervalo de 15 min, 1 h de anticipación y 14/45 días adelante, ¿ok?
-8. ¿Prueba Premium de 7 días? (propuesta: sí)
-9. ¿El cliente Premium paga solo a Josué, o la barbería gana algo por cada cliente Premium suyo? (propuesta: todo a Josué en v1)
+## 14. Lo que hace Josué antes de programar
+- [ ] Crear la cuenta nueva de Supabase y el proyecto **Barberia**.
+- [ ] Después del paso 1 de `docs/CONFIGURAR.md`, enviar la clave **anon public** (nunca la service_role).
+- [ ] Tener a mano el link de Mercado Pago para Premium.
+
+## 15. Últimas confirmaciones
+1. **Precio Premium:** escribiste "4.009". ¿Es **$4.990** o **$4.000** al mes?
+2. **¿Quién crea clientes?** *Propuesta: solo el dueño.* Los barberos solo atienden.
+3. **"Por aprobar" sin respuesta** (efectivo o fin de semana): *Propuesta: se libera sola a las 12 h, o 1 h antes de la cita si eso ocurre antes.*
+4. **Datos de pago del abono:** *Propuesta: una sola cuenta, la de la barbería.* Opcional: cada barbero con los suyos.
