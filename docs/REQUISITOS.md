@@ -1,9 +1,9 @@
-# Barbería — Requisitos (v0.3, lista para programar salvo lo marcado ❓)
+# Barbería — Requisitos (v0.4 · aprobada para programar)
 
 Pedido por Josué (administrador general · CodeFix). Se programa la app completa de una vez cuando esto esté aprobado.
 
 > **Regla de oro:** pocos campos obligatorios (solo lo necesario); todo lo demás, opcional.
-> **❓** = confirmación pendiente (sección 16).
+> Todas las decisiones están cerradas (sección 16).
 
 ---
 
@@ -35,8 +35,9 @@ hora libre, abona y su barbero confirma. Cada barbero anota sus cortes en una **
 - **Si hay más barberos**, la agenda del dueño **no se ofrece** a los clientes: ellos reservan con los demás barberos.
   Para atenderse con el dueño, le escriben por el chat interno, acuerdan y **el dueño agenda la hora en su calendario,
   asociada a ese cliente**.
-- *Mejora propuesta:* en vez de una regla fija, un interruptor del dueño **"Mi agenda abierta a clientes"**
-  (activado si es el único barbero, desactivado si hay más). Así lo decide él.
+- **Interruptor del dueño "Mi agenda abierta a clientes"** (decidido): cuando está disponible la abre y le reservan
+  directo; cuando tiene el cupo lleno la cierra. Viene activado si es el único barbero y desactivado si hay más.
+  Con la agenda cerrada, los clientes le escriben por chat y él les agenda la hora a mano.
 
 ## 4. Horarios (todo administrable)
 - **Cada día de la semana (lunes a domingo)** puede ser **Abierto**, **A consultar** o **Cerrado**, con hora de inicio, término
@@ -62,7 +63,8 @@ hora libre, abona y su barbero confirma. Cada barbero anota sus cortes en una **
 3. **Abono fijo**, el mismo para cualquier servicio. Lo define el dueño (por defecto **$4.000**; ej. puede dejarlo en $3.000).
    Va **directo a la barbería**. Formas de pago:
    - **💳 Link de pago** (el que configura el dueño) o **🏦 transferencia** (datos del dueño, botón copiar).
-   - **💵 Efectivo** (❓ 1): sin abono; la hora queda **Por aprobar** y se abre el chat.
+   - **No hay opción efectivo para agendar.** Sin abono no hay hora; si alguien quiere pagar en efectivo, va al local
+     a probar suerte (el barbero puede anotarlo a mano en su calendario si lo atiende).
 4. **Apartado de 15 min:** el cliente tiene 15 min para tocar **"Ya aboné"**. Si no, la hora se libera sola.
 5. **"Ya aboné" pide la foto del comprobante (obligatoria)** y la envía **automáticamente al chat** con el barbero de esa hora
    (el dueño también la ve). Así es un solo paso para el cliente.
@@ -77,7 +79,7 @@ hora libre, abona y su barbero confirma. Cada barbero anota sus cortes en una **
 | Estado | Qué significa |
 |---|---|
 | **Esperando abono** | Apartada 15 min. Si no toca "Ya aboné", se libera sola. |
-| **Por aprobar** | Efectivo o día "A consultar". Si el barbero no responde, se libera sola a las **12 h** o **1 h antes de la cita** (lo que ocurra antes). |
+| **Por aprobar** | Día "A consultar" (con abono ya enviado; si lo rechaza, queda saldo a favor). Si el barbero no responde, se libera sola a las **12 h** o **1 h antes de la cita** (lo que ocurra antes). |
 | **Agendada** | Abono enviado con comprobante. Espera la revisión del barbero (no vence). |
 | **Confirmada** | El barbero vio el abono. Se avisa al cliente. |
 | **Atendida** / **No vino** | La marca el barbero. **Atendida pasa sola a la Caja.** |
@@ -138,7 +140,7 @@ hora libre, abona y su barbero confirma. Cada barbero anota sus cortes en una **
 - **Recorrido inicial de 3 pasos:** "Elige tu corte → Elige tu hora → Abona y listo".
 
 ## 11. Planes — todos parten en Free · Premium se paga a Josué
-**Mismo precio para barbería y cliente** (❓ 2), editable en los Ajustes del admin. Prueba de **7 días**, una vez por cuenta.
+**Premium: $4.900 al mes, mismo precio para barbería y cliente; ambos le pagan a Josué.** Editable en Ajustes del admin. Prueba de **7 días**, una vez por cuenta.
 Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; solo recibe los abonos.
 
 ### Barbería
@@ -173,19 +175,44 @@ Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; 
 | Barbero favorito | — | ✅ |
 | Íconos y colores | Básicos | Todos + marco ⭐ |
 
-### Cobro
-Admin → Ajustes → link de Mercado Pago y precio. **Comprar → Ya pagué →** correo y push a Josué → aprueba con un toque →
-dura 30 días, avisa 3 días antes, se corta solo.
+### Cómo ven el Premium los que no lo tienen
+- Todo lo Premium **aparece en la app, pero en plateado** con un candado 🔒 y "⭐ Hazte Premium". Al tocarlo se explica
+  qué trae y cuánto cuesta. Así el usuario Free ve lo que se pierde.
+- La app del cliente Free es buena y completa para reservar; la Premium se nota "más pro" (marco dorado, insignia ⭐, más
+  colores, prioridad en el chat).
 
-## 12. Panel del super admin
-Barberías (crear, enviar acceso, Premium, vencimiento, suspender, 👁️ ver), clientes y barberos con filtro, solicitudes,
-ingresos, ajustes (links, precio, WhatsApp, Gmail, push, liberar versión), avisos y uso del servidor.
+### Cobro y activación (dos formas, siempre mensual)
+- Admin → Ajustes → link de Mercado Pago y precio ($4.900).
+- La persona toca **Comprar** → paga → **Ya pagué** → a Josué le llega correo y push.
+- Josué activa de **una de dos formas**:
+  1. **Key:** genera una key mensual, se la envía por WhatsApp y la persona la pega en **Mi plan → Activar key**.
+  2. **Directo:** botón "Activar Premium 1 mes" en la ficha de esa cuenta.
+- Las dos quedan **registradas en el historial de keys**: código, a quién, quién la activó, fecha de inicio,
+  **fecha de término** y monto. Keys aleatorias, de un solo uso, con bloqueo tras 10 intentos fallidos.
+- Cada usuario ve en **Mi plan**: "Premium hasta el 12/11/2026" y los días que le quedan. Aviso 3 días antes; se corta solo.
+- Renovar suma un mes desde la fecha de término (no se pierden días).
+- Prueba de 7 días, una vez por cuenta.
+
+## 12. Panel del super admin (todo lo que pasa, muy pro)
+- **Resumen:** barberías activas, Premium vs Free, ingresos del mes (Premium cobrados), planes por vencer,
+  solicitudes "Ya pagué" pendientes, uso del servidor.
+- **📊 Por barbería:** reservas del mes, horas atendidas, "No vino", **ventas de la Caja**, abonos recibidos, clientes
+  activos, clientes Premium, barberos, servicios más vendidos, horas y días más pedidos, última actividad.
+  Comparación mes a mes con flechas ↑↓.
+- **💡 Recomendaciones automáticas** para enviar a cada barbería: "muchos No vino → activa recordatorios (Premium)",
+  "agenda llena los sábados → abre el sábado", "pocos clientes nuevos → usa ofertas", "lleva 10 días sin entrar".
+  Con un toque se le manda por el chat de soporte.
+- **Ranking** de barberías por ventas y reservas.
+- **Barberías:** crear, enviar acceso, Premium (key o directo), suspender, 👁️ ver su panel tal como lo ve el dueño.
+- **Clientes y barberos** de todas las barberías, con filtro y Premium.
+- **🔑 Keys:** generar, historial completo, revocar, renovar.
+- **Ajustes:** links de pago, precio, WhatsApp, Gmail, push, liberar versión. **Avisos** a barberías y/o clientes.
 
 ## 13. Avisos automáticos
 
 | Cuándo | A quién |
 |---|---|
-| Nueva reserva, "Ya aboné", pide efectivo o "A consultar" | Barbero de la hora + dueño (push + correo + campanita) |
+| Nueva reserva, "Ya aboné" o pide día "A consultar" | Barbero de la hora + dueño (push + correo + campanita) |
 | Confirma, aprueba, rechaza, mueve o anula | Cliente (push + campanita) |
 | Recordatorio 24 h y 2 h antes (Premium) | Cliente |
 | Se liberó una hora (lista de espera) | Cliente Premium |
@@ -208,7 +235,9 @@ ingresos, ajustes (links, precio, WhatsApp, Gmail, push, liberar versión), avis
 
 **Josué:** crear la cuenta y el proyecto Supabase **Barberia**; enviar la clave **anon public** cuando la guía lo pida.
 
-## 16. Confirmaciones pendientes
-1. **Efectivo:** escribiste "transferencia y débito no". ¿Se mantiene **efectivo** como opción (queda Por aprobar), o solo link/transferencia?
-2. **Precio Premium:** "4.009" → ¿**$4.990** o **$4.000**? (No frena el código: se cambia desde Ajustes.)
-3. **Agenda del dueño:** ¿regla fija (cerrada a clientes si hay más barberos) o el interruptor "Mi agenda abierta a clientes"?
+## 16. Decisiones cerradas (v0.4)
+- Abono solo con **link de pago o transferencia**. Sin efectivo para agendar.
+- Premium **$4.900/mes**, igual para barbería y cliente, pagado a Josué. Activación con **key mensual** o **directa**, ambas registradas con fecha de término.
+- Interruptor **"Mi agenda abierta a clientes"** para el dueño.
+- Funciones Premium visibles **en plateado con 🔒** para los Free.
+- Barberos creados por el dueño: versión tradicional (sus horas, su caja, sus chats).
