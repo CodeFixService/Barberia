@@ -1,0 +1,856 @@
+/* Panel de la barbería: el dueño administra todo; cada barbero ve su agenda, su caja y sus chats. */
+(async function () {
+  'use strict';
+  const C = Core, K = Cuenta, A = Agenda, P = Perfil;
+  const $ = C.$, esc = C.esc;
+  C.registrarSW();
+
+  let yo = await K.exigir(['owner', 'barber']);
+  const dueno = () => yo.role === 'owner';
+  const premium = () => !!(yo.barberia && yo.barberia.premium);
+  const bar = () => yo.barberia || {};
+  let B = { barberos: [], servicios: [], ofertas: [] };
+  let clientes = null;
+  let datos = { reservas: [], bloqueos: [] }, rango = '';
+
+  Avisos.montar({ sub: dueno() ? (premium() ? '⭐ Premium · Dueño' : 'Free · Dueño') : 'Barbero' });
+  Avisos.alCambiar((r, antes) => { if (antes.cargado && (r.pendientes !== antes.pendientes || r.avisos > antes.avisos)) { rango = ''; refrescarVista(); } });
+  C.marca(premium());
+
+  const barbero = (id) => B.barberos.find((b) => b.id === id);
+  const horarios = () => Object.fromEntries(B.barberos.map((b) => [b.id, b.horario]));
+  const servicio = (id) => B.servicios.find((s) => s.id === id);
+  const ACTIVA = ['esperando_abono', 'por_aprobar', 'agendada', 'confirmada'];
+
+  async function cargarBarberia() { B = await K.rpc('ver_barberia'); }
+  async function cargarDatos(desde, hasta, forzar) {
+    const k = desde + hasta;
+    if (!forzar && k === rango) return datos;
+    datos = await K.rpc('ocupacion', { p_desde: desde, p_hasta: hasta });
+    rango = k;
+    return datos;
+  }
+  async function cargarClientes(forzar) { if (!clientes || forzar) clientes = await K.rpc('mis_clientes'); return clientes; }
+
+  /* ---------- Navegación ---------- */
+  let vistaActual = 'hoy';
+  const VISTAS = { hoy, agenda, caja, chat: () => Chat.montar($('v-chat')), mas };
+  function mostrar(v) {
+    vistaActual = v;
+    document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-' + v));
+    document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+    scrollTo(0, 0);
+    VISTAS[v]();
+  }
+  const refrescarVista = () => { if (vistaActual === 'hoy') hoy(); else if (vistaActual === 'agenda') pintarAgenda(true); };
+  document.querySelectorAll('nav.tabs button').forEach((b) => b.onclick = () => { history.replaceState(null, '', '#' + b.dataset.v); mostrar(b.dataset.v); });
+  function ruta() {
+    const h = decodeURIComponent(location.hash.slice(1));
+    const [v, qs] = h.split('?');
+    const q = new URLSearchParams(qs || '');
+    if (v === 'agenda' && q.get('r')) { mostrar('agenda'); abrirReserva(q.get('r')); return; }
+    if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
+    if (v === 'avisos') { Avisos.abrir(); return; }
+    if (v === 'plan' || v === 'clientes' || v === 'perfil' || v === 'equipo' || v === 'servicios' || v === 'ajustes' || v === 'estadisticas' || v === 'ofertas') {
+      mostrar('mas'); abrirSeccion(v); return;
+    }
+    mostrar(VISTAS[v] ? v : 'hoy');
+  }
+  addEventListener('hashchange', ruta);
+
+  /* ---------- Hoy ---------- */
+  async function hoy() {
+    const el = $('v-hoy');
+    const f = C.hoy();
+    let d;
+    try { d = await cargarDatos(C.sumarDias(f, -1), C.sumarDias(f, 30), true); } catch (e) { el.innerHTML = '<div class="card err">' + esc(e.message) + '</div>'; return; }
+    const mias = (r) => dueno() || r.barbero_id === yo.id;
+    const pend = d.reservas.filter((r) => r.detalle && mias(r) && (r.estado === 'agendada' || r.estado === 'por_aprobar') && new Date(r.fin) > new Date())
+      .sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
+    const deHoy = d.reservas.filter((r) => r.detalle && mias(r) && C.fechaDe(r.inicio) === f && r.estado !== 'anulada').sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
+    const esperando = d.reservas.filter((r) => r.detalle && mias(r) && r.estado === 'esperando_abono');
+    let caja = [];
+    try { caja = await K.rpc('ver_caja', { p_desde: f, p_hasta: f, p_barbero: dueno() && premium() ? null : yo.id }); } catch (e) { /* nada */ }
+    const totalCaja = caja.reduce((t, k) => t + k.monto + k.propina, 0);
+    let html = '';
+    if (yo.clave_temporal) html += '<div class="banner alerta"><div class="grow"><b>🔑 Cambia tu clave temporal</b> en Más → Mi perfil.</div></div>';
+    html += '<div class="card"><div class="flex">' + C.avatar(yo, 'lg') + '<div class="grow"><h2 style="margin:0">Hola, ' + esc(yo.nombre.split(' ')[0]) + ' 💈</h2>' +
+      '<div class="muted">' + C.fechaLarga(f) + '</div></div></div>' +
+      (dueno() ? '<label class="check" style="margin-top:14px"><input type="checkbox" id="chkAgenda"' + (yo.agenda_abierta ? ' checked' : '') + '> <span><b>Mi agenda abierta a clientes</b><br><span class="muted chico">' +
+        'Ábrela cuando tengas cupo; ciérrala cuando estés lleno (te escribirán por el chat).</span></span></label>' : '') + '</div>';
+    html += '<div class="stats"><div class="card"><small>Horas hoy</small><b>' + deHoy.length + '</b></div>' +
+      '<div class="card"><small>Por confirmar</small><b style="color:var(--consultar)">' + pend.length + '</b></div>' +
+      '<div class="card"><small>Atendidas hoy</small><b>' + deHoy.filter((r) => r.estado === 'atendida').length + '</b></div>' +
+      '<div class="card"><small>Caja de hoy</small><b>' + C.plata(totalCaja) + '</b></div></div>';
+    if (pend.length) {
+      html += '<div class="sec-tit">🔔 Por confirmar (' + pend.length + ')</div>' + pend.map((r) =>
+        '<div class="card pend"><div class="flex"><div class="grow"><b>' + esc(r.cliente) + (r.cliente_premium ? ' <span class="pill oro">⭐</span>' : '') + '</b>' +
+        '<div class="sub muted">' + C.cuando(r.inicio) + ' · ' + esc(r.servicios.map((s) => s.nombre).join(' + ')) + (dueno() ? ' · ' + esc((barbero(r.barbero_id) || {}).nombre || '') : '') + '</div>' +
+        '<div style="margin-top:4px">' + A.estadoPill(r.estado) + (r.tiene_comprobante ? ' <span class="pill info">🧾 comprobante</span>' : r.pagado_con === 'saldo' ? ' <span class="pill ok">saldo a favor</span>' : '') + '</div></div></div>' +
+        '<div class="btns"><button class="ok small" data-conf="' + r.id + '">✅ ' + (r.estado === 'por_aprobar' ? 'Aprobar' : 'Confirmar') + '</button>' +
+        (r.tiene_comprobante ? '<button class="small gris" data-comp="' + r.id + '">🧾 Ver comprobante</button>' : '') +
+        '<button class="small gris" data-ver="' + r.id + '">Ver</button></div></div>').join('');
+    }
+    if (esperando.length) html += '<p class="muted chico">⏳ ' + esperando.length + ' hora(s) apartada(s) esperando que el cliente abone (se liberan solas a los 15 min).</p>';
+    html += '<div class="sec-tit">📅 Hoy</div>';
+    html += deHoy.length ? '<div class="card"><ul class="list">' + deHoy.map((r) =>
+      '<li class="tap" data-ver="' + r.id + '"><div style="width:52px;font-weight:800;font-variant-numeric:tabular-nums">' + C.horaDe(r.inicio) + '</div>' +
+      '<div class="grow"><b>' + esc(r.cliente) + '</b><div class="sub">' + esc(r.servicios.map((s) => s.nombre).join(' + ') || r.nota || '') +
+      (dueno() && B.barberos.length > 1 ? ' · ' + esc((barbero(r.barbero_id) || {}).nombre || '') : '') + '</div></div>' + A.estadoPill(r.estado) + '</li>').join('') + '</ul></div>'
+      : '<div class="card empty"><span class="ico">☕</span>No hay horas para hoy.</div>';
+    html += '<div class="btns"><button class="alt" id="bHoraHoy">+ Agendar una hora</button>' + (dueno() ? '<button class="gris" id="bLink">🔗 Enlace para clientes</button>' : '') + '</div>';
+    el.innerHTML = html;
+    el.querySelectorAll('[data-conf]').forEach((x) => x.onclick = (ev) => C.accion(ev.target, async () => {
+      await K.rpc('confirmar_hora', { p_reserva: x.dataset.conf }); K.despertarEnvios(); Avisos.actualizar(); hoy();
+    }, '✅ Confirmada. Le avisamos al cliente'));
+    el.querySelectorAll('[data-comp]').forEach((x) => x.onclick = () => verComprobante(x.dataset.comp));
+    el.querySelectorAll('[data-ver]').forEach((x) => x.onclick = () => abrirReserva(x.dataset.ver));
+    if ($('chkAgenda')) $('chkAgenda').onchange = async (e) => {
+      try { await K.rpc('set_agenda_abierta', { p_abierta: e.target.checked }); yo.agenda_abierta = e.target.checked; await cargarBarberia(); C.toast(e.target.checked ? '🟢 Agenda abierta' : '🔴 Agenda cerrada a clientes'); }
+      catch (err) { C.toast('⚠️ ' + err.message); e.target.checked = !e.target.checked; }
+    };
+    $('bHoraHoy').onclick = () => nuevaHora(dueno() && !yo.agenda_abierta && B.barberos.length > 1 ? yo.id : yo.id, f, null);
+    if ($('bLink')) $('bLink').onclick = enlaceClientes;
+    Avisos.invitarPush(el);
+  }
+
+  /* ---------- Agenda ---------- */
+  let vista = 'dia', fechaSel = C.hoy(), quien = null, verAnuladas = false;
+  function agenda() {
+    if (!quien) quien = dueno() && premium() && B.barberos.length > 1 ? '*' : yo.id;
+    pintarAgenda();
+  }
+  async function pintarAgenda(forzar) {
+    const el = $('v-agenda');
+    const ids = B.barberos.map((b) => b.id);
+    let html = '<div class="card" style="padding:12px"><div class="chips" id="chQuien">' +
+      (B.barberos.length > 1 ? '<button class="chip' + (quien === '*' ? ' on' : '') + '" data-q="*">👥 Todos</button>' : '') +
+      B.barberos.map((b) => '<button class="chip' + (quien === b.id ? ' on' : '') + '" data-q="' + b.id + '">' + esc(b.id === yo.id ? 'Yo' : b.nombre.split(' ')[0]) + (b.activo ? '' : ' (inactivo)') + '</button>').join('') + '</div>' +
+      '<div class="seg" style="margin:8px 0"><button data-vi="dia">Día</button><button data-vi="semana">Semana</button><button data-vi="mes">Mes</button><button data-vi="anio">Año</button></div>' +
+      '<div class="barra-cal"><button class="icono" id="cAnt">‹</button><button class="small gris" id="cHoy">Hoy</button><span class="fecha-tit" id="cTit"></span><button class="icono" id="cSig">›</button></div>' +
+      '<div class="btns" style="margin-top:0"><button class="small" id="cNueva">+ Hora</button><button class="small gris" id="cBloq">⛔ Bloquear</button>' +
+      '<label class="check" style="margin:0 0 0 auto;font-size:13.5px"><input type="checkbox" id="cAnul"' + (verAnuladas ? ' checked' : '') + '> anuladas</label></div></div><div id="calZona"></div>';
+    el.innerHTML = html;
+    if (!premium() && dueno()) {
+      const t = el.querySelector('[data-q="*"]'); if (t) P.bloquear(t, 'Vista "Todos" en columnas');
+      P.bloquear(el.querySelector('[data-vi="anio"]'), 'Vista Año');
+    } else if (!dueno()) {
+      const t = el.querySelector('[data-q="*"]'); if (t) t.remove();
+    }
+    el.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => { quien = b.dataset.q; pintarAgenda(); });
+    el.querySelectorAll('[data-vi]').forEach((b) => { b.classList.toggle('on', b.dataset.vi === vista); b.onclick = () => { vista = b.dataset.vi; pintarAgenda(); }; });
+    const paso = { dia: 1, semana: 7, mes: 0, anio: 0 }[vista];
+    const mover = (n) => {
+      if (vista === 'mes') { const [y, m] = fechaSel.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); fechaSel = d.getUTCFullYear() + '-' + C.pad(d.getUTCMonth() + 1) + '-01'; }
+      else if (vista === 'anio') fechaSel = (+fechaSel.slice(0, 4) + n) + '-01-01';
+      else fechaSel = C.sumarDias(fechaSel, n * paso);
+      pintarAgenda();
+    };
+    $('cAnt').onclick = () => mover(-1);
+    $('cSig').onclick = () => mover(1);
+    $('cHoy').onclick = () => { fechaSel = C.hoy(); pintarAgenda(); };
+    $('cNueva').onclick = () => nuevaHora(quien === '*' ? yo.id : quien, fechaSel, null);
+    $('cBloq').onclick = () => nuevoBloqueo(quien === '*' ? null : quien);
+    $('cAnul').onchange = (e) => { verAnuladas = e.target.checked; pintarAgenda(); };
+    if (!dueno() && quien !== yo.id) { $('cNueva').classList.add('hidden'); $('cBloq').classList.add('hidden'); }
+
+    // Rango a cargar
+    let desde, hasta;
+    if (vista === 'dia') { desde = hasta = fechaSel; }
+    else if (vista === 'semana') { desde = C.sumarDias(fechaSel, -(C.dow(fechaSel) - 1)); hasta = C.sumarDias(desde, 6); }
+    else if (vista === 'mes') { desde = fechaSel.slice(0, 7) + '-01'; hasta = C.sumarDias(C.sumarDias(desde, 32).slice(0, 7) + '-01', -1); }
+    else { desde = fechaSel.slice(0, 4) + '-01-01'; hasta = fechaSel.slice(0, 4) + '-12-31'; }
+    const zona = $('calZona');
+    zona.innerHTML = '<p class="muted centro">Cargando…</p>';
+    try { await cargarDatos(desde, hasta, forzar || true); } catch (e) { zona.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    const lista = quien === '*' ? ids : [quien];
+    if (vista === 'dia') {
+      $('cTit').textContent = C.relativoDia(fechaSel) === C.fechaLarga(fechaSel) ? C.fechaLarga(fechaSel) : C.relativoDia(fechaSel) + ' · ' + C.diaCorto(fechaSel);
+      const cols = lista.map((id) => ({ f: fechaSel, barbero: id, titulo: esc(id === yo.id ? 'Yo' : (barbero(id) || {}).nombre || ''), hoy: fechaSel === C.hoy() }));
+      zona.innerHTML = '<div id="tl"></div>';
+      A.timeline($('tl'), { cols, datos, horarios: horarios(), staff: true, verAnuladas, ancho: lista.length > 1 ? 120 : 200,
+        alBloque: abrirReserva, alBloqueo: borrarBloqueo,
+        alLibre: (c, m) => { if (!dueno() && c.barbero !== yo.id) return; nuevaHora(c.barbero, c.f, C.aHHMM(m)); } });
+    } else if (vista === 'semana') {
+      $('cTit').textContent = C.diaCorto(desde) + ' – ' + C.diaCorto(hasta);
+      const id = quien === '*' ? yo.id : quien;
+      const cols = [];
+      for (let i = 0; i < 7; i++) { const f = C.sumarDias(desde, i); cols.push({ f, barbero: id, titulo: C.diaCorto(f), hoy: f === C.hoy() }); }
+      zona.innerHTML = (quien === '*' ? '<p class="muted chico">Semana de ' + esc(barbero(id).nombre) + '. Elige un barbero arriba para ver la suya.</p>' : '') + '<div id="tl"></div>';
+      A.timeline($('tl'), { cols, datos, horarios: horarios(), staff: true, verAnuladas, ancho: 96, px: 0.9,
+        alBloque: abrirReserva, alBloqueo: borrarBloqueo,
+        alLibre: (c, m) => { if (!dueno() && c.barbero !== yo.id) return; nuevaHora(c.barbero, c.f, C.aHHMM(m)); } });
+    } else if (vista === 'mes') {
+      const [y, m] = desde.split('-').map(Number);
+      $('cTit').textContent = C.MESES[m - 1][0].toUpperCase() + C.MESES[m - 1].slice(1) + ' ' + y;
+      zona.innerHTML = '<div class="card" style="padding:10px"><div id="mesG"></div></div><p class="muted chico">El número es la cantidad de horas del día; la barrita, qué tan lleno está.</p>';
+      A.mes($('mesG'), { mes: desde.slice(0, 7), staff: true, info: (f) => A.llenado(lista, f, datos, horarios()), alDia: (f) => { fechaSel = f; vista = 'dia'; pintarAgenda(); } });
+    } else {
+      $('cTit').textContent = 'Año ' + desde.slice(0, 4);
+      zona.innerHTML = '<div id="anioG"></div>';
+      A.anio($('anioG'), { anio: desde.slice(0, 4), info: (f) => A.llenado(lista, f, datos, horarios()), alMes: (mm) => { fechaSel = mm + '-01'; vista = 'mes'; pintarAgenda(); } });
+    }
+  }
+
+  // Detalle de una hora con todas sus acciones.
+  async function abrirReserva(id) {
+    let r = (datos.reservas || []).find((x) => x.id === id);
+    if (!r || !r.detalle) {
+      try {
+        const t = new Date(); const d = await K.rpc('ocupacion', { p_desde: C.sumarDias(C.fechaDe(t), -60), p_hasta: C.sumarDias(C.fechaDe(t), 120) });
+        r = d.reservas.find((x) => x.id === id);
+      } catch (e) { /* nada */ }
+    }
+    if (!r || !r.detalle) return C.toast('No se encontró la hora');
+    const b = barbero(r.barbero_id) || {};
+    const puede = dueno() || r.barbero_id === yo.id;
+    const activa = ACTIVA.includes(r.estado);
+    const cli = r.cliente_id ? { nombre: r.cliente, avatar: r.cliente_avatar } : { nombre: r.cliente, avatar: '🚶' };
+    const h = C.hoja('<h2>' + C.avatar(cli, 'sm' + (r.cliente_premium ? ' premium' : '')) + ' ' + esc(r.cliente) + (r.cliente_premium ? ' <span class="pill oro">⭐ Premium</span>' : '') + '</h2>' +
+      '<div style="margin-bottom:10px">' + A.estadoPill(r.estado) + (r.consultar ? ' <span class="pill warn">día a consultar</span>' : '') + '</div>' +
+      '<div class="det-fila"><span>📅 Cuándo</span><b>' + C.cuando(r.inicio) + '–' + C.horaDe(r.fin) + '</b></div>' +
+      '<div class="det-fila"><span>💈 Barbero</span><b>' + esc(b.nombre || '') + '</b></div>' +
+      '<div class="det-fila"><span>✂️ Servicios</span><b style="text-align:right">' + esc(r.servicios.map((s) => s.nombre).join(' + ') || '—') + '</b></div>' +
+      '<div class="det-fila"><span>💵 Total</span><b>' + C.plata(r.total) + '</b></div>' +
+      '<div class="det-fila"><span>💳 Abono</span><b>' + (r.pagado_con === 'interno' ? 'Agendada por la barbería' : r.estado === 'esperando_abono' ? 'Esperando (' + C.plata(r.abono) + ')' :
+        C.plata(r.abono) + ' · ' + ({ link: 'link de pago', transferencia: 'transferencia', saldo: 'saldo a favor' }[r.pagado_con] || '—')) + '</b></div>' +
+      (r.pagado_con !== 'interno' && r.abono ? '<div class="det-fila"><span>Cobrar en el local</span><b>' + C.plata(Math.max(0, r.total - (r.estado === 'esperando_abono' ? 0 : r.abono))) + '</b></div>' : '') +
+      (r.nota ? '<div class="det-fila"><span>📝 Nota</span><b>' + esc(r.nota) + '</b></div>' : '') +
+      (r.motivo ? '<div class="det-fila"><span>Motivo</span><b>' + esc(r.motivo) + (r.abono_destino ? ' · abono ' + (r.abono_destino === 'saldo' ? 'a favor' : 'perdido') : '') + '</b></div>' : '') +
+      '<div data-avisos class="muted chico" style="margin-top:8px"></div>' +
+      '<div class="btns">' +
+      (puede && (r.estado === 'agendada' || r.estado === 'por_aprobar') ? '<button class="ok" data-a="conf">✅ ' + (r.estado === 'por_aprobar' ? 'Aprobar' : 'Confirmar') + '</button>' : '') +
+      (r.tiene_comprobante ? '<button class="gris" data-a="comp">🧾 Comprobante</button>' : '') +
+      (puede && ['agendada', 'confirmada', 'por_aprobar', 'atendida', 'no_vino'].includes(r.estado) && new Date(r.inicio) < Date.now() + 30 * 60000 ?
+        '<button data-a="aten">✔️ Atendida</button><button class="gris" data-a="novino">🚫 No vino</button>' : '') +
+      (puede && activa ? '<button class="gris" data-a="mover">🔁 Mover</button><button class="danger" data-a="anular">' + (r.estado === 'por_aprobar' ? 'Rechazar' : 'Anular') + '</button>' : '') +
+      (r.cliente_id ? '<button class="gris" data-a="chat">💬 Escribir</button>' : '') +
+      (r.cliente_tel ? '<a class="btn wsp" target="_blank" rel="noopener" href="' + C.wa(r.cliente_tel, 'Hola ' + r.cliente.split(' ')[0] + ', te escribo de ' + bar().nombre + ' por tu hora del ' + C.cuando(r.inicio)) + '">WhatsApp</a>' : '') +
+      '</div>');
+    K.rpc('avisos_de_reserva', { p_reserva: r.id }).then((av) => {
+      if (!av.length) return;
+      h.q('[data-avisos]').innerHTML = '<b>Avisos de esta hora</b><br>' + av.map((x) => esc(x.titulo) + ' → ' + esc(x.para) + ' · ' + C.hace(x.created_at) + ' ' +
+        (x.visto_at ? '<span class="ticks visto">✓✓</span> visto ' + C.horaDe(x.visto_at) : x.recibido ? '<span class="ticks">✓✓</span> recibido' : '<span class="ticks">✓</span> enviado')).join('<br>');
+    }).catch(() => {});
+    const fin = async (msg) => { h.cerrar(); K.despertarEnvios(); if (msg) C.toast(msg); rango = ''; Avisos.actualizar(); refrescarVista(); };
+    h.qa('[data-a]').forEach((btn) => btn.onclick = async () => {
+      const a = btn.dataset.a;
+      try {
+        if (a === 'conf') { await C.accion(btn, () => K.rpc('confirmar_hora', { p_reserva: r.id })); fin('✅ Confirmada. Le avisamos al cliente'); }
+        if (a === 'comp') verComprobante(r.id);
+        if (a === 'chat') { h.cerrar(); mostrar('chat'); Chat.abrir(r.cliente_id, { nombre: r.cliente, avatar: r.cliente_avatar, rol: 'client' }, r.id); }
+        if (a === 'novino') { if (await C.confirmar('Marcar que ' + r.cliente + ' no vino. Su abono se pierde.', { si: 'No vino' })) { await K.rpc('marcar_hora', { p_reserva: r.id, p_estado: 'no_vino' }); fin('Marcado como "No vino"'); } }
+        if (a === 'aten') atendida(r, fin);
+        if (a === 'anular') {
+          const motivo = await C.pedir(r.estado === 'por_aprobar' ? 'Rechazar solicitud' : 'Anular hora', { texto: 'El cliente recibirá un aviso' + (r.pagado_con !== 'interno' && r.estado !== 'esperando_abono' ? ' y su abono quedará a favor' : '') + '. Motivo (opcional):', placeholder: 'Ej: Ese día no trabajo' });
+          if (motivo === null) return;
+          await K.rpc('rechazar_hora', { p_reserva: r.id, p_motivo: motivo }); fin('Hora anulada');
+        }
+        if (a === 'mover') moverHora(r, fin);
+      } catch (e) { C.toast('⚠️ ' + e.message, 4000); }
+    });
+  }
+
+  function atendida(r, fin) {
+    const resto = Math.max(0, r.total - (['link', 'transferencia', 'saldo'].includes(r.pagado_con) ? r.abono : 0));
+    const h = C.hoja('<h2>✔️ Atendida</h2><p>Queda anotada en tu caja: <b>' + C.plata(r.total) + '</b>' + (resto !== r.total ? ' (abono ' + C.plata(r.abono) + ' ya recibido; cobras ' + C.plata(resto) + ')' : '') + '.</p>' +
+      '<label>¿Cómo pagó el resto?</label><div class="seg" data-medio><button class="on" data-m="efectivo">💵 Efectivo</button><button data-m="transferencia">🏦 Transferencia</button></div>' +
+      '<label>Propina <span class="opc">(opcional)</span></label><input type="number" inputmode="numeric" min="0" data-prop placeholder="0">' +
+      '<div class="btns"><button class="full" data-ok>Guardar</button></div>');
+    let medio = 'efectivo';
+    h.qa('[data-m]').forEach((b) => b.onclick = () => { medio = b.dataset.m; h.qa('[data-m]').forEach((x) => x.classList.toggle('on', x === b)); });
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      await K.rpc('marcar_hora', { p_reserva: r.id, p_estado: 'atendida', p_medio: medio, p_propina: +h.q('[data-prop]').value || 0 });
+      h.cerrar(); fin('✔️ Atendida y anotada en la caja');
+    });
+  }
+
+  function moverHora(r, fin) {
+    const dur = (new Date(r.fin) - new Date(r.inicio)) / 60000;
+    const h = C.hoja('<h2>🔁 Mover hora</h2><p class="muted">' + esc(r.cliente) + ' · ' + dur + ' min</p>' +
+      (dueno() ? '<label>Barbero</label><select data-b>' + B.barberos.map((b) => '<option value="' + b.id + '"' + (b.id === r.barbero_id ? ' selected' : '') + '>' + esc(b.nombre) + '</option>').join('') + '</select>' : '') +
+      '<div class="row"><div><label>Día</label><input type="date" data-f value="' + C.fechaDe(r.inicio) + '"></div><div><label>Hora</label><input type="time" step="900" data-h value="' + C.horaDe(r.inicio) + '"></div></div>' +
+      '<p class="muted chico">El cliente recibe un aviso con la hora nueva.</p><div class="btns"><button class="full" data-ok>Mover</button></div>');
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      const t = C.instante(h.q('[data-f]').value, h.q('[data-h]').value);
+      await K.rpc('mover_hora', { p_reserva: r.id, p_barbero: h.q('[data-b]') ? h.q('[data-b]').value : r.barbero_id, p_inicio: t.toISOString() });
+      h.cerrar(); fin('🔁 Hora movida');
+    });
+  }
+
+  async function verComprobante(id) {
+    try {
+      const img = await K.rpc('ver_comprobante', { p_reserva: id });
+      if (!img) return C.toast('El comprobante ya no está (se borran a los 30 días)');
+      const h = C.hoja('<h2>🧾 Comprobante</h2><img src="' + img + '" alt="Comprobante" style="width:100%;border-radius:12px">');
+      h.q('.panel').style.maxWidth = '720px';
+    } catch (e) { C.toast('⚠️ ' + e.message); }
+  }
+
+  // Hora creada por la barbería (cliente que escribió, llamó o llegó).
+  async function nuevaHora(barberoId, f, hhmm) {
+    if (!dueno() && barberoId !== yo.id) barberoId = yo.id;
+    try { await cargarClientes(); } catch (e) { clientes = []; }
+    const carro = new Set();
+    const h = C.hoja('<h2>📅 Agendar una hora</h2>' +
+      '<label>Cliente</label><input data-buscar placeholder="🔎 Busca un cliente o escribe un nombre" list="dlCli"><datalist id="dlCli">' +
+      clientes.map((c) => '<option value="' + esc(c.nombre) + '">').join('') + '</datalist>' +
+      '<p class="muted chico" data-cli-info>Si no tiene cuenta, escribe su nombre igual.</p>' +
+      (dueno() ? '<label>Barbero</label><select data-b>' + B.barberos.map((b) => '<option value="' + b.id + '"' + (b.id === barberoId ? ' selected' : '') + '>' + esc(b.nombre) + '</option>').join('') + '</select>' : '') +
+      '<div class="row"><div><label>Día</label><input type="date" data-f value="' + f + '"></div><div><label>Hora</label><input type="time" step="900" data-h value="' + (hhmm || '') + '"></div></div>' +
+      '<label>Servicios</label><div class="chips" style="flex-wrap:wrap" data-servs>' + B.servicios.map((s) => '<button type="button" class="chip" data-s="' + s.id + '">' + esc(s.nombre) + ' · ' + s.duracion + "'" + '</button>').join('') + '</div>' +
+      '<label>Duración (min)</label><input type="number" min="5" max="480" step="5" data-min placeholder="Se calcula con los servicios">' +
+      '<label>Nota <span class="opc">(opcional)</span></label><input data-nota maxlength="200" placeholder="Ej: acordado por chat">' +
+      '<div class="btns"><button class="full" data-ok>Agendar</button></div>');
+    const buscar = h.q('[data-buscar]');
+    const cliDe = () => clientes.find((c) => c.nombre.toLowerCase() === buscar.value.trim().toLowerCase());
+    buscar.oninput = () => { const c = cliDe(); h.q('[data-cli-info]').textContent = c ? '✅ Cliente con cuenta: le llegará un aviso' : 'Si no tiene cuenta, escribe su nombre igual.'; };
+    h.qa('[data-s]').forEach((b) => b.onclick = () => {
+      if (carro.has(b.dataset.s)) carro.delete(b.dataset.s); else carro.add(b.dataset.s);
+      b.classList.toggle('on', carro.has(b.dataset.s));
+      h.q('[data-min]').value = [...carro].reduce((t, id) => t + (servicio(id) || {}).duracion, 0) || '';
+    });
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      if (!h.q('[data-h]').value) throw new Error('Elige la hora');
+      const c = cliDe();
+      const r = await K.rpc('crear_hora', {
+        p_barbero: h.q('[data-b]') ? h.q('[data-b]').value : yo.id, p_inicio: C.instante(h.q('[data-f]').value, h.q('[data-h]').value).toISOString(),
+        p_servicios: [...carro], p_cliente: c ? c.id : null, p_nombre: c ? null : buscar.value.trim(), p_minutos: +h.q('[data-min]').value || null, p_nota: h.q('[data-nota]').value
+      });
+      h.cerrar(); K.despertarEnvios(); rango = ''; fechaSel = h.q('[data-f]').value;
+      C.toast('📅 Hora agendada' + (c ? '. Le avisamos al cliente' : ''));
+      refrescarVista();
+      return r;
+    });
+  }
+
+  function nuevoBloqueo(barberoId) {
+    const f = fechaSel;
+    const h = C.hoja('<h2>⛔ Bloquear horario</h2><p class="muted">Feriados, vacaciones, trámites, "hoy salgo antes"… Nadie podrá reservar en ese rango.</p>' +
+      (dueno() ? '<label>Para</label><select data-b><option value="">Toda la barbería</option>' + B.barberos.map((b) => '<option value="' + b.id + '"' + (b.id === barberoId ? ' selected' : '') + '>' + esc(b.nombre) + '</option>').join('') + '</select>' : '') +
+      '<div class="row"><div><label>Desde</label><input type="date" data-f1 value="' + f + '"></div><div><label>Hora</label><input type="time" step="900" data-h1 value="00:00"></div></div>' +
+      '<div class="row"><div><label>Hasta</label><input type="date" data-f2 value="' + f + '"></div><div><label>Hora</label><input type="time" step="900" data-h2 value="23:59"></div></div>' +
+      '<label>Motivo <span class="opc">(opcional, solo lo ve el equipo)</span></label><input data-m maxlength="80" placeholder="Ej: Vacaciones">' +
+      '<div class="btns"><button class="full" data-ok>Bloquear</button></div>');
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      await K.rpc('guardar_bloqueo', {
+        p_desde: C.instante(h.q('[data-f1]').value, h.q('[data-h1]').value).toISOString(),
+        p_hasta: C.instante(h.q('[data-f2]').value, h.q('[data-h2]').value).toISOString(),
+        p_barbero: h.q('[data-b]') ? (h.q('[data-b]').value || null) : yo.id, p_motivo: h.q('[data-m]').value
+      });
+      h.cerrar(); rango = ''; refrescarVista();
+    }, '⛔ Horario bloqueado');
+  }
+  async function borrarBloqueo(id) {
+    if (!await C.confirmar('¿Quitar este bloqueo? Se podrá reservar de nuevo en ese horario.', { si: 'Quitar' })) return;
+    try { await K.rpc('borrar_bloqueo', { p_id: id }); rango = ''; refrescarVista(); C.toast('Bloqueo quitado'); } catch (e) { C.toast('⚠️ ' + e.message); }
+  }
+
+  /* ---------- Caja ---------- */
+  let cajaRango = 'hoy', cajaQuien = null;
+  async function caja() {
+    const el = $('v-caja');
+    const verTodos = dueno() && premium();
+    if (cajaQuien === null) cajaQuien = verTodos ? '*' : yo.id;
+    const f = C.hoy();
+    const rangos = { hoy: [f, f], semana: [C.sumarDias(f, -(C.dow(f) - 1)), f], mes: [f.slice(0, 8) + '01', f], mesant: null };
+    const [y, m] = f.split('-').map(Number);
+    const ant = new Date(Date.UTC(y, m - 2, 1));
+    rangos.mesant = [ant.getUTCFullYear() + '-' + C.pad(ant.getUTCMonth() + 1) + '-01', C.sumarDias(f.slice(0, 8) + '01', -1)];
+    let html = '<div class="card" style="padding:12px"><div class="seg"><button data-r="hoy">Hoy</button><button data-r="semana">Semana</button><button data-r="mes">Mes</button><button data-r="mesant">Mes pasado</button></div>' +
+      (verTodos && B.barberos.length > 1 ? '<div class="chips" style="margin-top:8px"><button class="chip" data-c="*">👥 Todos</button>' + B.barberos.map((b) => '<button class="chip" data-c="' + b.id + '">' + esc(b.id === yo.id ? 'Yo' : b.nombre.split(' ')[0]) + '</button>').join('') + '</div>' : '') +
+      '</div><div id="cajaZona"><p class="muted centro">Cargando…</p></div>' +
+      '<div class="btns"><button class="grande full" id="bAnotar">+ Anotar corte</button></div>';
+    el.innerHTML = html;
+    el.querySelectorAll('[data-r]').forEach((b) => {
+      b.classList.toggle('on', b.dataset.r === cajaRango);
+      if (!premium() && b.dataset.r !== 'hoy') P.bloquear(b, 'Reportes de caja');
+      else b.onclick = () => { cajaRango = b.dataset.r; caja(); };
+    });
+    el.querySelectorAll('[data-c]').forEach((b) => { b.classList.toggle('on', b.dataset.c === cajaQuien); b.onclick = () => { cajaQuien = b.dataset.c; caja(); }; });
+    $('bAnotar').onclick = () => anotar();
+    const [d1, d2] = rangos[cajaRango];
+    let l = [];
+    try { l = await K.rpc('ver_caja', { p_desde: d1, p_hasta: d2, p_barbero: cajaQuien === '*' ? null : cajaQuien }); }
+    catch (e) { $('cajaZona').innerHTML = '<div class="card err">' + esc(e.message) + '</div>'; return; }
+    const sum = (fn) => l.reduce((t, k) => t + fn(k), 0);
+    const total = sum((k) => k.monto + k.propina);
+    const efectivo = sum((k) => (k.medio === 'efectivo' ? k.monto - k.abono : 0));
+    const transf = sum((k) => (k.medio === 'transferencia' ? k.monto - k.abono : 0));
+    const abonos = sum((k) => k.abono);
+    const propinas = sum((k) => k.propina);
+    let z = '<div class="stats"><div class="card"><small>Total</small><b>' + C.plata(total) + '</b></div><div class="card"><small>Cortes</small><b>' + l.length + '</b></div>' +
+      '<div class="card"><small>💵 Efectivo</small><b>' + C.plata(efectivo) + '</b></div><div class="card"><small>🏦 Transferencias</small><b>' + C.plata(transf) + '</b></div>' +
+      '<div class="card"><small>💳 Abonos</small><b>' + C.plata(abonos) + '</b></div><div class="card"><small>🙌 Propinas</small><b>' + C.plata(propinas) + '</b></div></div>';
+    if (verTodos && cajaQuien === '*' && B.barberos.length > 1) {
+      const com = bar().comision;
+      z += '<div class="card"><h2>👥 Por barbero <span class="pill">comisión ' + com + '%</span></h2><div class="scroll-x"><table class="tabla"><tr><th>Barbero</th><th class="n">Cortes</th><th class="n">Ventas</th><th class="n">Su parte</th></tr>' +
+        B.barberos.map((b) => {
+          const mios = l.filter((k) => k.barbero_id === b.id);
+          const v = mios.reduce((t, k) => t + k.monto, 0), p = mios.reduce((t, k) => t + k.propina, 0);
+          const parte = b.id === bar().owner_id ? v + p : Math.round(v * com / 100) + p;
+          return '<tr><td>' + esc(b.nombre) + '</td><td class="n">' + mios.length + '</td><td class="n">' + C.plata(v + p) + '</td><td class="n">' + C.plata(parte) + '</td></tr>';
+        }).join('') + '</table></div><p class="muted chico">La parte del barbero = comisión de sus cortes + sus propinas. Cambia el % en Ajustes.</p></div>';
+    } else if (dueno() && !premium()) {
+      z += '<div class="card plata" id="upCaja"><h2>👥 Caja de todo el equipo y comisiones</h2><p class="muted">Mira lo que vende cada barbero y cuánto le corresponde.</p></div>';
+    }
+    z += '<div class="card"><h2>🧾 Movimientos</h2>' + (l.length ? '<ul class="list">' + l.map((k) =>
+      '<li class="tap" data-k="' + k.id + '"><div class="grow"><b>' + esc(k.servicio) + '</b><div class="sub">' + C.cuando(k.fecha) + (k.cliente ? ' · ' + esc(k.cliente) : '') +
+      (cajaQuien === '*' ? ' · ' + esc(k.barbero) : '') + ' · ' + (k.medio === 'efectivo' ? '💵' : '🏦') + (k.abono ? ' · abono ' + C.plata(k.abono) : '') + (k.propina ? ' · propina ' + C.plata(k.propina) : '') + '</div></div>' +
+      '<b>' + C.plata(k.monto + k.propina) + '</b></li>').join('') + '</ul>' : '<div class="empty"><span class="ico">💵</span>Sin movimientos. Las horas marcadas como Atendida llegan solas.</div>') + '</div>';
+    $('cajaZona').innerHTML = z;
+    if ($('upCaja')) $('upCaja').onclick = () => P.upsell('Caja de todo el equipo');
+    $('cajaZona').querySelectorAll('[data-k]').forEach((li) => li.onclick = () => anotar(l.find((k) => k.id === li.dataset.k)));
+  }
+
+  async function anotar(k) {
+    try { await cargarClientes(); } catch (e) { clientes = []; }
+    const h = C.hoja('<h2>' + (k ? '✏️ Editar corte' : '+ Anotar corte') + '</h2>' +
+      '<label>Servicio</label><div class="chips" style="flex-wrap:wrap">' + B.servicios.map((s) => '<button type="button" class="chip" data-s="' + s.id + '">' + esc(s.nombre) + '</button>').join('') + '</div>' +
+      '<input data-serv maxlength="80" placeholder="O escribe el servicio" value="' + esc(k ? k.servicio : '') + '" style="margin-top:8px">' +
+      '<label>Monto</label><input data-monto type="number" inputmode="numeric" min="0" value="' + (k ? k.monto : '') + '" placeholder="$">' +
+      '<label>Medio de pago</label><div class="seg" data-medio><button data-m="efectivo">💵 Efectivo</button><button data-m="transferencia">🏦 Transferencia</button></div>' +
+      '<details style="margin-top:12px"' + (k && (k.cliente || k.propina || k.nota) ? ' open' : '') + '><summary class="muted">Opcional: cliente, propina, nota</summary>' +
+      '<label>Cliente</label><input data-cli list="dlCli2" value="' + esc(k ? k.cliente || '' : '') + '"><datalist id="dlCli2">' + clientes.map((c) => '<option value="' + esc(c.nombre) + '">').join('') + '</datalist>' +
+      '<label>Propina</label><input data-prop type="number" inputmode="numeric" min="0" value="' + (k ? k.propina || '' : '') + '">' +
+      '<label>Nota</label><input data-nota maxlength="200" value="' + esc(k ? k.nota || '' : '') + '"></details>' +
+      (dueno() && !k && B.barberos.length > 1 ? '<label>Barbero</label><select data-b>' + B.barberos.map((b) => '<option value="' + b.id + '"' + (b.id === yo.id ? ' selected' : '') + '>' + esc(b.nombre) + '</option>').join('') + '</select>' : '') +
+      '<div class="btns"><button class="full" data-ok>Guardar</button>' + (k ? '<button class="danger" data-del>Borrar</button>' : '') + '</div>');
+    let medio = k ? k.medio : 'efectivo';
+    const pintarMedio = () => h.qa('[data-m]').forEach((b) => b.classList.toggle('on', b.dataset.m === medio));
+    pintarMedio();
+    h.qa('[data-m]').forEach((b) => b.onclick = () => { medio = b.dataset.m; pintarMedio(); });
+    h.qa('[data-s]').forEach((b) => b.onclick = () => { const s = servicio(b.dataset.s); h.q('[data-serv]').value = s.nombre; h.q('[data-monto]').value = s.precio; h.qa('[data-s]').forEach((x) => x.classList.toggle('on', x === b)); });
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      const cli = clientes.find((c) => c.nombre.toLowerCase() === h.q('[data-cli]').value.trim().toLowerCase());
+      await K.rpc('anotar_corte', { p: {
+        id: k ? k.id : '', servicio: h.q('[data-serv]').value, monto: h.q('[data-monto]').value === '' ? -1 : +h.q('[data-monto]').value, medio,
+        cliente_id: cli ? cli.id : '', cliente_nombre: h.q('[data-cli]').value, propina: +h.q('[data-prop]').value || 0, nota: h.q('[data-nota]').value,
+        barbero_id: h.q('[data-b]') ? h.q('[data-b]').value : ''
+      } });
+      h.cerrar(); caja();
+    }, '💵 Anotado');
+    if (h.q('[data-del]')) h.q('[data-del]').onclick = async () => {
+      if (!await C.confirmar('¿Borrar este movimiento de la caja?', { si: 'Borrar', peligro: true })) return;
+      await K.rpc('borrar_corte', { p_id: k.id }); h.cerrar(); caja();
+    };
+  }
+
+  /* ---------- Más ---------- */
+  function mas() {
+    const el = $('v-mas');
+    const items = dueno() ? [
+      ['clientes', '👥', 'Clientes', 'Crear cuentas, claves, notas'],
+      ['equipo', '💈', 'Mi equipo', 'Barberos y sus horarios'],
+      ['servicios', '✂️', 'Servicios y precios', 'Tu catálogo'],
+      ['ofertas', '🏷️', 'Ofertas', 'Promos para tus clientes'],
+      ['estadisticas', '📊', 'Estadísticas', 'Ventas, servicios, horas'],
+      ['ajustes', '⚙️', 'Ajustes', 'Horario, abono, logo, colores'],
+      ['enlace', '🔗', 'Enlace y QR', 'Para que entren tus clientes'],
+      ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
+      ['perfil', '👤', 'Mi perfil', 'Foto, clave, notificaciones'],
+      ['soporte', '🛟', 'Soporte CodeFix', 'Escríbele a Josué']
+    ] : [
+      ['clientes', '👥', 'Clientes', 'La lista de la barbería'],
+      ['estadisticas', '📊', 'Mis estadísticas', 'Tus cortes y ventas'],
+      ['perfil', '👤', 'Mi perfil', 'Foto, clave, notificaciones'],
+      ['soporte', '🛟', 'Soporte CodeFix', 'Escríbele a Josué']
+    ];
+    el.innerHTML = '<div class="menu-mas">' + items.map((i) => '<button data-s="' + i[0] + '"><span>' + i[1] + '</span>' + i[2] + '<small>' + esc(i[3]) + '</small></button>').join('') + '</div>';
+    el.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => abrirSeccion(b.dataset.s));
+  }
+  function seccion(titulo) {
+    const el = $('v-mas');
+    el.innerHTML = '<div class="flex" style="margin-bottom:12px"><button class="icono" id="bVolver" aria-label="Volver">←</button><h2 style="margin:0;font-size:19px">' + titulo + '</h2></div><div id="secZona"></div>';
+    $('bVolver').onclick = () => { history.replaceState(null, '', '#mas'); mas(); };
+    scrollTo(0, 0);
+    return $('secZona');
+  }
+  async function abrirSeccion(s) {
+    if (s === 'soporte') {
+      const adminId = await K.rpc('mis_contactos').then((l) => (l.find((c) => c.rol === 'admin') || {}).id).catch(() => null);
+      mostrar('chat'); if (adminId) Chat.abrir(adminId, { nombre: 'CodeFix (soporte)', rol: 'admin', avatar: '🛟' }); return;
+    }
+    const F = { clientes: secClientes, equipo: secEquipo, servicios: secServicios, ofertas: secOfertas, estadisticas: secEstadisticas, ajustes: secAjustes,
+      enlace: enlaceClientes, plan: () => P.plan(seccion('💎 Mi plan')), perfil: () => P.perfil(seccion('👤 Mi perfil'), { tour: (f) => P.tour(pasos(), f), alGuardar: () => { yo = K.cuenta; } }) };
+    if (F[s]) F[s]();
+  }
+
+  /* ----- Clientes ----- */
+  async function secClientes() {
+    const z = seccion('👥 Clientes');
+    z.innerHTML = '<p class="muted">Cargando…</p>';
+    try { await cargarClientes(true); } catch (e) { z.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    const lim = premium() ? 500 : 40;
+    z.innerHTML = (dueno() ? '<div class="card"><div class="flex"><div class="grow"><b>' + clientes.length + ' / ' + lim + ' clientes</b>' +
+      (premium() ? '' : '<div class="muted chico">Con Premium: hasta 500</div>') + '</div><button id="bNuevoCli">+ Nuevo cliente</button></div></div>' : '') +
+      '<input id="fCli" placeholder="🔎 Buscar cliente…" style="margin-bottom:10px"><div class="card"><ul class="list" id="lCli">' + clientes.map((c) =>
+        '<li class="tap" data-c="' + c.id + '" data-n="' + esc((c.nombre + ' ' + (c.telefono || '') + ' ' + (c.email || '')).toLowerCase()) + '">' + C.avatar(c, c.premium ? 'premium' : '') +
+        '<div class="grow"><b>' + esc(c.nombre) + '</b>' + (c.premium ? ' <span class="pill oro">⭐</span>' : '') + (c.bloqueado ? ' <span class="pill bad">bloqueado</span>' : '') +
+        '<div class="sub">' + c.visitas + ' visita' + (c.visitas === 1 ? '' : 's') + (c.no_vino ? ' · ' + c.no_vino + ' no vino' : '') + (c.saldo ? ' · saldo ' + C.plata(c.saldo) : '') +
+        (c.proxima ? ' · próxima ' + C.cuando(c.proxima) : '') + '</div></div></li>').join('') + '</ul>' + (clientes.length ? '' : '<div class="empty"><span class="ico">👥</span>Aún no hay clientes.</div>') + '</div>';
+    $('fCli').oninput = () => z.querySelectorAll('#lCli li').forEach((li) => li.classList.toggle('hidden', !li.dataset.n.includes($('fCli').value.toLowerCase())));
+    z.querySelectorAll('[data-c]').forEach((li) => li.onclick = () => fichaCliente(clientes.find((c) => c.id === li.dataset.c)));
+    if ($('bNuevoCli')) $('bNuevoCli').onclick = () => {
+      if (clientes.length >= lim) return premium() ? C.toast('Llegaste al máximo de clientes') : P.upsell('Hasta 500 clientes');
+      nuevaCuenta('client', secClientes);
+    };
+  }
+
+  function nuevaCuenta(tipo, despues) {
+    const esBarbero = tipo === 'barber';
+    const h = C.hoja('<h2>' + (esBarbero ? '💈 Nuevo barbero' : '👤 Nuevo cliente') + '</h2>' +
+      '<label>Nombre</label><input data-n maxlength="80" placeholder="Ej: Juan Pérez">' +
+      '<label>WhatsApp</label><input data-t inputmode="tel" placeholder="+56 9 1234 5678">' +
+      '<label>Correo <span class="opc">(con este entra a la app)</span></label><input data-e type="email" inputmode="email" placeholder="correo@ejemplo.cl">' +
+      '<p class="muted chico">Le crearemos una clave y te dejaremos el mensaje listo para enviárselo por WhatsApp.</p><p class="err" data-err></p>' +
+      '<div class="btns"><button class="full" data-ok>Crear cuenta</button></div>');
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      const d = { nombre: h.q('[data-n]').value.trim(), telefono: h.q('[data-t]').value.trim(), email: h.q('[data-e]').value.trim().toLowerCase(), clave: K.claveNueva(), tipo };
+      if (!d.nombre || !d.email) throw new Error('Falta el nombre o el correo');
+      const r = await K.crearUsuario(d);
+      h.cerrar();
+      enviarAcceso(Object.assign(d, { codigo: r.codigo || bar().codigo, barberia: bar().nombre }));
+      clientes = null;
+      await cargarBarberia();
+      despues && despues();
+    }).catch((e) => { h.q('[data-err]').textContent = e.message; });
+  }
+
+  function enviarAcceso(d) {
+    const msg = K.mensajeAcceso(d);
+    const h = C.hoja('<h2>✅ ' + (d.nuevo === false ? 'Clave restablecida' : 'Cuenta creada') + '</h2><p>Envíale sus datos a <b>' + esc(d.nombre) + '</b>:</p>' +
+      '<textarea readonly style="min-height:170px">' + esc(msg) + '</textarea><div class="btns" style="flex-direction:column">' +
+      '<a class="btn wsp full" target="_blank" rel="noopener" href="' + (d.telefono ? C.wa(d.telefono, msg) : 'https://wa.me/?text=' + encodeURIComponent(msg)) + '">💬 Enviar por WhatsApp</a>' +
+      '<button class="gris full" data-c>📋 Copiar mensaje</button></div>');
+    h.q('[data-c]').onclick = () => C.copiar(msg);
+  }
+
+  function fichaCliente(c) {
+    const h = C.hoja('<h2>' + C.avatar(c, 'sm' + (c.premium ? ' premium' : '')) + ' ' + esc(c.nombre) + (c.premium ? ' <span class="pill oro">⭐ Premium</span>' : '') + '</h2>' +
+      '<div class="det-fila"><span>Visitas</span><b>' + c.visitas + '</b></div><div class="det-fila"><span>No vino</span><b>' + c.no_vino + '</b></div>' +
+      (c.ultima ? '<div class="det-fila"><span>Última visita</span><b>' + C.cuando(c.ultima) + '</b></div>' : '') +
+      (c.proxima ? '<div class="det-fila"><span>Próxima hora</span><b>' + C.cuando(c.proxima) + '</b></div>' : '') +
+      (c.email ? '<div class="det-fila"><span>Correo</span><b>' + esc(c.email) + '</b></div>' : '') +
+      (c.cumple ? '<div class="det-fila"><span>🎂 Cumpleaños</span><b>' + esc(c.cumple.slice(8) + '/' + c.cumple.slice(5, 7)) + '</b></div>' : '') +
+      (dueno() ? '<label>WhatsApp</label><input data-t inputmode="tel" value="' + esc(c.telefono || '') + '">' +
+        '<label>Notas <span class="opc">(solo las ve el equipo)</span></label><textarea data-notas maxlength="400" placeholder="Ej: Corte 2 al costado, le gusta la barba corta">' + esc(c.notas || '') + '</textarea>' +
+        '<label>Saldo a favor</label><input data-saldo type="number" min="0" value="' + (c.saldo || 0) + '">' +
+        '<label class="check"><input type="checkbox" data-bloq' + (c.bloqueado ? ' checked' : '') + '> Bloquear para reservar (ej. muchos "No vino")</label>' +
+        '<div class="btns"><button data-g>Guardar</button></div>' : (c.notas ? '<p class="muted">📝 ' + esc(c.notas) + '</p>' : '')) +
+      '<div class="btns"><button class="gris" data-chat>💬 Escribir</button><button class="gris" data-hora>📅 Agendar hora</button>' +
+      (c.telefono ? '<a class="btn wsp" target="_blank" rel="noopener" href="' + C.wa(c.telefono, 'Hola ' + c.nombre.split(' ')[0] + ' 👋') + '">WhatsApp</a>' : '') +
+      (dueno() ? '<button class="gris" data-clave>🔑 Restablecer clave</button>' : '') + '</div>');
+    if (h.q('[data-g]')) h.q('[data-g]').onclick = (ev) => C.accion(ev.target, async () => {
+      await K.rpc('guardar_cliente', { p_id: c.id, p: { telefono: h.q('[data-t]').value, notas: h.q('[data-notas]').value, saldo: +h.q('[data-saldo]').value || 0, bloqueado: h.q('[data-bloq]').checked } });
+      h.cerrar(); clientes = null; secClientes();
+    }, '✅ Guardado');
+    h.q('[data-chat]').onclick = () => { h.cerrar(); mostrar('chat'); Chat.abrir(c.id, { nombre: c.nombre, avatar: c.avatar, foto: c.foto, rol: 'client' }); };
+    h.q('[data-hora]').onclick = () => { h.cerrar(); nuevaHora(yo.id, C.hoy(), null).then(() => { const i = document.querySelector('[data-buscar]'); if (i) { i.value = c.nombre; i.dispatchEvent(new Event('input')); } }); };
+    if (h.q('[data-clave]')) h.q('[data-clave]').onclick = () => restablecer(c, h);
+  }
+
+  async function restablecer(p, hoja) {
+    if (!await C.confirmar('Se le pondrá una clave genérica nueva a ' + p.nombre + ' y te dejaremos el mensaje listo para enviársela. Al entrar, la podrá cambiar en su perfil.', { titulo: '🔑 Restablecer clave', si: 'Restablecer' })) return;
+    try {
+      const clave = K.claveNueva();
+      await K.restablecerClave(p.id, clave);
+      hoja && hoja.cerrar();
+      enviarAcceso({ nombre: p.nombre, email: p.email, telefono: p.telefono, clave, codigo: bar().codigo, barberia: bar().nombre, nuevo: false });
+    } catch (e) { C.toast('⚠️ ' + e.message, 4500); }
+  }
+
+  /* ----- Equipo ----- */
+  async function secEquipo() {
+    const z = seccion('💈 Mi equipo');
+    await cargarBarberia();
+    const lim = premium() ? 10 : 3;
+    z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + B.barberos.length + ' / ' + lim + ' barberos</b><div class="muted chico">Contándote a ti' + (premium() ? '' : ' · Premium: hasta 10') + '</div></div>' +
+      '<button id="bNuevoBar">+ Nuevo barbero</button></div></div><div class="card"><ul class="list">' + B.barberos.map((b) =>
+        '<li class="tap" data-b="' + b.id + '">' + C.avatar(b) + '<div class="grow"><b>' + esc(b.nombre) + (b.es_dueno ? ' <span class="pill">Dueño</span>' : '') + (b.activo ? '' : ' <span class="pill bad">inactivo</span>') + '</b>' +
+        '<div class="sub">' + (b.reservable ? '🟢 Agenda abierta' : '🔴 Agenda cerrada a clientes') + (b.descripcion ? ' · ' + esc(b.descripcion) : '') + '</div></div><span>›</span></li>').join('') + '</ul></div>' +
+      '<p class="muted chico">Cada barbero entra con su cuenta y ve solo el detalle de sus horas; las de los demás le aparecen como "Ocupado". Tú ves todo.</p>';
+    $('bNuevoBar').onclick = () => {
+      if (B.barberos.length >= lim) return premium() ? C.toast('Llegaste al máximo de barberos') : P.upsell('Hasta 10 barberos');
+      nuevaCuenta('barber', secEquipo);
+    };
+    z.querySelectorAll('[data-b]').forEach((li) => li.onclick = () => fichaBarbero(barbero(li.dataset.b)));
+  }
+
+  function fichaBarbero(b) {
+    const esYo = b.id === yo.id;
+    const propio = !!(b.horario && JSON.stringify(b.horario) !== JSON.stringify(bar().horario));
+    const h = C.hoja('<h2>' + C.avatar(b, 'sm') + ' ' + esc(b.nombre) + '</h2>' +
+      '<div id="ePerfil"><label>Nombre</label><input data-n maxlength="80" value="' + esc(b.nombre) + '">' +
+      '<label>Descripción <span class="opc">(la ven los clientes)</span></label><input data-d maxlength="200" value="' + esc(b.descripcion || '') + '">' +
+      '<div class="btns"><button class="gris small" data-foto>📷 Foto</button></div></div>' +
+      (!esYo ? '<label class="check"><input type="checkbox" data-act' + (b.activo ? ' checked' : '') + '> Activo (recibe reservas)</label>' : '') +
+      '<div id="eHorario"><label class="check"><input type="checkbox" data-hp' + (propio ? ' checked' : '') + '> Horario propio (si no, usa el de la barbería)</label><div data-hz class="' + (propio ? '' : 'hidden') + '"></div></div>' +
+      '<div class="btns"><button data-g>Guardar</button>' + (!esYo ? '<button class="gris" data-chat>💬 Escribir</button><button class="gris" data-clave>🔑 Restablecer clave</button>' : '') + '</div>');
+    let foto;
+    const hz = h.q('[data-hz]');
+    const leerH = editorHorario(hz, b.horario || bar().horario);
+    h.q('[data-hp]').onchange = (e) => hz.classList.toggle('hidden', !e.target.checked);
+    h.q('[data-foto]').onclick = async () => { foto = await C.elegirImagen(220, 0.75); if (foto) C.toast('📷 Foto lista, toca Guardar'); };
+    if (!premium() && !esYo) { P.bloquear(h.q('#ePerfil'), 'Editar el perfil de tus barberos'); }
+    if (!premium()) P.bloquear(h.q('#eHorario'), 'Horario propio por barbero');
+    h.q('[data-g]').onclick = (ev) => C.accion(ev.target, async () => {
+      const p = {};
+      if (h.q('[data-act]')) p.activo = h.q('[data-act]').checked;
+      if (premium() || esYo) { p.nombre = h.q('[data-n]').value; p.descripcion = h.q('[data-d]').value; if (foto) p.foto = foto; }
+      if (premium()) p.horario = h.q('[data-hp]').checked ? leerH() : null;
+      await K.rpc('guardar_barbero', { p_id: b.id, p });
+      h.cerrar(); await cargarBarberia(); secEquipo();
+    }, '✅ Guardado');
+    if (h.q('[data-chat]')) h.q('[data-chat]').onclick = () => { h.cerrar(); mostrar('chat'); Chat.abrir(b.id, { nombre: b.nombre, avatar: b.avatar, foto: b.foto, rol: 'barber' }); };
+    if (h.q('[data-clave]')) h.q('[data-clave]').onclick = () => restablecer({ id: b.id, nombre: b.nombre, telefono: b.telefono }, h);
+  }
+
+  // Editor de horario semanal (lunes a domingo): Abierto / A consultar / Cerrado, horas y colación.
+  function editorHorario(el, h) {
+    h = JSON.parse(JSON.stringify(h || []));
+    el.innerHTML = C.DIAS_LARGO.map((n, i) => {
+      const d = h[i] || { e: 'x', i: '10:00', f: '20:00' };
+      return '<div class="horario-dia" data-d="' + i + '"><div><b>' + n.slice(0, 3) + '</b><select data-e style="margin-top:4px">' +
+        '<option value="a"' + (d.e === 'a' ? ' selected' : '') + '>Abierto</option><option value="c"' + (d.e === 'c' ? ' selected' : '') + '>A consultar</option><option value="x"' + (d.e === 'x' ? ' selected' : '') + '>Cerrado</option></select></div>' +
+        '<div class="hs' + (d.e === 'x' ? ' cerrado' : '') + '"><input type="time" step="900" data-i value="' + (d.i || '10:00') + '" aria-label="Abre"><input type="time" step="900" data-f value="' + (d.f || '20:00') + '" aria-label="Cierra">' +
+        '<input type="time" step="900" data-ci value="' + (d.ci || '') + '" aria-label="Colación desde" placeholder="colación"><input type="time" step="900" data-cf value="' + (d.cf || '') + '" aria-label="Colación hasta"></div></div>';
+    }).join('') + '<p class="muted chico">Por día: abre · cierra · colación desde · hasta (deja la colación vacía si no hay).</p>' +
+      '<div class="btns"><button type="button" class="small gris" data-copiar>Copiar el lunes a lun–vie</button><button type="button" class="small gris" data-todos>Copiar el lunes a todos</button></div>';
+    el.querySelectorAll('[data-e]').forEach((s) => s.onchange = () => s.closest('.horario-dia').querySelector('.hs').classList.toggle('cerrado', s.value === 'x'));
+    const copiar = (hasta) => {
+      const l = el.querySelector('[data-d="0"]');
+      for (let i = 1; i < hasta; i++) {
+        const d = el.querySelector('[data-d="' + i + '"]');
+        ['[data-e]', '[data-i]', '[data-f]', '[data-ci]', '[data-cf]'].forEach((s) => { d.querySelector(s).value = l.querySelector(s).value; });
+        d.querySelector('.hs').classList.toggle('cerrado', d.querySelector('[data-e]').value === 'x');
+      }
+    };
+    el.querySelector('[data-copiar]').onclick = () => copiar(5);
+    el.querySelector('[data-todos]').onclick = () => copiar(7);
+    return () => [...el.querySelectorAll('.horario-dia')].map((d) => {
+      const o = { e: d.querySelector('[data-e]').value, i: d.querySelector('[data-i]').value || '10:00', f: d.querySelector('[data-f]').value || '20:00' };
+      const ci = d.querySelector('[data-ci]').value, cf = d.querySelector('[data-cf]').value;
+      if (ci && cf) { o.ci = ci; o.cf = cf; }
+      return o;
+    });
+  }
+
+  /* ----- Servicios ----- */
+  async function secServicios() {
+    const z = seccion('✂️ Servicios y precios');
+    await cargarBarberia();
+    const lim = premium() ? 100 : 8;
+    z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + B.servicios.length + ' / ' + (premium() ? '∞' : lim) + ' servicios</b><div class="muted chico">Los clientes los ven con precio y duración</div></div>' +
+      '<button id="bNuevoSer">+ Nuevo</button></div></div>' + (B.servicios.length ? B.servicios.map((s, i) =>
+        '<div class="serv" style="' + (s.visible ? '' : 'opacity:.55') + '"><span class="foto" style="' + C.fondo(s.foto) + '">' + (s.foto ? '' : '✂️') + '</span>' +
+        '<div class="grow"><b>' + esc(s.nombre) + (s.visible ? '' : ' <span class="pill">oculto</span>') + '</b><span class="sub muted">' + s.duracion + ' min' + (s.categoria ? ' · ' + esc(s.categoria) : '') +
+        (s.barberos && s.barberos.length ? ' · solo ' + s.barberos.map((id) => (barbero(id) || {}).nombre || '').join(', ') : '') + '</span></div>' +
+        '<div style="text-align:right"><div class="precio-s">' + C.plata(s.precio) + '</div><div class="orden"><button class="gris" data-up="' + i + '"' + (i ? '' : ' disabled') + '>↑</button> <button class="gris" data-ed="' + s.id + '">✏️</button></div></div></div>').join('')
+      : '<div class="card empty"><span class="ico">✂️</span>Agrega tu primer servicio: corte, barba, cejas…</div>');
+    $('bNuevoSer').onclick = () => {
+      if (B.servicios.length >= lim) return premium() ? C.toast('Máximo alcanzado') : P.upsell('Servicios ilimitados');
+      editarServicio(null);
+    };
+    z.querySelectorAll('[data-ed]').forEach((b) => b.onclick = () => editarServicio(servicio(b.dataset.ed)));
+    z.querySelectorAll('[data-up]').forEach((b) => b.onclick = async () => {
+      const i = +b.dataset.up, a = B.servicios[i - 1], c = B.servicios[i];
+      try {
+        await K.rpc('guardar_servicio', { p: Object.assign({}, c, { orden: i - 1, foto: undefined, barberos: c.barberos || [] }) });
+        await K.rpc('guardar_servicio', { p: Object.assign({}, a, { orden: i, foto: undefined, barberos: a.barberos || [] }) });
+      } catch (e) { C.toast('⚠️ ' + e.message); }
+      B.servicios.forEach((s, j) => { if (j !== i && j !== i - 1) K.rpc('guardar_servicio', { p: Object.assign({}, s, { orden: j, foto: undefined, barberos: s.barberos || [] }) }).catch(() => {}); });
+      secServicios();
+    });
+  }
+
+  function editarServicio(s) {
+    const durs = [15, 30, 45, 60, 90, 120];
+    const h = C.hoja('<h2>' + (s ? '✏️ Editar servicio' : '✂️ Nuevo servicio') + '</h2>' +
+      '<label>Nombre</label><input data-n maxlength="60" placeholder="Ej: Corte + barba" value="' + esc(s ? s.nombre : '') + '">' +
+      '<label>Precio</label><input data-p type="number" inputmode="numeric" min="0" placeholder="$" value="' + (s ? s.precio : '') + '">' +
+      '<label>Duración</label><div class="durs">' + durs.map((d) => '<button type="button" class="chip" data-dur="' + d + '">' + d + ' min</button>').join('') + '</div>' +
+      '<input data-d type="number" min="5" max="480" step="5" value="' + (s ? s.duracion : 30) + '" style="margin-top:8px">' +
+      '<details style="margin-top:12px"' + (s && (s.categoria || s.descripcion) ? ' open' : '') + '><summary class="muted">Opcional: categoría y descripción</summary>' +
+      '<label>Categoría</label><input data-c maxlength="30" placeholder="Ej: Cortes, Barba, Color" value="' + esc(s ? s.categoria || '' : '') + '">' +
+      '<label>Descripción</label><input data-desc maxlength="200" value="' + esc(s ? s.descripcion || '' : '') + '"></details>' +
+      '<label class="check"><input type="checkbox" data-v' + (!s || s.visible ? ' checked' : '') + '> Visible para los clientes</label>' +
+      '<div id="sPrem"><label>Foto ⭐</label><div class="btns" style="margin-top:0"><button type="button" class="gris small" data-foto>📷 ' + (s && s.foto ? 'Cambiar foto' : 'Poner foto') + '</button></div>' +
+      (B.barberos.length > 1 ? '<label>¿Quién lo hace? ⭐ <span class="opc">(nada marcado = todos)</span></label>' + B.barberos.map((b) => '<label class="check"><input type="checkbox" data-bb="' + b.id + '"' + (s && s.barberos && s.barberos.includes(b.id) ? ' checked' : '') + '> ' + esc(b.nombre) + '</label>').join('') : '') + '</div>' +
+      '<div class="btns"><button class="full" data-g>Guardar</button>' + (s ? '<button class="danger" data-del>Borrar</button>' : '') + '</div>');
+    let foto;
+    h.qa('[data-dur]').forEach((b) => b.onclick = () => { h.q('[data-d]').value = b.dataset.dur; });
+    if (!premium()) P.bloquear(h.q('#sPrem'), 'Fotos y servicios por barbero');
+    h.q('[data-foto]').onclick = async () => { foto = await C.elegirImagen(500, 0.7); if (foto) C.toast('📷 Foto lista'); };
+    h.q('[data-g]').onclick = (ev) => C.accion(ev.target, async () => {
+      const p = { id: s ? s.id : '', nombre: h.q('[data-n]').value, precio: +h.q('[data-p]').value || 0, duracion: +h.q('[data-d]').value,
+        categoria: h.q('[data-c]').value, descripcion: h.q('[data-desc]').value, visible: h.q('[data-v]').checked, orden: s ? s.orden : null,
+        barberos: premium() ? [...h.qa('[data-bb]:checked')].map((x) => x.dataset.bb) : [] };
+      if (foto) p.foto = foto;
+      await K.rpc('guardar_servicio', { p });
+      h.cerrar(); secServicios();
+    }, '✅ Servicio guardado');
+    if (h.q('[data-del]')) h.q('[data-del]').onclick = async () => {
+      if (!await C.confirmar('¿Borrar "' + s.nombre + '"? Las horas ya agendadas no cambian.', { si: 'Borrar', peligro: true })) return;
+      await K.rpc('borrar_servicio', { p_id: s.id }); h.cerrar(); secServicios();
+    };
+  }
+
+  /* ----- Ofertas ----- */
+  async function secOfertas() {
+    const z = seccion('🏷️ Ofertas');
+    await cargarBarberia();
+    const activas = B.ofertas.filter((o) => o.activa && (!o.hasta || o.hasta >= C.hoy())).length;
+    z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + activas + ' / ' + (premium() ? '∞' : 1) + ' activas</b><div class="muted chico">Al publicar, les llega un aviso a tus clientes 🔔</div></div>' +
+      '<button id="bNuevaOf">+ Nueva</button></div></div>' + (B.ofertas.length ? B.ofertas.map((o) =>
+        '<div class="card ' + (o.vip ? 'oro-marco' : '') + '"><h2><span class="grow">' + (o.vip ? '⭐ ' : '') + esc(o.titulo) + '</span>' + (o.activa ? '<span class="pill ok">activa</span>' : '<span class="pill">pausada</span>') + '</h2>' +
+        (o.detalle ? '<p style="margin:0;white-space:pre-line">' + esc(o.detalle) + '</p>' : '') + (o.precio ? '<p><b>' + esc(o.precio) + '</b></p>' : '') +
+        (o.hasta ? '<p class="muted chico">Hasta el ' + esc(o.hasta) + '</p>' : '') + '<div class="btns"><button class="small gris" data-ed="' + o.id + '">✏️ Editar</button></div></div>').join('')
+      : '<div class="card empty"><span class="ico">🏷️</span>Crea una oferta: "Corte + barba a $12.000 los martes".</div>');
+    $('bNuevaOf').onclick = () => { if (!premium() && activas >= 1) return P.upsell('Ofertas ilimitadas'); editarOferta(null); };
+    z.querySelectorAll('[data-ed]').forEach((b) => b.onclick = () => editarOferta(B.ofertas.find((o) => o.id === b.dataset.ed)));
+  }
+  function editarOferta(o) {
+    const h = C.hoja('<h2>' + (o ? '✏️ Editar oferta' : '🏷️ Nueva oferta') + '</h2>' +
+      '<label>Título</label><input data-t maxlength="80" placeholder="Ej: Martes de barba" value="' + esc(o ? o.titulo : '') + '">' +
+      '<label>Detalle <span class="opc">(opcional)</span></label><textarea data-d maxlength="400">' + esc(o ? o.detalle || '' : '') + '</textarea>' +
+      '<div class="row"><div><label>Precio <span class="opc">(texto)</span></label><input data-p maxlength="30" placeholder="$12.000" value="' + esc(o ? o.precio || '' : '') + '"></div>' +
+      '<div><label>Válida hasta</label><input type="date" data-h value="' + esc(o ? o.hasta || '' : '') + '"></div></div>' +
+      '<div class="btns"><button type="button" class="gris small" data-img>🖼️ Imagen</button></div>' +
+      '<label class="check" id="oVip"><input type="checkbox" data-vip' + (o && o.vip ? ' checked' : '') + '> ⭐ VIP: solo para clientes Premium</label>' +
+      (o ? '<label class="check"><input type="checkbox" data-act' + (o.activa ? ' checked' : '') + '> Activa</label>' : '<label class="check"><input type="checkbox" data-av checked> Avisar a mis clientes ahora 🔔</label>') +
+      '<div class="btns"><button class="full" data-g>' + (o ? 'Guardar' : 'Publicar') + '</button>' + (o ? '<button class="danger" data-del>Borrar</button>' : '') + '</div>');
+    let img;
+    if (!premium()) P.bloquear(h.q('#oVip'), 'Ofertas VIP');
+    h.q('[data-img]').onclick = async () => { img = await C.elegirImagen(700, 0.7); if (img) C.toast('🖼️ Imagen lista'); };
+    h.q('[data-g]').onclick = (ev) => C.accion(ev.target, async () => {
+      const p = { id: o ? o.id : '', titulo: h.q('[data-t]').value, detalle: h.q('[data-d]').value, precio: h.q('[data-p]').value, hasta: h.q('[data-h]').value,
+        vip: premium() && h.q('[data-vip]').checked };
+      if (img) p.imagen = img;
+      if (h.q('[data-act]')) p.activa = h.q('[data-act]').checked;
+      await K.rpc('guardar_oferta', { p, p_avisar: !!(h.q('[data-av]') && h.q('[data-av]').checked) });
+      K.despertarEnvios();
+      h.cerrar(); secOfertas();
+    }, o ? '✅ Guardada' : '📣 Oferta publicada');
+    if (h.q('[data-del]')) h.q('[data-del]').onclick = async () => { if (await C.confirmar('¿Borrar la oferta?', { si: 'Borrar', peligro: true })) { await K.rpc('borrar_oferta', { p_id: o.id }); h.cerrar(); secOfertas(); } };
+  }
+
+  /* ----- Estadísticas ----- */
+  let estRango = 'mes';
+  async function secEstadisticas() {
+    const z = seccion(dueno() ? '📊 Estadísticas' : '📊 Mis estadísticas');
+    if (!premium()) {
+      z.innerHTML = '<div class="card plata" id="upEst"><h2>📊 Estadísticas</h2><p class="muted">Ventas y cortes por barbero, servicios más pedidos, mejores clientes, horas y días con más movimiento.</p>' +
+        '<div class="barras">' + ['10:00', '12:00', '18:00', '19:00'].map((h, i) => '<div class="b"><span>' + h + '</span><span class="t"><i style="width:' + [40, 65, 90, 75][i] + '%"></i></span><span>—</span></div>').join('') + '</div></div>';
+      $('upEst').onclick = () => P.upsell('Estadísticas');
+      return;
+    }
+    const f = C.hoy();
+    const [y, m] = f.split('-').map(Number);
+    const ant = new Date(Date.UTC(y, m - 2, 1));
+    const R = { mes: [f.slice(0, 8) + '01', f], mesant: [ant.getUTCFullYear() + '-' + C.pad(ant.getUTCMonth() + 1) + '-01', C.sumarDias(f.slice(0, 8) + '01', -1)],
+      d30: [C.sumarDias(f, -29), f], anio: [f.slice(0, 4) + '-01-01', f] };
+    z.innerHTML = '<div class="seg" style="margin-bottom:12px"><button data-r="mes">Este mes</button><button data-r="mesant">Mes pasado</button><button data-r="d30">30 días</button><button data-r="anio">Año</button></div><div id="estZona"><p class="muted">Cargando…</p></div>';
+    z.querySelectorAll('[data-r]').forEach((b) => { b.classList.toggle('on', b.dataset.r === estRango); b.onclick = () => { estRango = b.dataset.r; secEstadisticas(); }; });
+    let e;
+    try { e = await K.rpc('estadisticas', { p_desde: R[estRango][0], p_hasta: R[estRango][1] }); } catch (err) { $('estZona').innerHTML = '<p class="err">' + esc(err.message) + '</p>'; return; }
+    const tot = (k) => e.por_barbero.reduce((t, b) => t + (+b[k] || 0), 0);
+    const barras = (obj, etq) => {
+      const ent = Object.entries(obj || {}).sort((a, b) => +a[0] - +b[0]);
+      const max = Math.max(1, ...ent.map((x) => x[1]));
+      return ent.length ? '<div class="barras">' + ent.map(([k, v]) => '<div class="b"><span>' + etq(k) + '</span><span class="t"><i style="width:' + Math.round(v / max * 100) + '%"></i></span><span>' + v + '</span></div>').join('') + '</div>' : '<p class="muted">Sin datos aún.</p>';
+    };
+    const com = bar().comision;
+    $('estZona').innerHTML = '<div class="stats"><div class="card"><small>Ventas</small><b>' + C.plata(tot('ventas')) + '</b></div><div class="card"><small>Atendidas</small><b>' + tot('atendidas') + '</b></div>' +
+      '<div class="card"><small>No vino</small><b style="color:var(--bad)">' + tot('no_vino') + '</b></div><div class="card"><small>Abonos</small><b>' + C.plata(tot('abonos')) + '</b></div></div>' +
+      '<div class="card"><h2>💈 Por barbero</h2><div class="scroll-x"><table class="tabla"><tr><th>Barbero</th><th class="n">Cortes</th><th class="n">No vino</th><th class="n">Ventas</th>' + (dueno() ? '<th class="n">Su parte</th>' : '') + '</tr>' +
+      e.por_barbero.map((b) => '<tr><td>' + esc(b.nombre) + '</td><td class="n">' + b.atendidas + '</td><td class="n">' + b.no_vino + '</td><td class="n">' + C.plata(b.ventas) + '</td>' +
+        (dueno() ? '<td class="n">' + C.plata(b.id === bar().owner_id ? b.ventas : Math.round((b.ventas - b.propinas) * com / 100) + +b.propinas) + '</td>' : '') + '</tr>').join('') + '</table></div></div>' +
+      '<div class="card"><h2>✂️ Servicios más pedidos</h2>' + (e.servicios.length ? '<div class="barras">' + e.servicios.map((s) => '<div class="b"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.nombre) + '</span><span class="t"><i style="width:' + Math.round(s.veces / e.servicios[0].veces * 100) + '%"></i></span><span>' + s.veces + '</span></div>').join('') + '</div>' : '<p class="muted">Sin datos aún.</p>') + '</div>' +
+      '<div class="card"><h2>🏆 Mejores clientes</h2>' + (e.clientes.length ? '<ul class="list">' + e.clientes.map((c, i) => '<li><b style="width:22px">' + (i + 1) + '</b><span class="grow">' + esc(c.nombre) + '</span><span class="muted">' + c.visitas + ' visitas · ' + C.plata(c.total) + '</span></li>').join('') + '</ul>' : '<p class="muted">Sin datos aún.</p>') + '</div>' +
+      '<div class="card"><h2>🕐 Horas más pedidas</h2>' + barras(e.horas, (k) => C.pad(k) + ':00') + '</div>' +
+      '<div class="card"><h2>📆 Días más pedidos</h2>' + barras(e.dias, (k) => C.DIAS[k - 1]) + '</div>';
+  }
+
+  /* ----- Ajustes ----- */
+  async function secAjustes() {
+    const z = seccion('⚙️ Ajustes de la barbería');
+    yo = await K.refrescar() || yo;
+    const b = bar();
+    z.innerHTML =
+      '<div class="card"><h2>🏪 Datos</h2><label>Nombre</label><input data-k="nombre" maxlength="80" value="' + esc(b.nombre) + '">' +
+      '<label>Dirección <span class="opc">(opcional)</span></label><input data-k="direccion" maxlength="160" value="' + esc(b.direccion || '') + '">' +
+      '<label>WhatsApp de la barbería <span class="opc">(aquí llegan los "olvidé mi clave")</span></label><input data-k="whatsapp" inputmode="tel" value="' + esc(b.whatsapp || '') + '">' +
+      '<label>Mensaje de bienvenida <span class="opc">(opcional)</span></label><input data-k="bienvenida" maxlength="300" placeholder="Ej: ¡Bienvenido a la familia! 💈" value="' + esc(b.bienvenida || '') + '">' +
+      '<label>Logo</label><div class="flex"><span class="av lg" id="aLogo" style="' + C.fondo(b.logo) + '">' + (b.logo ? '' : '💈') + '</span><button class="gris small" id="bLogo">📷 Cambiar logo</button>' +
+      (b.logo ? '<button class="gris small" id="bSinLogo">Quitar</button>' : '') + '</div></div>' +
+      '<div class="card"><h2>💳 Abono para reservar</h2><p class="muted chico" style="margin-top:0">Monto fijo para cualquier servicio. Va directo a ti y se descuenta del total.</p>' +
+      '<label>Monto del abono</label><input data-k="abono" type="number" inputmode="numeric" min="0" max="100000" value="' + b.abono + '">' +
+      '<label>Link de pago <span class="opc">(Mercado Pago u otro)</span></label><input data-k="link_pago" placeholder="https://…" value="' + esc(b.link_pago || '') + '">' +
+      '<label>Datos de transferencia</label><textarea data-k="datos_transferencia" maxlength="400" placeholder="Nombre, RUT, banco, tipo y número de cuenta, correo">' + esc(b.datos_transferencia || '') + '</textarea></div>' +
+      '<div class="card"><h2>🕐 Horario de la semana</h2><div id="edH"></div></div>' +
+      '<div class="card"><h2>⛔ Días bloqueados</h2><div id="lBloq"><p class="muted">Cargando…</p></div><div class="btns"><button class="gris" id="bBloq">+ Bloquear fechas</button></div></div>' +
+      '<div class="card" id="cPrem"><h2>⭐ Premium</h2><label>Color de la app</label><div class="swatches" id="sw"></div>' +
+      '<label>Portada <span class="opc">(foto grande en el inicio de tus clientes)</span></label><div class="btns" style="margin-top:0"><button class="gris small" id="bPortada">🖼️ ' + (b.portada ? 'Cambiar' : 'Subir') + ' portada</button>' + (b.portada ? '<button class="gris small" id="bSinPortada">Quitar</button>' : '') + '</div>' +
+      '<div class="row"><div><label>Comisión barberos (%)</label><input data-k="comision" type="number" min="0" max="100" value="' + b.comision + '"></div>' +
+      '<div><label>Sellos para corte gratis</label><input data-k="sellos_meta" type="number" min="3" max="30" value="' + b.sellos_meta + '"></div></div></div>' +
+      '<div class="btns"><button class="grande full" id="bGuardarAj">Guardar ajustes</button></div>';
+    const leerH = editorHorario($('edH'), b.horario);
+    let logo, portada, color = b.color || '';
+    $('bLogo').onclick = async () => { const f = await C.elegirImagen(160, 0.8); if (!f) return; logo = f; $('aLogo').style.cssText = C.fondo(f); $('aLogo').textContent = ''; };
+    if ($('bSinLogo')) $('bSinLogo').onclick = () => { logo = ''; $('aLogo').style.cssText = ''; $('aLogo').textContent = '💈'; };
+    $('sw').innerHTML = C.COLORES.map(([n, c]) => '<button type="button" title="' + n + '" style="background:' + c + '" class="' + (c === color ? 'on' : '') + '" data-c="' + c + '"></button>').join('');
+    $('sw').querySelectorAll('button').forEach((x) => x.onclick = () => { color = x.dataset.c; $('sw').querySelectorAll('button').forEach((y) => y.classList.toggle('on', y === x)); C.aplicarColor(color); });
+    $('bPortada').onclick = async () => { const f = await C.elegirImagen(1100, 0.65); if (f) { portada = f; C.toast('🖼️ Portada lista, toca Guardar'); } };
+    if ($('bSinPortada')) $('bSinPortada').onclick = () => { portada = ''; C.toast('Portada quitada, toca Guardar'); };
+    if (!premium()) P.bloquear($('cPrem'), 'Colores, portada, comisiones y sellos');
+    $('bGuardarAj').onclick = (ev) => C.accion(ev.target, async () => {
+      const p = { horario: leerH() };
+      z.querySelectorAll('[data-k]').forEach((i) => {
+        if (!premium() && (i.dataset.k === 'comision' || i.dataset.k === 'sellos_meta')) return;
+        p[i.dataset.k] = i.type === 'number' ? (+i.value || 0) : i.value;
+      });
+      if (logo !== undefined) p.logo = logo;
+      if (premium()) { p.color = color; if (portada !== undefined) p.portada = portada; }
+      yo = await K.rpc('guardar_barberia', { p });
+      K.aplicarMarca(yo);
+      await cargarBarberia();
+    }, '✅ Ajustes guardados');
+    $('bBloq').onclick = () => nuevoBloqueo(null);
+    try {
+      const d = await K.rpc('ocupacion', { p_desde: C.hoy(), p_hasta: C.sumarDias(C.hoy(), 365) });
+      $('lBloq').innerHTML = d.bloqueos.length ? '<ul class="list">' + d.bloqueos.map((k) => '<li><div class="grow"><b>' + esc(k.motivo || 'Bloqueado') + '</b><div class="sub">' + C.cuando(k.desde) + ' → ' + C.cuando(k.hasta) +
+        ' · ' + esc(k.barbero_id ? (barbero(k.barbero_id) || {}).nombre || '' : 'toda la barbería') + '</div></div><button class="small danger" data-del="' + k.id + '">Quitar</button></li>').join('') + '</ul>' : '<p class="muted">No hay fechas bloqueadas.</p>';
+      $('lBloq').querySelectorAll('[data-del]').forEach((x) => x.onclick = async () => { await borrarBloqueo(x.dataset.del); secAjustes(); });
+    } catch (e) { $('lBloq').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
+  }
+
+  /* ----- Enlace y QR para clientes ----- */
+  function enlaceClientes() {
+    const link = C.raiz() + '?b=' + bar().codigo;
+    const z = vistaActual === 'mas' ? seccion('🔗 Enlace y QR') : null;
+    const html = '<div class="card centro"><p>Comparte este enlace o el QR con tus clientes. Entran con la cuenta que tú les creas.</p>' +
+      '<img class="qr-img" src="' + C.qr(link, 440) + '" alt="QR"><input readonly value="' + esc(link) + '" style="text-align:center">' +
+      '<div class="btns" style="justify-content:center"><button data-c>📋 Copiar</button><a class="btn wsp" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent('💈 Reserva tu hora en ' + bar().nombre + ': ' + link) + '">💬 Compartir</a></div></div>';
+    if (z) { z.innerHTML = html; z.querySelector('[data-c]').onclick = () => C.copiar(link); }
+    else { const h = C.hoja('<h2>🔗 Enlace para clientes</h2>' + html); h.q('[data-c]').onclick = () => C.copiar(link); }
+  }
+
+  const pasos = () => dueno() ? [
+    ['💈', '¡Bienvenido a tu panel!', 'Aquí administras todo: agenda, clientes, equipo, servicios, precios y tu caja.'],
+    ['✂️', 'Arma tu catálogo', 'En Más → Servicios agrega tus cortes con precio y duración. En Ajustes pon tu horario, el abono y tus datos de pago.'],
+    ['👥', 'Crea a tus clientes', 'En Más → Clientes creas su cuenta y se la envías por WhatsApp con un toque. También puedes sumar barberos.'],
+    ['🔔', 'Confirma las reservas', 'Cuando alguien reserva te llega un aviso. Revisa el comprobante y toca Confirmar: el cliente sabe al tiro que lo viste.']
+  ] : [
+    ['💈', '¡Bienvenido!', 'Aquí ves tu agenda, confirmas tus horas y anotas tus cortes en la caja.'],
+    ['🔔', 'Confirma las reservas', 'Cuando un cliente reserva contigo te llega un aviso. Revisa el comprobante y toca Confirmar.'],
+    ['💵', 'Tu caja', 'Las horas que marcas como Atendida se anotan solas. También puedes anotar cortes sin hora.']
+  ];
+
+  // Arranque
+  try { await cargarBarberia(); } catch (e) { C.toast('⚠️ ' + e.message, 5000); }
+  ruta();
+  P.tour(pasos());
+  K.revisarActualizacion();
+  K.ajustes();
+})();

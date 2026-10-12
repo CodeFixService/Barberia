@@ -280,7 +280,7 @@ insert into public.app_settings (key, value) values ('precio_premium', '4900') o
 
 create or replace function public.ajustes_publicos() returns jsonb
 language sql stable security definer set search_path = '' as $$
-  select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) from public.app_settings
+  select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) from public.app_settings where key <> 'url_enviar'
 $$;
 
 create or replace function public.admin_ajuste(p_key text, p_value text) returns void
@@ -471,6 +471,17 @@ begin
     'avisos', (select count(*) from public.avisos where para = me.id and visto_at is null and tipo <> 'chat'),
     'mensajes', (select count(*) from public.messages where recipient = me.id and read_at is null),
     'pendientes', pend);
+end $$;
+
+-- Aviso de prueba a mí mismo (para revisar que el push llegue a este celular).
+create or replace function public.aviso_prueba() returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then raise exception 'Inicia sesión primero'; end if;
+  if (select count(*) from public.avisos where para = auth.uid() and titulo = '🔔 Prueba' and created_at > now() - interval '1 hour') >= 5 then
+    raise exception 'Máximo 5 pruebas por hora';
+  end if;
+  perform public.avisar(null, auth.uid(), 'aviso', '🔔 Prueba', 'Si ves esto, las notificaciones funcionan ✅', 'avisos');
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -882,6 +893,9 @@ do $$ begin
     where (estado in ('esperando_abono', 'por_aprobar', 'agendada', 'confirmada'));
 exception when duplicate_object or duplicate_table then null; end $$;
 
+create or replace function public.pesos(n int) returns text
+language sql immutable as $$ select '$' || replace(to_char(coalesce(n, 0), 'FM999,999,999'), ',', '.') $$;
+
 create or replace function public.fecha_txt(t timestamptz) returns text
 language sql stable as $$
   select (array['lun','mar','mié','jue','vie','sáb','dom'])[extract(isodow from t at time zone public.tz())::int]
@@ -1191,7 +1205,7 @@ begin
     expira_at = case when consultar then least(now() + interval '12 hours', inicio - interval '1 hour') end
   where id = r.id returning * into r;
   insert into public.messages (sender, recipient, body, imagen, reserva_id, sistema)
-  values (me.id, r.barbero_id, '🧾 Comprobante de abono ($' || r.abono || ') · ' || public.fecha_txt(r.inicio), p_comprobante, r.id, true);
+  values (me.id, r.barbero_id, '🧾 Comprobante de abono (' || public.pesos(r.abono) || ') · ' || public.fecha_txt(r.inicio), p_comprobante, r.id, true);
   perform public.notificar_reserva(r);
   return to_jsonb(r) - 'comprobante';
 end $$;

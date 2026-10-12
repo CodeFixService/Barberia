@@ -1,4 +1,4 @@
-# Barbería — Requisitos (v1.0 · aprobada, lista para programar)
+# Barbería — Requisitos (v1.0 · aprobada e implementada en la app v1.0)
 
 Pedido por Josué (administrador general · CodeFix). Se programa la app completa de una vez cuando esto esté aprobado.
 
