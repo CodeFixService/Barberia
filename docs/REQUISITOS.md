@@ -1,4 +1,4 @@
-# Barbería — Requisitos (v0.5 · aprobada para programar)
+# Barbería — Requisitos (v1.0 · aprobada, lista para programar)
 
 Pedido por Josué (administrador general · CodeFix). Se programa la app completa de una vez cuando esto esté aprobado.
 
@@ -16,8 +16,13 @@ hora libre, abona y su barbero confirma. Cada barbero anota sus cortes en una **
 - PWA publicada desde `CodeFixService/Barberia`. **Supabase en cuenta nueva** (la crea Josué). Reglas en el servidor.
 - **Todo por notificaciones push + campanita dentro de la app. Nada por correo** (sin Gmail). WhatsApp solo para enviar
   accesos y keys con el mensaje ya escrito (`wa.me`).
-- Sin correo, **la contraseña olvidada la restablece quien creó la cuenta** (dueño → cliente/barbero, Josué → barbería)
-  y se envía por WhatsApp.
+- **Contraseña olvidada (sin correo):** en el inicio de sesión hay un botón **"🔑 ¿Olvidaste tu contraseña?"** que abre
+  WhatsApp con la barbería: *"Hola, olvidé mi contraseña de la app"*. El dueño, desde su panel (ficha del cliente →
+  **Cambiar contraseña**), le pone una nueva al tiro, sin pedirle nada, y se la envía por WhatsApp con un toque.
+  Los barberos se la piden al dueño y las barberías a Josué, igual.
+  - Para saber a qué barbería escribir sin haber iniciado sesión: el enlace de acceso que se envía al crear la cuenta
+    lleva el código de la barbería, y el celular recuerda la última barbería usada (logo y WhatsApp en el inicio de sesión).
+    Si no hay ninguna guardada, el botón escribe a Josué.
 - Se reutiliza de Aplicaciones: sesión, cuentas por invitación, Free/Premium con aprobación, "Ya pagué", chat con límite de 3,
   avisos, logo, temas, botón **Actualizar**, uso del servidor, y la Caja (adaptada a cortes).
 
@@ -257,7 +262,8 @@ Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; 
 5. Caja, chat, perfil, ofertas, Premium, prueba y cobros.
 6. Pruebas (1 barbería, 2 barberos, 3 clientes) y guía `docs/CONFIGURAR.md`.
 
-**Josué:** crear la cuenta y el proyecto Supabase **Barberia**; enviar la clave **anon public** cuando la guía lo pida.
+**Servidor:** proyecto Supabase creado ✅ — `https://gxlabxuttnxvzkucckef.supabase.co`.
+**Falta de Josué:** la clave **anon public** (Project Settings → API Keys → Legacy API Keys; empieza con `eyJ`). Nunca la service_role.
 
 ## 16. Decisiones cerradas (v0.4)
 - Abono solo con **link de pago o transferencia**. Sin efectivo para agendar.
@@ -267,3 +273,5 @@ Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; 
 - Barberos creados por el dueño: versión tradicional (sus horas, su caja, sus chats).
 - **Solo push + campanita** (sin correo), con **estado Visto** en avisos y chats, en ambas direcciones.
 - Regla de 3 mensajes: cliente → barbero y barbería → Josué; el que responde escribe sin límite.
+- Cliente Premium: **mensajes sin límite**.
+- Contraseña olvidada: botón en el inicio de sesión → WhatsApp a su barbería → el dueño la cambia desde su panel.
