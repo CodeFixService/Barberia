@@ -191,7 +191,7 @@ select pg_temp.como('ana@test.cl');
 select public.enviar_mensaje(prueba.id('pedro@test.cl'), 'hola 1');
 select public.enviar_mensaje(prueba.id('pedro@test.cl'), 'hola 2');
 select public.enviar_mensaje(prueba.id('pedro@test.cl'), 'hola 3');
-select pg_temp.debe_fallar($$select public.enviar_mensaje(prueba.id('pedro@test.cl'), 'hola 4')$$, '3 mensajes');
+select pg_temp.debe_fallar($$select public.enviar_mensaje(prueba.id('pedro@test.cl'), 'hola 4')$$, 'mensajes seguidos');
 select pg_temp.debe_fallar($$select public.enviar_mensaje(prueba.id('beto@test.cl'), 'hola')$$, 'No puedes');
 select pg_temp.debe_fallar($$select public.enviar_mensaje(prueba.id('juanjosuecastilloloyola@gmail.com'), 'hola')$$, 'No puedes');
 reset role;
@@ -203,7 +203,7 @@ select pg_temp.ok(prueba.si($q$(select count(*) = 4 from public.messages where r
 select public.enviar_mensaje(prueba.id('ana@test.cl'), 'r' || g) from generate_series(1, 5) g;
 select pg_temp.ok(public.chat_restantes(prueba.id('ana@test.cl')) is null, 'barbero → cliente: sin límite');
 select public.enviar_mensaje(prueba.id('b2@test.cl'), 'x' || g) from generate_series(1, 3) g;
-select pg_temp.debe_fallar($$select public.enviar_mensaje(prueba.id('b2@test.cl'), 'x4')$$, '3 mensajes');
+select pg_temp.debe_fallar($$select public.enviar_mensaje(prueba.id('b2@test.cl'), 'x4')$$, 'mensajes seguidos');
 reset role;
 select pg_temp.como('ana@test.cl');
 select pg_temp.ok(public.chat_restantes(prueba.id('pedro@test.cl')) = 3, 'cuando le contestan, vuelve a tener 3');
@@ -300,6 +300,32 @@ select pg_temp.ok(jsonb_array_length(public.mis_avisos()) = 0, 'la campanita que
 reset role;
 select pg_temp.ok(prueba.si($q$(select count(*) > 0 from public.avisos where para = prueba.id('ana@test.cl') and oculto and visto_at is not null)$q$), 'los avisos quedan ocultos y vistos (quien los envió conserva el ✓✓)');
 select pg_temp.ok(prueba.si($q$(select last_seen > now() - interval '1 minute' from public.profiles where email = 'ana@test.cl')$q$), 'la conexión se actualiza mientras la app está abierta');
+
+-- 16. v1.4: dos links de pago y planes editables
+select pg_temp.como('dueno@test.cl');
+select public.guardar_barberia('{"pagos":{"activo":1,"p1":{"monto":4000,"link":"https://mpago.la/a"},"p2":{"monto":8000,"link":"https://mpago.la/b"}}}');
+select pg_temp.ok(prueba.si($q$(select abono = 4000 and link_pago = 'https://mpago.la/a' from public.barberias limit 1)$q$), 'link 1 activo: abono 4000');
+select public.guardar_barberia('{"pagos":{"activo":2,"p1":{"monto":4000,"link":"https://mpago.la/a"},"p2":{"monto":8000,"link":"https://mpago.la/b"}}}');
+select pg_temp.ok(prueba.si($q$(select abono = 8000 and link_pago = 'https://mpago.la/b' and pago1_link = 'https://mpago.la/a' from public.barberias limit 1)$q$), 'activar el link 2 cambia abono y link (el 1 queda guardado)');
+select pg_temp.debe_fallar($$select public.guardar_barberia('{"pagos":{"activo":2,"p1":{"monto":4000},"p2":{"monto":"","link":""}}}')$$, 'monto del link 2');
+select pg_temp.debe_fallar($$select public.guardar_barberia('{"pagos":{"activo":1,"p1":{"monto":4000,"link":"http://x"}}}')$$, 'https');
+select pg_temp.ok((public.mi_cuenta() -> 'barberia' -> 'pagos' ->> 'activo') = '2', 'el dueño ve sus dos links');
+reset role;
+select pg_temp.como('ana@test.cl');
+select pg_temp.ok(coalesce(jsonb_typeof(public.mi_cuenta() -> 'barberia' -> 'pagos'), 'null') = 'null' and (public.mi_cuenta() -> 'barberia' ->> 'abono')::int = 8000, 'el cliente ve solo el abono y link activos');
+select pg_temp.debe_fallar($$select public.admin_guardar_planes('{}')$$, 'Solo el administrador');
+reset role;
+select pg_temp.como('juanjosuecastilloloyola@gmail.com');
+select public.admin_guardar_planes('{"barberia":{"clientes":{"free":2,"premium":600},"precio":{"free":0,"premium":9900}},"cliente":{"precio":{"free":0,"premium":2990},"mensajes":{"free":5,"premium":0}}}');
+select pg_temp.ok((public.ajustes_publicos() -> 'planes' -> 'barberia' -> 'clientes' ->> 'free')::int = 2, 'el admin cambia los límites');
+select pg_temp.ok((public.admin_crear_key('cliente', 'X') ->> 'precio')::int = 2990 and (public.admin_crear_key('barberia', 'Y') ->> 'precio')::int = 9900, 'cada plan con su precio');
+select pg_temp.debe_fallar($$select public.admin_guardar_planes('{"cliente":{"dias":{"free":0,"premium":45}}}')$$, 'al menos 1');
+reset role;
+update public.profiles set plan = 'free', premium_until = null where email = 'dueno@test.cl';
+select pg_temp.debe_fallar($$select pg_temp.crear('dueno@test.cl', 'nuevo@test.cl', 'Nuevo', 'client')$$, 'máximo de 2 clientes');
+select pg_temp.como('beto@test.cl');
+select pg_temp.ok(public.chat_restantes(prueba.id('pedro@test.cl')) <= 5, 'mensajes del cliente Free según el plan');
+reset role;
 
 \o
 \echo '✅ TODAS LAS PRUEBAS PASARON'

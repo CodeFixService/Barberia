@@ -10,7 +10,7 @@
   C.marca();
   let barberias = [];
   let ajustes = await K.ajustes();
-  const precio = () => +(ajustes.precio_premium || 4900);
+  const precio = (rol) => K.plan(rol === 'client' || rol === 'cliente' ? 'cliente' : 'barberia', 'precio', true);
 
   /* ---------- Navegación ---------- */
   let vistaActual = 'resumen';
@@ -56,8 +56,9 @@
     if (b.fin_de_semana >= 3) r.push(['📅', 'Le piden harto el fin de semana (' + b.fin_de_semana + ' solicitudes).', 'Tip 💡: tus clientes están pidiendo horas el fin de semana. Si puedes, abre el sábado en Ajustes → Horario y asegura esas ventas.']);
     if (!b.ofertas) r.push(['🏷️', 'No tiene ofertas activas.', 'Tip 💡: publica una oferta (ej. "Martes de barba a $X"). A tus clientes les llega un aviso al tiro y suben las reservas en días flojos.']);
     if (b.ventas_ant && b.ventas < b.ventas_ant * 0.8) r.push(['📉', 'Ventas ' + Math.round((1 - b.ventas / b.ventas_ant) * 100) + '% bajo el mes pasado.', 'Hola 👋 Vi que este mes vas un poco más lento. ¿Te ayudo a armar una oferta para tus clientes?']);
-    if (!b.premium && b.clientes >= 32) r.push(['💎', 'Cerca del límite Free (' + b.clientes + '/40 clientes).', 'Hola 👋 Estás cerca del máximo de 40 clientes del plan Free. Con Premium puedes tener hasta 500, más recordatorios automáticos y estadísticas. ¿Te lo activo?']);
-    if (!b.premium && b.barberos >= 3) r.push(['💈', 'Tiene el máximo de barberos Free (3).', 'Hola 👋 Ya tienes 3 barberos, el máximo Free. Con Premium puedes sumar hasta 10 y ver la caja y estadísticas de cada uno.']);
+    const cf = K.limite('clientes', false), cp = K.limite('clientes', true), bf = K.limite('barberos', false), bp = K.limite('barberos', true);
+    if (!b.premium && b.clientes >= Math.ceil(cf * 0.8)) r.push(['💎', 'Cerca del límite Free (' + b.clientes + '/' + cf + ' clientes).', 'Hola 👋 Estás cerca del máximo de ' + cf + ' clientes del plan Free. Con Premium puedes tener hasta ' + cp + ', más recordatorios automáticos y estadísticas. ¿Te lo activo?']);
+    if (!b.premium && b.barberos >= bf) r.push(['💈', 'Tiene el máximo de barberos Free (' + bf + ').', 'Hola 👋 Ya tienes ' + bf + ' barberos, el máximo Free. Con Premium puedes sumar hasta ' + bp + ' y ver la caja y estadísticas de cada uno.']);
     if (b.premium && b.premium_until && new Date(b.premium_until) - Date.now() < 5 * 864e5) r.push(['⏳', 'Su Premium vence el ' + P.fechaCorta(b.premium_until) + '.', 'Hola 👋 Tu Premium vence el ' + P.fechaCorta(b.premium_until) + '. Para renovar, paga en Mi plan y toca "Ya pagué". ¡Gracias por confiar en nosotros!']);
     if (!b.abono) r.push(['💳', 'No cobra abono ($0).', 'Tip 💡: cobrar un abono pequeño (ej. $3.000–$4.000) reduce mucho los "No vino". Se configura en Ajustes.']);
     return r;
@@ -84,7 +85,7 @@
     html += '<div class="card"><h2>💰 Solicitudes "Ya pagué" (' + pend.length + ')</h2>' + (pend.length ? pend.map((x) =>
       '<div class="card solic" style="box-shadow:none"><div class="flex"><div class="grow"><b>' + esc(x.nombre) + '</b> <span class="pill">' + (x.rol === 'owner' ? 'Barbería' : 'Cliente') + '</span>' +
       '<div class="sub muted">' + esc(x.barberia || '') + ' · ' + esc(x.email) + ' · ' + C.hace(x.created_at) + '</div>' + (x.note ? '<div class="sub">📝 ' + esc(x.note) + '</div>' : '') + '</div></div>' +
-      '<div class="btns"><button class="ok small" data-ap="' + x.id + '">✅ Activar 1 mes (' + C.plata(precio()) + ')</button><button class="small danger" data-re="' + x.id + '">No encontré el pago</button></div></div>').join('')
+      '<div class="btns"><button class="ok small" data-ap="' + x.id + '">✅ Activar 1 mes (' + C.plata(precio(x.rol)) + ')</button><button class="small danger" data-re="' + x.id + '">No encontré el pago</button></div></div>').join('')
       : '<p class="muted">No hay pagos por revisar. Te llega un push cuando alguien toque "Ya pagué".</p>') + '</div>';
     if (rep.length) html += '<div class="card"><h2>🚩 Reportes (' + rep.length + ')</h2><ul class="list">' + rep.map((r) => '<li><div class="grow"><b>' + esc(r.de) + ' reportó a ' + esc(r.contra) + '</b><div class="sub">' + esc(r.reason) + ' · "' + esc(r.excerpt || '') + '"</div></div>' +
       '<button class="small gris" data-rok="' + r.id + '">Ignorar</button><button class="small danger" data-rsus="' + r.id + '">Suspender</button></li>').join('') + '</ul></div>';
@@ -254,7 +255,7 @@
   /* ---------- Keys ---------- */
   async function keys() {
     const el = $('v-keys');
-    el.innerHTML = '<div class="card"><h2>🔑 Generar key mensual</h2><p class="muted chico" style="margin-top:-4px">Una key = 1 mes de Premium (' + C.plata(precio()) + '). La persona la pega en Mi plan → "Tengo una key". Queda registrada con su fecha de término.</p>' +
+    el.innerHTML = '<div class="card"><h2>🔑 Generar key mensual</h2><p class="muted chico" style="margin-top:-4px">Una key = 1 mes de Premium (barbería ' + C.plata(precio('owner')) + ' · cliente ' + C.plata(precio('client')) + '). La persona la pega en Mi plan → "Tengo una key". Queda registrada con su fecha de término.</p>' +
       '<div class="btns" style="margin-top:6px"><button data-g="barberia">💈 Key para barbería</button><button class="alt" data-g="cliente">👤 Key para cliente</button></div></div>' +
       '<div class="card"><h2>📜 Historial</h2><div id="lKeys"><p class="muted">Cargando…</p></div></div>';
     el.querySelectorAll('[data-g]').forEach((b) => b.onclick = () => generarKey(b.dataset.g, '', ''));
@@ -294,8 +295,12 @@
     let sec = {};
     try { sec = await K.rpc('admin_secretos_estado'); } catch (e) { /* nada */ }
     el.innerHTML =
-      '<div class="card"><h2>💎 Venta de Premium</h2><label>Precio mensual (barbería y cliente)</label><input data-k="precio_premium" type="number" inputmode="numeric" value="' + esc(ajustes.precio_premium || 4900) + '">' +
-      '<label>Link de pago (Mercado Pago)</label><input data-k="link_pago" placeholder="https://mpago.la/…" value="' + esc(ajustes.link_pago || '') + '">' +
+      '<div class="card"><h2>⚙️ Planes Free y Premium</h2><p class="muted chico" style="margin-top:-4px">Cambia lo que quieras: se aplica al tiro para todos. ' +
+      'Si bajas un límite, nadie pierde lo que ya tiene; solo no puede agregar más.</p><div id="planesZona"></div>' +
+      '<div class="btns"><button id="bGuardarPlanes">Guardar planes</button></div></div>' +
+      '<div class="card"><h2>💎 Venta de Premium</h2>' +
+      '<label>Link de pago Premium barbería <span class="opc">(Mercado Pago, con el precio del plan)</span></label><input data-k="link_pago_barberia" placeholder="https://mpago.la/…" value="' + esc(ajustes.link_pago_barberia || ajustes.link_pago || '') + '">' +
+      '<label>Link de pago Premium cliente</label><input data-k="link_pago_cliente" placeholder="https://mpago.la/…" value="' + esc(ajustes.link_pago_cliente || ajustes.link_pago || '') + '">' +
       '<label>Datos de transferencia <span class="opc">(opcional)</span></label><textarea data-k="datos_transferencia" maxlength="300">' + esc(ajustes.datos_transferencia || '') + '</textarea>' +
       '<label>Tu WhatsApp de contacto</label><input data-k="whatsapp_admin" inputmode="tel" value="' + esc(ajustes.whatsapp_admin || '') + '">' +
       '<div class="btns"><button id="bGuardarV">Guardar</button></div></div>' +
@@ -309,6 +314,18 @@
       '<button class="gris" id="bPrueba">Enviarme un aviso de prueba</button></div></div>' +
       '<div class="card"><h2>🔄 Versión y actualizaciones</h2><div id="verZona"><p class="muted">Cargando…</p></div></div>' +
       '<div id="perfilAdmin"></div>';
+    pintarPlanes();
+    $('bGuardarPlanes').onclick = (ev) => C.accion(ev.target, async () => {
+      const p = { barberia: {}, cliente: {} };
+      $('planesZona').querySelectorAll('[data-pg]').forEach((i) => {
+        const [g, c, t] = i.dataset.pg.split('.');
+        p[g][c] = p[g][c] || {};
+        p[g][c][t] = i.value === '' ? 0 : +i.value;
+      });
+      await K.rpc('admin_guardar_planes', { p });
+      ajustes = await K.ajustes();
+      pintarPlanes();
+    }, '✅ Planes guardados');
     $('bGuardarV').onclick = (ev) => C.accion(ev.target, async () => {
       for (const i of el.querySelectorAll('[data-k]')) await K.rpc('admin_ajuste', { p_key: i.dataset.k, p_value: i.value });
       ajustes = await K.ajustes();
@@ -372,6 +389,31 @@
       '<div class="btns"><button class="small gris" id="bLiberar">Liberar v' + C.version + ' para todos</button></div></details>';
     $('bCopiarSQL').onclick = () => C.copiar(SQL_ACTUALIZAR);
     $('bLiberar').onclick = (ev) => C.accion(ev.target, async () => { await K.rpc('admin_ajuste', { p_key: 'version_liberada', p_value: C.version }); pintarAjustes(); }, '🔄 Versión liberada');
+  }
+
+  // Editor de planes: una fila por dato, columnas Free y Premium.
+  const FILAS_PLAN = [
+    ['barberia', 'precio', '💰 Precio mensual Premium ($)', true],
+    ['barberia', 'prueba_dias', '🎁 Días de prueba gratis (0 = sin prueba)', true],
+    ['barberia', 'barberos', '💈 Barberos (contando al dueño)'],
+    ['barberia', 'clientes', '👥 Clientes'],
+    ['barberia', 'servicios', '✂️ Servicios (100 o más = ilimitados)'],
+    ['barberia', 'ofertas', '🏷️ Ofertas activas (50 o más = ilimitadas)'],
+    ['cliente', 'precio', '💰 Precio mensual Premium ($)', true],
+    ['cliente', 'prueba_dias', '🎁 Días de prueba gratis (0 = sin prueba)', true],
+    ['cliente', 'dias', '📅 Días hacia adelante para reservar'],
+    ['cliente', 'activas', '🗓️ Horas activas a la vez'],
+    ['cliente', 'mensajes', '💬 Mensajes seguidos sin respuesta (0 = sin límite)']
+  ];
+  function pintarPlanes() {
+    const z = $('planesZona');
+    if (!z) return;
+    const fila = ([g, c, t, soloPrem]) => '<tr><td>' + t + '</td>' +
+      '<td class="n">' + (soloPrem ? '—' : '<input data-pg="' + g + '.' + c + '.free" type="number" min="0" inputmode="numeric" value="' + K.plan(g, c, false) + '" style="width:84px;padding:8px">') + '</td>' +
+      '<td class="n"><input data-pg="' + g + '.' + c + '.premium" type="number" min="0" inputmode="numeric" value="' + K.plan(g, c, true) + '" style="width:96px;padding:8px"></td></tr>';
+    const tabla = (g, tit) => '<h3>' + tit + '</h3><div class="scroll-x"><table class="tabla"><tr><th></th><th class="n">Free</th><th class="n">⭐ Premium</th></tr>' +
+      FILAS_PLAN.filter((f) => f[0] === g).map(fila).join('') + '</table></div>';
+    z.innerHTML = tabla('barberia', '💈 Barberías') + tabla('cliente', '👤 Clientes');
   }
 
   async function difusiones() {

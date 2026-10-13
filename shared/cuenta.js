@@ -76,6 +76,7 @@
   async function exigir(roles) {
     let a = null;
     try { a = await refrescar(); } catch (e) { a = cuenta; }
+    try { await ajustes(); } catch (e) { /* usa la copia guardada */ }
     if (!a) { location.replace(C.raiz()); return new Promise(() => {}); }
     if (roles && !roles.includes(a.role)) { location.replace(C.raiz() + paginaDe(a.role)); return new Promise(() => {}); }
     if (a.suspended) {
@@ -192,6 +193,22 @@
     catch (e) { return C.leer('ajustes', {}); }
   }
 
+  /* ---------- Planes Free / Premium (los edita el admin) ---------- */
+  const PLANES_BASE = {
+    barberia: { barberos: [3, 10], clientes: [40, 500], servicios: [8, 100], ofertas: [1, 50], precio: [0, 4900], prueba_dias: [0, 7] },
+    cliente: { activas: [1, 3], dias: [14, 45], mensajes: [3, 0], precio: [0, 4900], prueba_dias: [0, 7] }
+  };
+  // Valor de un plan: plan('cliente', 'dias', true) → 45
+  function plan(grupo, clave, premium) {
+    const p = ((C.leer('ajustes', {}) || {}).planes || {})[grupo] || {};
+    const v = p[clave];
+    if (v && v[premium ? 'premium' : 'free'] !== undefined) return +v[premium ? 'premium' : 'free'];
+    const b = (PLANES_BASE[grupo] || {})[clave];
+    return b ? b[premium ? 1 : 0] : 0;
+  }
+  const limite = (que, premium) => plan(['activas', 'dias', 'mensajes'].includes(que) ? 'cliente' : 'barberia', que, premium);
+  const grupoDe = (rol) => (rol === 'owner' ? 'barberia' : 'cliente');
+
   /* ---------- Actualizaciones con botón ---------- */
   const mayor = (a, b) => {
     const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
@@ -249,7 +266,7 @@
   global.Cuenta = {
     listo, sb, rpc, refrescar, exigir, entrar, salir, cambiarClave, crearUsuario, restablecerClave, probarServidor, despertarEnvios,
     claveNueva, mensajeAcceso, activarPush, sincronizarPush, pushActivo, pushPosible, esIOS, instalada, ajustes, revisarActualizacion,
-    recordarBarberia, barberiaLocal, paginaDe, irA, aplicarMarca, amigable, colorPremium,
+    recordarBarberia, barberiaLocal, paginaDe, irA, aplicarMarca, amigable, colorPremium, plan, limite, grupoDe,
     get cuenta() { return cuenta; },
     premium: () => !!(cuenta && cuenta.is_premium),
     barberiaPremium: () => !!(cuenta && cuenta.barberia && cuenta.barberia.premium)

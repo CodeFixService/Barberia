@@ -4,15 +4,23 @@
   const C = global.Core, K = global.Cuenta;
   const esc = C.esc;
 
-  const BENEF = {
-    client: ['Reserva hasta 45 días adelante (Free: 14)', 'Hasta 3 horas activas a la vez (Free: 1)', 'Mensajes sin límite y prioritarios ⭐',
+  // Beneficios Premium con los números que el admin dejó en los planes.
+  function beneficios(rol) {
+    const L = (q, prem) => K.limite(q, prem);
+    const ilim = (n, tope) => (n >= tope ? 'ilimitados' : 'hasta ' + n);
+    if (rol === 'owner') {
+      return ['Hasta ' + L('barberos', true) + ' barberos (Free: ' + L('barberos', false) + ') y ' + L('clientes', true) + ' clientes (Free: ' + L('clientes', false) + ')',
+        'Servicios ' + ilim(L('servicios', true), 100) + ', con foto (Free: ' + L('servicios', false) + ')', 'Calendario "Todos" en columnas y vista Año',
+        'Colores, portada y fotos de tu equipo', 'Ofertas ' + (L('ofertas', true) >= 50 ? 'ilimitadas' : 'hasta ' + L('ofertas', true)) + ' y ofertas VIP',
+        'Recordatorios automáticos a tus clientes', 'Tarjeta de sellos (ej. 10 cortes = 1 gratis)', 'Caja con reportes, comisiones y la de todos tus barberos',
+        'Estadísticas por barbero, servicios y horas más pedidas', 'Horario y servicios propios por barbero', 'Lista de espera para tus clientes', 'Marca CodeFix discreta'];
+    }
+    const m = L('mensajes', true), mf = L('mensajes', false);
+    return ['Reserva hasta ' + L('dias', true) + ' días adelante (Free: ' + L('dias', false) + ')', 'Hasta ' + L('activas', true) + ' horas activas a la vez (Free: ' + L('activas', false) + ')',
+      m === 0 ? 'Mensajes sin límite y prioritarios ⭐' : 'Hasta ' + m + ' mensajes seguidos (Free: ' + (mf || 'sin límite') + ')',
       'Ofertas VIP exclusivas', 'Recordatorios 24 h y 2 h antes de tu hora', 'Lista de espera: te avisamos si se libera una hora',
-      'Barbero favorito, se elige solo al agendar', 'Todos los íconos y colores, tu foto y marco dorado'],
-    owner: ['Hasta 10 barberos (Free: 3) y 500 clientes (Free: 40)', 'Servicios ilimitados, con foto', 'Calendario "Todos" en columnas y vista Año',
-      'Colores, portada y fotos de tu equipo', 'Ofertas ilimitadas y ofertas VIP', 'Recordatorios automáticos a tus clientes',
-      'Tarjeta de sellos (ej. 10 cortes = 1 gratis)', 'Caja con reportes, comisiones y la de todos tus barberos',
-      'Estadísticas por barbero, servicios y horas más pedidas', 'Horario y servicios propios por barbero', 'Lista de espera para tus clientes', 'Marca CodeFix discreta']
-  };
+      'Barbero favorito, se elige solo al agendar', 'Todos los colores, uno a tu gusto, tu foto y marco dorado'];
+  }
 
   const fechaCorta = (t) => { const f = C.fechaDe(t).split('-'); return f[2] + '/' + f[1] + '/' + f[0]; };
   const diasQuedan = (t) => Math.max(0, Math.ceil((new Date(t) - Date.now()) / 864e5));
@@ -24,13 +32,13 @@
     const h = C.hoja('<h2>⭐ ' + esc(que || 'Función Premium') + '</h2>' +
       (esCliente || esDueno
         ? '<p>Esto es parte de <b>Premium</b>. Por <b>' + C.plata(precio()) + ' al mes</b> desbloqueas:</p><ul class="feat">' +
-          BENEF[esDueno ? 'owner' : 'client'].map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul>' +
+          beneficios(esDueno ? 'owner' : 'client').map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul>' +
           '<div class="btns"><button class="oro full" data-ir>⭐ Ver Premium</button></div>'
         : '<p>Esta función está disponible cuando tu barbería es <b>Premium</b>. Pídele al dueño que la active.</p>'));
     const b = h.q('[data-ir]');
     if (b) b.onclick = () => { h.cerrar(); K.irA('plan'); };
   }
-  const precio = () => +((C.leer('ajustes', {}) || {}).precio_premium || 4900);
+  const precio = () => K.plan(K.grupoDe((K.cuenta || {}).role), 'precio', true);
   // Marca un elemento como Premium bloqueado (plateado con candado).
   function bloquear(el, que) {
     if (!el) return;
@@ -42,7 +50,10 @@
   async function plan(el) {
     const a = await K.refrescar() || K.cuenta;
     const s = await K.ajustes();
-    const p = +(s.precio_premium || 4900);
+    const grupo = K.grupoDe(a.role);
+    const p = K.plan(grupo, 'precio', true);
+    const link = s['link_pago_' + grupo] || s.link_pago;
+    const prueba = K.plan(grupo, 'prueba_dias', true);
     const esDueno = a.role === 'owner';
     const prem = a.is_premium;
     let html = '<div class="card ' + (prem ? 'oro-marco' : 'upsell') + '"><h2>' + (prem ? '⭐ Eres Premium' : '💎 Hazte Premium') + '</h2>';
@@ -54,16 +65,16 @@
       html += '<div class="precio">' + C.plata(p) + ' <small>/ mes</small></div><p class="muted" style="margin:2px 0 0">' +
         (esDueno ? 'Para tu barbería y todo tu equipo.' : 'Pago mensual, sin contratos.') + '</p>';
     }
-    html += '<ul class="feat">' + BENEF[esDueno ? 'owner' : 'client'].map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul>';
+    html += '<ul class="feat">' + beneficios(esDueno ? 'owner' : 'client').map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul>';
     html += '<h3>' + (prem ? 'Renovar (se suma desde tu fecha de término)' : '¿Cómo lo activo?') + '</h3><ol class="muted" style="padding-left:20px;margin:0">' +
-      '<li>Paga ' + C.plata(p) + (s.link_pago ? ' con el link de pago' : '') + (s.datos_transferencia ? ' o por transferencia' : '') + '.</li>' +
+      '<li>Paga ' + C.plata(p) + (link ? ' con el link de pago' : '') + (s.datos_transferencia ? ' o por transferencia' : '') + '.</li>' +
       '<li>Toca <b>"Ya pagué"</b>: le avisamos a CodeFix.</li><li>Te activan el mes al tiro o te envían una <b>key</b> por WhatsApp.</li></ol>' +
       '<div class="btns" style="flex-direction:column">' +
-      (s.link_pago ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(s.link_pago) + '">💳 Pagar ' + C.plata(p) + '</a>' : '') +
+      (link ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(link) + '">💳 Pagar ' + C.plata(p) + '</a>' : '') +
       (s.datos_transferencia ? '<button class="gris full" data-transf>🏦 Ver datos de transferencia</button>' : '') +
       '<button class="full" data-pague>✅ Ya pagué</button>' +
       '<button class="alt full" data-key>🔑 Tengo una key</button>' +
-      (!a.trial_used && !prem ? '<button class="ok full" data-prueba>🎁 Probar 7 días gratis</button>' : '') +
+      (!a.trial_used && !prem && prueba > 0 ? '<button class="ok full" data-prueba>🎁 Probar ' + prueba + ' días gratis</button>' : '') +
       (s.whatsapp_admin ? '<a class="btn wsp full" target="_blank" rel="noopener" href="' + C.wa(s.whatsapp_admin, 'Hola, quiero Premium para ' + (esDueno ? 'mi barbería ' + ((a.barberia || {}).nombre || '') : 'mi cuenta (' + a.email + ')')) + '">💬 Escribir a CodeFix</a>' : '') +
       '</div></div>';
     el.innerHTML = html;
@@ -87,7 +98,7 @@
     };
     if (q('[data-prueba]')) q('[data-prueba]').onclick = (ev) => C.accion(ev.target, async () => {
       await K.rpc('probar_premium');
-      C.toast('🎁 ¡7 días de Premium activados!');
+      C.toast('🎁 ¡' + prueba + ' días de Premium activados!');
       setTimeout(() => location.reload(), 900);
     });
   }
@@ -232,5 +243,5 @@
     pintar();
   }
 
-  global.Perfil = { perfil, plan, upsell, bloquear, tour, BENEF, fechaCorta, diasQuedan };
+  global.Perfil = { perfil, plan, upsell, bloquear, tour, beneficios, fechaCorta, diasQuedan };
 })(window);

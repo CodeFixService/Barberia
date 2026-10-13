@@ -1,4 +1,4 @@
-/* Mensajes con ✓ Enviado · ✓✓ Recibido · ✓✓ azul Visto, y la regla de 3 mensajes seguidos. */
+/* Mensajes con ✓ Enviado · ✓✓ Recibido · ✓✓ azul Visto, y la regla de mensajes seguidos (3; para clientes, según su plan). */
 (function (global) {
   'use strict';
   const C = global.Core, K = global.Cuenta;
@@ -110,7 +110,7 @@
     const txt = raiz.querySelector('[data-txt]'), env = raiz.querySelector('[data-env]');
     if (n === null || n === undefined) { el.innerHTML = ''; txt.disabled = false; env.disabled = false; return; }
     if (n <= 0) {
-      el.innerHTML = '<div class="chat-limite">⏳ Ya enviaste 3 mensajes. Espera que te respondan 🙂' +
+      el.innerHTML = '<div class="chat-limite">⏳ Llegaste al máximo de mensajes seguidos. Espera que te respondan 🙂' +
         (K.cuenta && K.cuenta.role === 'client' ? '<br><a href="#plan">⭐ Con Premium escribes sin límite</a>' : '') + '</div>';
       txt.disabled = true; env.disabled = true;
     } else {

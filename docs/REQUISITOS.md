@@ -282,3 +282,8 @@ Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; 
 - Selector de color en todos los perfiles (admin incluido): Free 4 colores conocidos; Premium todos + color personalizado.
 - Conexión visible (en línea / visto hace… / nunca entró) para el dueño y los barberos, y en el chat.
 - Campanita: botón Limpiar (solo para uno mismo) y borrado automático de avisos a los 7 días.
+
+## v1.4
+- **Abono con dos links de pago:** la barbería guarda Link 1 y Link 2 (monto + link) y elige cuál está activo. El abono que ven los clientes es el del link activo, así el monto y el link nunca se descuadran. Las reservas ya hechas conservan su abono.
+- **Planes editables por el admin** (Ajustes → Planes Free y Premium): precio mensual y días de prueba de cada plan, barberos, clientes, servicios y ofertas de la barbería; días adelante, horas activas y mensajes seguidos del cliente. Se aplica al tiro; si se baja un límite, nadie pierde lo que ya tiene.
+- **Link de pago Premium por plan** (barbería y cliente), cada uno con su precio.
