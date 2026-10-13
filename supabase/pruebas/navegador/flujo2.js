@@ -31,11 +31,9 @@ async function entrar(p, email, clave) {
 }
 async function cerrar(p) { for (let i = 0; i < 4; i++) { const c = await p.$('.sheet .cerrar'); if (!c) break; await c.click(); await esperar(250); } }
 const clave = async (email) => (await q('select pass from mock_pass where email = $1', [email]))[0].pass;
-function sabado() {
-  const d = new Date(Date.now() + 864e5);
-  while (d.getDay() !== 6) d.setDate(d.getDate() + 1);
-  return d.toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
-}
+function diaChile(offset) { return new Date(Date.now() + offset * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Santiago' }); }
+function dowChile(f) { const [y, m, d] = f.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); }
+function sabado() { let i = 1; while (dowChile(diaChile(i)) !== 6) i++; return diaChile(i); }
 
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] }).catch(() => chromium.launch());

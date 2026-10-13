@@ -23,7 +23,9 @@ end $$;
 Si todavía no uniste la rama, pega el contenido completo de `instalar.sql`).
 
 Si aparece un aviso de operación destructiva, toca **Run this query** (es normal).
-Al final debe decir **"Barbería instalada ✅ versión 1.0"**. Se puede volver a correr cuando haya una versión nueva: no borra datos.
+Al final debe decir **"Barbería instalada ✅ versión 1.1"**. Se puede volver a correr cuando haya una versión nueva: no borra datos.
+
+> **Al actualizar a una versión nueva** (ej. 1.1): primero corre este paso 1 otra vez, y después en la app **Administración → Ajustes → Liberar** la versión para que a todos les aparezca "Actualizar".
 
 Esto también deja programadas las tareas automáticas (cada minuto):
 - liberar las horas apartadas sin abono (15 min) y las "por aprobar" sin respuesta,
@@ -72,7 +74,7 @@ Esta función envía los push, crea las cuentas y restablece las claves.
 SQL Editor:
 ```sql
 select jobname, schedule from cron.job;           -- barberia-tick y barberia-push
-select public.db_version();                        -- 1.0
+select public.db_version();                        -- 1.1
 ```
 Si `cron.job` no existe: **Database → Extensions** → activa **pg_cron** y **pg_net**, y vuelve a correr el paso 1.
 

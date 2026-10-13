@@ -4,7 +4,7 @@
 
   const cfg = global.BARB_CONFIG || {};
   const ZONA = cfg.ZONA || 'America/Santiago';
-  const VERSION = '1.0';
+  const VERSION = '1.1';
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
