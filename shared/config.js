@@ -6,5 +6,6 @@ window.BARB_CONFIG = {
   ADMIN_EMAIL: 'juanjosuecastilloloyola@gmail.com',
   MARCA: 'CodeFix',
   AUTOR: 'Josué Castillo',
-  ZONA: 'America/Santiago'
+  ZONA: 'America/Santiago',
+  SITIO: 'https://barberia.juanjosuecastilloloyola.workers.dev/'
 };

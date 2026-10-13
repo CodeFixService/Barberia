@@ -6,7 +6,7 @@ reserva con abono y comprobante, mensajes con vistos, caja de cortes y planes Fr
 
 - **Requisitos acordados:** [`docs/REQUISITOS.md`](docs/REQUISITOS.md)
 - **Puesta en marcha (una vez):** [`docs/CONFIGURAR.md`](docs/CONFIGURAR.md)
-- **Publicada en:** https://codefixservice.github.io/Barberia/ (desde `main`)
+- **Publicada en:** https://barberia.juanjosuecastilloloyola.workers.dev/ (Cloudflare, se publica sola desde `main`)
 
 ## Roles
 | Rol | Página | Qué hace |

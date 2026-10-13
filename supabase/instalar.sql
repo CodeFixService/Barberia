@@ -18,11 +18,11 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.3'::text $$;
+language sql immutable as $$ select '1.3.1'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'Elige el color de tu app, mira quién está en línea y limpia tu campanita con un toque.'::text $$;
+language sql immutable as $$ select 'La app se mudó a una dirección nueva y más rápida: ábrela desde https://barberia.juanjosuecastilloloyola.workers.dev/ e instálala de nuevo.'::text $$;
 
 -- Límites Free / Premium (un solo lugar para cambiarlos).
 create or replace function public.limite(p_que text, p_premium boolean) returns int
