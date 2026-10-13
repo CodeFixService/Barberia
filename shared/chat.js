@@ -15,15 +15,19 @@
     raiz.innerHTML = '<div class="card"><h2><span class="grow">💬 Mensajes</span><button class="small alt" data-nuevo>✏️ Nuevo</button></h2><div data-l><p class="muted">Cargando…</p></div></div>';
     raiz.querySelector('[data-nuevo]').onclick = nuevo;
     let l = [];
-    try { l = await K.rpc('chat_lista'); } catch (e) { raiz.querySelector('[data-l]').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    let err = null;
+    try { l = await K.rpc('chat_lista'); } catch (e) { err = e; }
+    // Si mientras cargaba se abrió una conversación (ej. "Escribir" desde una ficha), no la pisamos.
     const cont = raiz.querySelector('[data-l]');
+    if (abierto || !cont) return;
+    if (err) { cont.innerHTML = '<p class="err">' + esc(err.message) + '</p>'; return; }
     if (!l.length) {
       cont.innerHTML = '<div class="empty"><span class="ico">💬</span>Aún no tienes conversaciones.<br>Toca <b>✏️ Nuevo</b> para escribir.</div>';
       return;
     }
     cont.innerHTML = '<ul class="list">' + l.map((c) =>
       '<li class="tap" data-id="' + c.other + '">' + C.avatar(c, c.premium ? 'premium' : '') +
-      '<div class="grow"><b>' + esc(c.nombre) + (c.premium ? ' <span class="pill oro">⭐ Premium</span>' : '') + '</b>' +
+      '<div class="grow"><b>' + esc(c.nombre) + (c.premium ? ' <span class="pill oro">⭐ Premium</span>' : '') + (C.conexion(c.last_seen).on ? ' <span title="En línea">🟢</span>' : '') + '</b>' +
       '<div class="sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
       (c.mio ? '<span class="ticks' + (c.leido ? ' visto' : '') + '">' + (c.entregado || c.leido ? '✓✓' : '✓') + '</span> ' : '') + esc(c.ultimo) + '</div></div>' +
       '<div style="text-align:right"><div class="sub chico">' + C.hace(c.ultimo_at) + '</div>' +
@@ -86,8 +90,17 @@
     if (reservaAdjunta) raiz.querySelector('[data-adj]').innerHTML = '<div class="chat-limite" style="margin-top:6px">📅 Este mensaje irá con tu hora adjunta</div>';
     await cargar(true);
     try { limite(await K.rpc('chat_restantes', { p_other: id })); } catch (e) { /* nada */ }
+    const conectado = async () => {
+      try {
+        const t = await K.rpc('ultima_conexion', { p_other: id });
+        const el = raiz && raiz.querySelector('[data-rol]');
+        if (el && abierto === id) el.textContent = (ROL[info.rol] ? ROL[info.rol] + ' · ' : '') + C.conexion(t).txt;
+      } catch (e) { /* nada */ }
+    };
+    conectado();
+    let vueltas = 0;
     clearInterval(timer);
-    timer = setInterval(() => { if (abierto === id && !document.hidden) cargar(false); }, 6000);
+    timer = setInterval(() => { if (abierto === id && !document.hidden) { cargar(false); if (++vueltas % 5 === 0) conectado(); } }, 6000);
     global.Avisos && global.Avisos.actualizar();
   }
 

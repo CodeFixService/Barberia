@@ -39,12 +39,14 @@
     const b = a && a.barberia;
     let color = null;
     if (b && b.premium && b.color) color = b.color;
-    if (a && a.color && (a.is_premium || a.role !== 'client')) color = a.color;
-    else if (a && a.color && a.role === 'client' && C.COLORES_LIBRES.includes(a.color)) color = a.color;
+    if (a && a.color && (colorPremium(a) || C.COLORES_LIBRES.includes(a.color))) color = a.color;
     C.aplicarColor(color || C.COLORES[0][1]);
     try { localStorage.setItem('barb:color', JSON.stringify(color || C.COLORES[0][1]).slice(1, -1)); } catch (e) { /* lleno */ }
     if (b) recordarBarberia({ codigo: b.codigo, nombre: b.nombre, logo: b.logo, whatsapp: b.whatsapp, color: b.premium ? b.color : null });
   }
+
+  // Todos los colores y el personalizado: cliente Premium, equipo de barbería Premium o el admin.
+  const colorPremium = (a) => !!(a && (a.is_premium || a.is_admin || (a.role !== 'client' && a.barberia && a.barberia.premium)));
 
   // La barbería queda recordada en el celular: su logo y su WhatsApp aparecen en el inicio de sesión.
   function recordarBarberia(info) { if (info && info.codigo) C.guardar('local', info); }
@@ -247,7 +249,7 @@
   global.Cuenta = {
     listo, sb, rpc, refrescar, exigir, entrar, salir, cambiarClave, crearUsuario, restablecerClave, probarServidor, despertarEnvios,
     claveNueva, mensajeAcceso, activarPush, sincronizarPush, pushActivo, pushPosible, esIOS, instalada, ajustes, revisarActualizacion,
-    recordarBarberia, barberiaLocal, paginaDe, irA, aplicarMarca, amigable,
+    recordarBarberia, barberiaLocal, paginaDe, irA, aplicarMarca, amigable, colorPremium,
     get cuenta() { return cuenta; },
     premium: () => !!(cuenta && cuenta.is_premium),
     barberiaPremium: () => !!(cuenta && cuenta.barberia && cuenta.barberia.premium)

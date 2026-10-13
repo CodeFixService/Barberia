@@ -28,6 +28,9 @@ Registro cerrado: el admin crea las barberías; cada dueño crea a sus barberos 
 
 ## Avisos y mensajes
 - Solo **push** + 🔔 campanita (sin correo). Cada aviso tiene ✓ Enviado · ✓✓ Recibido · ✓✓ Visto, en ambas direcciones.
+  Botón **🗑️ Limpiar** en la campanita (solo la vacía para uno; quien envió conserva su ✓✓) y los avisos se borran solos a los 7 días.
+- **Conexión:** 🟢 En línea / Visto hace… / ⚪ Nunca entró, en clientes, equipo y arriba de cada chat.
+- **Colores:** cada perfil elige el color de su app. Free: 4 colores; Premium: los 12 y uno personalizado.
 - Chat con ✓ / ✓✓ / ✓✓ azul. **Máximo 3 mensajes seguidos** hacia arriba (cliente → barbero, barbero → barbero, barbería → Josué) hasta que contesten; el que responde, sin límite. El cliente Premium escribe sin límite.
 - Clave olvidada: botón en el inicio de sesión → WhatsApp de su barbería → el dueño pone una clave genérica → el cliente la cambia en su perfil.
 

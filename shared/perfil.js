@@ -99,7 +99,10 @@
     const esCliente = a.role === 'client';
     const prem = esCliente ? a.is_premium : true;
     const ROL = { admin: 'Administrador', owner: 'Dueño', barber: 'Barbero', client: 'Cliente' };
-    const tema = C.leer('tema', 'auto');
+    let tema = 'auto';
+    try { tema = localStorage.getItem('barb:tema') || 'auto'; } catch (e) { /* sin acceso */ }
+    if (!['auto', 'light', 'dark'].includes(tema)) tema = 'auto';
+    const premColor = K.colorPremium(a);
     el.innerHTML =
       (a.clave_temporal ? '<div class="banner alerta"><div class="grow"><b>🔑 Estás usando una clave temporal</b><br>Cámbiala abajo por una que recuerdes.</div></div>' : '') +
       '<div class="card ' + (a.is_premium ? 'oro-marco' : '') + '"><div class="flex"><span data-av>' + C.avatar(a, 'lg' + (a.is_premium ? ' premium' : '')) + '</span>' +
@@ -112,7 +115,9 @@
       (!esCliente && a.role !== 'admin' ? '<label>Sobre mí <span class="opc">(lo ven los clientes)</span></label><input data-k="descripcion" maxlength="200" placeholder="Ej: Especialista en degradados" value="' + esc(a.descripcion || '') + '">' : '') +
       '<label>Tu ícono</label><div class="emojis" data-emojis></div>' +
       '<div class="btns"><button class="gris small" data-foto>📷 ' + (a.foto ? 'Cambiar foto' : 'Poner mi foto') + '</button>' + (a.foto ? '<button class="gris small" data-sinfoto>Quitar foto</button>' : '') + '</div>' +
-      (a.role !== 'admin' ? '<label>Color de mi app</label><div class="swatches" data-colores></div>' : '') +
+      '<label>Color de mi app <span class="opc">(' + (premColor ? 'todos los colores o uno a tu gusto' : '4 colores · ⭐ Premium: todos y uno a tu gusto') + ')</span></label>' +
+      '<div class="swatches" data-colores></div><div class="flex" style="margin-top:10px" data-propio-wrap><input type="color" data-propio value="' + esc(/^#[0-9a-f]{6}$/i.test(a.color || '') ? a.color : '#b07d2b') + '" style="width:64px;flex:none">' +
+      '<span class="muted chico">🎨 Color personalizado: fabrica el tono que quieras</span></div>' +
       (opts.extraPerfil || '') +
       '<div class="btns"><button data-guardar class="full">Guardar</button></div></div>' +
       '<div class="card"><h2>⚙️ Preferencias</h2>' +
@@ -151,7 +156,7 @@
     const colores = q('[data-colores]');
     if (colores) {
       colores.innerHTML = C.COLORES.map(([n, c]) => {
-        const lock = esCliente && !prem && !C.COLORES_LIBRES.includes(c);
+        const lock = !premColor && !C.COLORES_LIBRES.includes(c);
         return '<button type="button" title="' + n + '" class="' + (c === a.color ? 'on ' : '') + (lock ? 'plata' : '') + '" style="background:' + c + '" data-c="' + c + '"></button>';
       }).join('');
       colores.querySelectorAll('button').forEach((b) => b.onclick = () => {
@@ -160,6 +165,13 @@
         colores.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
         C.aplicarColor(b.dataset.c);
       });
+      const propio = q('[data-propio]');
+      if (!premColor) { propio.disabled = true; bloquear(q('[data-propio-wrap]'), 'Color personalizado'); }
+      else propio.oninput = () => {
+        datos.color = propio.value;
+        colores.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+        C.aplicarColor(propio.value);
+      };
     }
     q('[data-guardar]').onclick = (ev) => C.accion(ev.target, async () => {
       const p = { avatar: datos.avatar, color: datos.color || '' };
