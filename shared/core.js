@@ -4,7 +4,7 @@
 
   const cfg = global.BARB_CONFIG || {};
   const ZONA = cfg.ZONA || 'America/Santiago';
-  const VERSION = '1.2';
+  const VERSION = '1.3';
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -73,6 +73,13 @@
     if (s < 86400) return 'hace ' + Math.floor(s / 3600) + ' h';
     if (s < 172800) return 'ayer';
     return cuando(t).split(' · ')[0];
+  }
+  // "🟢 En línea" (últimos 2 min) · "Visto hace 15 min" · "⚪ Nunca entró".
+  function conexion(t) {
+    if (!t) return { txt: '⚪ Nunca entró', on: false };
+    const s = (Date.now() - new Date(t).getTime()) / 1000;
+    if (s < 120) return { txt: '🟢 En línea', on: true };
+    return { txt: 'Visto ' + (s < 172800 ? hace(t) : 'el ' + cuando(t).split(' · ')[0]), on: false };
   }
   function relativoDia(f) {
     const h = hoy();
@@ -273,7 +280,7 @@
 
   global.Core = {
     $, esc, plata, pad, toast, errorTxt, partes, fechaDe, horaDe, minutosDe, hoy, sumarDias, dow, instante, aMin, aHHMM,
-    DIAS, DIAS_LARGO, MESES, diaCorto, fechaLarga, cuando, hace, relativoDia, hoja, confirmar, pedir, accion, wa, numeroWsp,
+    DIAS, DIAS_LARGO, MESES, diaCorto, fechaLarga, cuando, hace, conexion, relativoDia, hoja, confirmar, pedir, accion, wa, numeroWsp,
     imagen, elegirImagen, fondo, avatar, COLORES, COLORES_LIBRES, EMOJIS, EMOJIS_LIBRES, aplicarColor, aplicarTema, tinta,
     registrarSW, raiz, marca, copiar, guardar, leer, ics, googleCal, qr, version: VERSION, ZONA
   };

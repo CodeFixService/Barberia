@@ -18,11 +18,11 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.2'::text $$;
+language sql immutable as $$ select '1.3'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'Actualizaciones más simples: te avisamos al tiro cuando hay una versión nueva.'::text $$;
+language sql immutable as $$ select 'Elige el color de tu app, mira quién está en línea y limpia tu campanita con un toque.'::text $$;
 
 -- Límites Free / Premium (un solo lugar para cambiarlos).
 create or replace function public.limite(p_que text, p_premium boolean) returns int
@@ -393,6 +393,8 @@ create index if not exists avisos_de_idx on public.avisos (de, created_at desc);
 create index if not exists avisos_push_idx on public.avisos (push) where push = 'pendiente';
 create index if not exists avisos_reserva_idx on public.avisos (reserva_id);
 create index if not exists avisos_difusion_idx on public.avisos (difusion);
+-- v1.3: "Limpiar" solo los quita de mi campanita (quien los envió conserva su ✓✓ visto). Se borran solos a los 7 días.
+alter table public.avisos add column if not exists oculto boolean not null default false;
 alter table public.avisos enable row level security;
 
 create or replace function public.avisar(p_de uuid, p_para uuid, p_tipo text, p_titulo text, p_cuerpo text,
@@ -433,7 +435,7 @@ begin
     select a.id, a.tipo, a.titulo, a.cuerpo, a.url, a.created_at, a.visto_at, a.reserva_id,
            case when a.de is null then 'Sistema' else public.nombre_de(p) end as de
     from public.avisos a left join public.profiles p on p.id = a.de
-    where a.para = auth.uid() and a.tipo <> 'chat' and a.created_at > now() - interval '60 days'
+    where a.para = auth.uid() and a.tipo <> 'chat' and not a.oculto and a.created_at > now() - interval '7 days'
     order by a.created_at desc limit 80) x;
   return r;
 end $$;
@@ -444,6 +446,18 @@ language sql security definer set search_path = '' as $$
   where para = auth.uid() and visto_at is null and (p_ids is null or id = any(p_ids))
 $$;
 
+-- Limpiar mi campanita (como borrar el caché): los marca vistos y los oculta solo para mí.
+create or replace function public.limpiar_avisos() returns int
+language plpgsql security definer set search_path = '' as $$
+declare n int;
+begin
+  if auth.uid() is null then raise exception 'Inicia sesión primero'; end if;
+  update public.avisos set oculto = true, visto_at = coalesce(visto_at, now()), entregado_at = coalesce(entregado_at, now())
+  where para = auth.uid() and tipo <> 'chat' and not oculto;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
 -- Avisos que yo envié (para ver ✓ / ✓✓ / Visto).
 create or replace function public.avisos_enviados() returns jsonb
 language sql stable security definer set search_path = '' as $$
@@ -451,7 +465,7 @@ language sql stable security definer set search_path = '' as $$
     select a.id, a.titulo, a.cuerpo, a.created_at, a.visto_at, a.reserva_id, a.difusion,
            (a.push = 'enviado' or a.entregado_at is not null) as recibido, public.nombre_de(p) as para
     from public.avisos a join public.profiles p on p.id = a.para
-    where a.de = auth.uid() and a.tipo not in ('chat', 'difusion') and a.created_at > now() - interval '30 days'
+    where a.de = auth.uid() and a.tipo not in ('chat', 'difusion') and a.created_at > now() - interval '7 days'
     order by a.created_at desc limit 100) x
 $$;
 
@@ -462,6 +476,10 @@ declare me public.profiles; pend int := 0;
 begin
   select * into me from public.profiles where id = auth.uid();
   if me.id is null then return null; end if;
+  -- v1.3: "en línea" / "visto hace…" se actualiza mientras la app está abierta.
+  if me.last_seen is null or me.last_seen < now() - interval '1 minute' then
+    update public.profiles set last_seen = now() where id = me.id;
+  end if;
   update public.messages set delivered_at = now() where recipient = me.id and delivered_at is null;
   update public.avisos set entregado_at = now() where para = me.id and entregado_at is null;
   if me.role = 'owner' then
@@ -474,7 +492,7 @@ begin
     select count(*) into pend from public.requests where status = 'pendiente';
   end if;
   return jsonb_build_object(
-    'avisos', (select count(*) from public.avisos where para = me.id and visto_at is null and tipo <> 'chat'),
+    'avisos', (select count(*) from public.avisos where para = me.id and visto_at is null and tipo <> 'chat' and not oculto),
     'mensajes', (select count(*) from public.messages where recipient = me.id and read_at is null),
     'pendientes', pend);
 end $$;
@@ -1045,6 +1063,7 @@ begin
     'barberos', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'nombre', public.nombre_de(p), 'avatar', p.avatar, 'foto', p.foto, 'descripcion', p.descripcion,
         'es_dueno', p.role = 'owner', 'reservable', public.reservable(p), 'activo', p.activo, 'agenda_abierta', p.agenda_abierta,
+        'last_seen', case when staff then p.last_seen end,
         'horario', public.horario_de(p.id), 'telefono', case when staff then p.telefono end)
         order by (p.role = 'owner') desc, p.nombre), '[]'::jsonb)
       from public.profiles p where p.barberia_id = me.barberia_id and p.role in ('owner', 'barber')
@@ -1623,6 +1642,13 @@ begin
   me := public.yo_activo();
   prem := public.is_premium(me.id) or (public.es_staff(me) and public.barberia_premium(me.barberia_id));
   if not public.img_ok(p ->> 'foto', 40000) then raise exception 'Foto muy pesada'; end if;
+  -- v1.3: Free elige entre 4 colores conocidos; Premium, cualquier color (también uno personalizado).
+  if coalesce(p ->> 'color', '') <> '' then
+    if (p ->> 'color') !~* '^#[0-9a-f]{6}$' then raise exception 'Color no válido'; end if;
+    if not prem and lower(p ->> 'color') not in ('#b07d2b', '#18181b', '#1d4ed8', '#15803d') then
+      raise exception 'Todos los colores y el color personalizado son Premium ⭐';
+    end if;
+  end if;
   if p ? 'favorito' and nullif(p ->> 'favorito', '') is not null then
     if not prem then raise exception 'Barbero favorito es Premium ⭐'; end if;
     if not exists (select 1 from public.profiles where id = (p ->> 'favorito')::uuid and barberia_id = me.barberia_id and role in ('owner', 'barber')) then
@@ -1920,7 +1946,7 @@ language sql stable security definer set search_path = '' as $$
     from mine order by other, created_at desc
   )
   select coalesce(jsonb_agg(jsonb_build_object(
-    'other', l.other, 'nombre', public.nombre_de(p), 'rol', p.role, 'avatar', p.avatar, 'foto', p.foto,
+    'other', l.other, 'nombre', public.nombre_de(p), 'rol', p.role, 'avatar', p.avatar, 'foto', p.foto, 'last_seen', p.last_seen,
     'premium', p.role = 'client' and public.is_premium(p.id),
     'ultimo', case when l.foto then '🧾 ' else '' end || l.body, 'ultimo_at', l.created_at, 'mio', l.mio,
     'entregado', l.delivered_at is not null, 'leido', l.read_at is not null,
@@ -1946,6 +1972,12 @@ begin
           where (x.sender = auth.uid() and x.recipient = p_other) or (x.sender = p_other and x.recipient = auth.uid())
           order by x.created_at desc limit 150) m);
 end $$;
+
+-- Última conexión de alguien con quien puedo hablar (para "🟢 en línea" / "visto hace…" en el chat).
+create or replace function public.ultima_conexion(p_other uuid) returns timestamptz
+language sql stable security definer set search_path = '' as $$
+  select p.last_seen from public.profiles p where p.id = p_other and public.puede_hablar(auth.uid(), p_other)
+$$;
 
 create or replace function public.chat_imagen(p_id uuid) returns text
 language sql stable security definer set search_path = '' as $$
@@ -2184,7 +2216,7 @@ begin
       count(*) filter (where a.push = 'enviado' or a.entregado_at is not null) as recibidos, count(a.visto_at) as vistos,
       coalesce(jsonb_agg(jsonb_build_object('nombre', public.nombre_de(p), 'visto_at', a.visto_at) order by a.visto_at nulls last), '[]'::jsonb) as detalle
     from public.avisos a join public.profiles p on p.id = a.para
-    where a.de = auth.uid() and a.difusion is not null and a.created_at > now() - interval '60 days'
+    where a.de = auth.uid() and a.difusion is not null and a.created_at > now() - interval '7 days'
     group by a.difusion order by min(a.created_at) desc limit 30) x);
 end $$;
 
@@ -2241,7 +2273,7 @@ create or replace function public.limpiar() returns void
 language sql security definer set search_path = '' as $$
   update public.reservas set comprobante = null where comprobante is not null and comprobante_at < now() - interval '30 days';
   update public.messages set imagen = null where imagen is not null and created_at < now() - interval '30 days';
-  delete from public.avisos where created_at < now() - interval '90 days';
+  delete from public.avisos where created_at < now() - interval '7 days';
   delete from public.lista_espera where fecha < current_date - 1;
 $$;
 

@@ -283,5 +283,23 @@ select pg_temp.ok(jsonb_array_length(public.tomar_push()) > 0, 'el enviador toma
 select pg_temp.ok(public.puede_restablecer(prueba.id('dueno@test.cl'), prueba.id('ana@test.cl')), 'el dueño puede restablecer la clave de su cliente');
 select pg_temp.ok(not public.puede_restablecer(prueba.id('pedro@test.cl'), prueba.id('ana@test.cl')), 'un barbero no');
 
+-- 15. v1.3: colores, conexión y limpiar la campanita
+update public.profiles set plan = 'free', premium_until = null where email = 'beto@test.cl';
+select pg_temp.como('beto@test.cl');
+select pg_temp.debe_fallar($$select public.guardar_perfil('{"color":"#123456"}')$$, 'Premium');
+select public.guardar_perfil('{"color":"#1d4ed8"}');
+select pg_temp.debe_fallar($$select public.guardar_perfil('{"color":"rojo"}')$$, 'no válido');
+reset role;
+select pg_temp.como('ana@test.cl');
+select public.guardar_perfil('{"color":"#123456"}');
+select public.resumen();
+select pg_temp.ok(public.ultima_conexion(prueba.id('pedro@test.cl')) is not null, 'veo la última conexión de mi barbero');
+select pg_temp.ok(public.ultima_conexion(prueba.id('beto@test.cl')) is null, 'no veo la conexión de otro cliente');
+select pg_temp.ok(public.limpiar_avisos() > 0, 'limpiar la campanita');
+select pg_temp.ok(jsonb_array_length(public.mis_avisos()) = 0, 'la campanita queda vacía');
+reset role;
+select pg_temp.ok(prueba.si($q$(select count(*) > 0 from public.avisos where para = prueba.id('ana@test.cl') and oculto and visto_at is not null)$q$), 'los avisos quedan ocultos y vistos (quien los envió conserva el ✓✓)');
+select pg_temp.ok(prueba.si($q$(select last_seen > now() - interval '1 minute' from public.profiles where email = 'ana@test.cl')$q$), 'la conexión se actualiza mientras la app está abierta');
+
 \o
 \echo '✅ TODAS LAS PRUEBAS PASARON'

@@ -52,10 +52,12 @@
   async function abrir() {
     const h = C.hoja('<h2>🔔 Avisos</h2><div class="seg" style="margin-bottom:10px"><button class="on" data-t="r">Recibidos</button>' +
       '<button data-t="e">Enviados</button></div><div data-lista><p class="muted">Cargando…</p></div>' +
-      '<div class="btns"><button class="gris small" data-todo>✓ Marcar todo como visto</button></div>');
+      '<div class="btns"><button class="gris small" data-todo>✓ Marcar todo como visto</button><button class="gris small" data-limpiar>🗑️ Limpiar</button></div>' +
+      '<p class="muted chico" data-nota>Los avisos se borran solos a los 7 días.</p>');
     const lista = h.q('[data-lista]');
     const recibidos = async () => {
       h.q('[data-todo]').classList.remove('hidden');
+      h.q('[data-limpiar]').classList.remove('hidden');
       let av = [];
       try { av = await K.rpc('mis_avisos'); } catch (e) { lista.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
       if (!av.length) { lista.innerHTML = '<div class="empty"><span class="ico">🔕</span>No tienes avisos todavía.</div>'; return; }
@@ -72,6 +74,7 @@
     };
     const enviados = async () => {
       h.q('[data-todo]').classList.add('hidden');
+      h.q('[data-limpiar]').classList.add('hidden');
       let av = [];
       try { av = await K.rpc('avisos_enviados'); } catch (e) { lista.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
       if (!av.length) { lista.innerHTML = '<div class="empty"><span class="ico">📤</span>Aquí verás si leyeron los avisos que enviaste (confirmaciones, cambios de hora…).</div>'; return; }
@@ -84,6 +87,10 @@
       (b.dataset.t === 'r' ? recibidos : enviados)();
     });
     h.q('[data-todo]').onclick = async () => { await K.rpc('marcar_vistos', { p_ids: null }); actualizar(); recibidos(); };
+    h.q('[data-limpiar]').onclick = async (ev) => {
+      if (!await C.confirmar('Se vacía tu campanita. Quien te envió los avisos igual ve que los recibiste.', { titulo: '🗑️ Limpiar avisos', si: 'Limpiar' })) return;
+      try { await K.rpc('limpiar_avisos'); C.toast('🗑️ Campanita limpia'); actualizar(); recibidos(); } catch (e) { C.toast('⚠️ ' + e.message); }
+    };
     recibidos();
   }
 

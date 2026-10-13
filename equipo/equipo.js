@@ -490,7 +490,7 @@
         '<li class="tap" data-c="' + c.id + '" data-n="' + esc((c.nombre + ' ' + (c.telefono || '') + ' ' + (c.email || '')).toLowerCase()) + '">' + C.avatar(c, c.premium ? 'premium' : '') +
         '<div class="grow"><b>' + esc(c.nombre) + '</b>' + (c.premium ? ' <span class="pill oro">⭐</span>' : '') + (c.bloqueado ? ' <span class="pill bad">bloqueado</span>' : '') +
         '<div class="sub">' + c.visitas + ' visita' + (c.visitas === 1 ? '' : 's') + (c.no_vino ? ' · ' + c.no_vino + ' no vino' : '') + (c.saldo ? ' · saldo ' + C.plata(c.saldo) : '') +
-        (c.ultimo_barbero ? ' · último con ' + esc(c.ultimo_barbero.split(' ')[0]) : '') +
+        (c.ultimo_barbero ? ' · último con ' + esc(c.ultimo_barbero.split(' ')[0]) : '') + ' · ' + C.conexion(c.last_seen).txt +
         (c.proxima ? ' · próxima ' + C.cuando(c.proxima) : '') + '</div></div></li>').join('') + '</ul>' + (clientes.length ? '' : '<div class="empty"><span class="ico">👥</span>Aún no hay clientes.</div>') + '</div>';
     $('fCli').oninput = () => z.querySelectorAll('#lCli li').forEach((li) => li.classList.toggle('hidden', !li.dataset.n.includes($('fCli').value.toLowerCase())));
     z.querySelectorAll('[data-c]').forEach((li) => li.onclick = () => fichaCliente(clientes.find((c) => c.id === li.dataset.c)));
@@ -531,6 +531,8 @@
 
   function fichaCliente(c) {
     const h = C.hoja('<h2>' + C.avatar(c, 'sm' + (c.premium ? ' premium' : '')) + ' ' + esc(c.nombre) + (c.premium ? ' <span class="pill oro">⭐ Premium</span>' : '') + '</h2>' +
+      '<div class="det-fila"><span>📶 Conexión</span><b>' + C.conexion(c.last_seen).txt + '</b></div>' +
+      (!c.last_seen ? '<p class="muted chico" style="margin:4px 0">Aún no entra a la app: reenvíale su acceso con "Restablecer clave".</p>' : '') +
       '<div class="det-fila"><span>Visitas</span><b>' + c.visitas + '</b></div><div class="det-fila"><span>No vino</span><b>' + c.no_vino + '</b></div>' +
       (c.ultimo_barbero ? '<div class="det-fila"><span>✂️ Último corte</span><b>con ' + esc(c.ultimo_barbero) + ' · ' + C.cuando(c.ultimo_corte) + '</b></div>' : '') +
       (c.habitual ? '<div class="det-fila"><span>💈 Barbero habitual</span><b>' + esc(c.habitual) + ' (' + c.habitual_veces + ' corte' + (c.habitual_veces === 1 ? '' : 's') + ')</b></div>' : '') +
@@ -573,7 +575,8 @@
     z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + B.barberos.length + ' / ' + lim + ' barberos</b><div class="muted chico">Contándote a ti' + (premium() ? '' : ' · Premium: hasta 10') + '</div></div>' +
       '<button id="bNuevoBar">+ Nuevo barbero</button></div></div><div class="card"><ul class="list">' + B.barberos.map((b) =>
         '<li class="tap" data-b="' + b.id + '">' + C.avatar(b) + '<div class="grow"><b>' + esc(b.nombre) + (b.es_dueno ? ' <span class="pill">Dueño</span>' : '') + (b.activo ? '' : ' <span class="pill bad">inactivo</span>') + '</b>' +
-        '<div class="sub">' + (!b.activo ? '⚪ Inactivo' : b.agenda_abierta ? '🟢 Agenda abierta' : '🔴 Agenda llena') + (b.descripcion ? ' · ' + esc(b.descripcion) : '') + '</div></div><span>›</span></li>').join('') + '</ul></div>' +
+        '<div class="sub">' + (!b.activo ? '⚪ Inactivo' : b.agenda_abierta ? '🟢 Agenda abierta' : '🔴 Agenda llena') + (b.id === yo.id ? '' : ' · ' + C.conexion(b.last_seen).txt) +
+        (b.descripcion ? ' · ' + esc(b.descripcion) : '') + '</div></div><span>›</span></li>').join('') + '</ul></div>' +
       '<p class="muted chico">Cada barbero entra con su cuenta y ve solo el detalle de sus horas; las de los demás le aparecen como "Ocupado". Tú ves todo.</p>';
     $('bNuevoBar').onclick = () => {
       if (B.barberos.length >= lim) return premium() ? C.toast('Llegaste al máximo de barberos') : P.upsell('Hasta 10 barberos');
@@ -586,6 +589,7 @@
     const esYo = b.id === yo.id;
     const propio = !!(b.horario && JSON.stringify(b.horario) !== JSON.stringify(bar().horario));
     const h = C.hoja('<h2>' + C.avatar(b, 'sm') + ' ' + esc(b.nombre) + '</h2>' +
+      (esYo ? '' : '<div class="det-fila"><span>📶 Conexión</span><b>' + C.conexion(b.last_seen).txt + '</b></div>') +
       '<div id="ePerfil"><label>Nombre</label><input data-n maxlength="80" value="' + esc(b.nombre) + '">' +
       '<label>Descripción <span class="opc">(la ven los clientes)</span></label><input data-d maxlength="200" value="' + esc(b.descripcion || '') + '">' +
       '<div class="btns"><button class="gris small" data-foto>📷 Foto</button></div></div>' +

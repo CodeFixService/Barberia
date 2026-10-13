@@ -277,3 +277,8 @@ Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; 
 - Regla de 3 mensajes: cliente → barbero y barbería → Josué; el que responde escribe sin límite.
 - Cliente Premium: **mensajes sin límite**.
 - Contraseña olvidada: botón en el inicio de sesión → WhatsApp a su barbería → el dueño pone una clave genérica → el cliente la cambia en su perfil.
+
+## v1.3
+- Selector de color en todos los perfiles (admin incluido): Free 4 colores conocidos; Premium todos + color personalizado.
+- Conexión visible (en línea / visto hace… / nunca entró) para el dueño y los barberos, y en el chat.
+- Campanita: botón Limpiar (solo para uno mismo) y borrado automático de avisos a los 7 días.
