@@ -3,8 +3,12 @@
   'use strict';
 
   const cfg = global.BARB_CONFIG || {};
+  // La app se mudó de GitHub Pages a Cloudflare: la dirección antigua redirige a la nueva (con la misma página y datos).
+  if (location.hostname === 'codefixservice.github.io' && cfg.SITIO) {
+    location.replace(cfg.SITIO + location.pathname.replace(/^\/Barberia\//i, '') + location.search + location.hash);
+  }
   const ZONA = cfg.ZONA || 'America/Santiago';
-  const VERSION = '1.3';
+  const VERSION = '1.3.1';
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

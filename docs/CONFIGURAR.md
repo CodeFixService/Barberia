@@ -2,12 +2,12 @@
 
 Proyecto Supabase: `https://gxlabxuttnxvzkucckef.supabase.co` (ya está en `shared/config.js`).
 
-## 0. Publicar la app (GitHub Pages)
-1. Une la rama de trabajo con `main` (pull request → **Merge**).
-2. En GitHub: **Barberia → Settings → Pages** → *Source*: **Deploy from a branch** → *Branch*: `main` / `(root)` → **Save**.
-3. En 1–2 minutos queda en: **https://codefixservice.github.io/Barberia/**
+## 0. Publicar la app (Cloudflare)
+La app está publicada en Cloudflare, conectada al repositorio `CodeFixService/Barberia`:
+**https://barberia.juanjosuecastilloloyola.workers.dev/**
 
-> Cada cambio que llegue a `main` se publica solo.
+> Cada cambio que llega a `main` se publica solo en 1–2 minutos (Cloudflare → el proyecto → *Deployments* muestra cada publicación).
+> La dirección antigua de GitHub Pages redirige sola a esta.
 
 ## 1. Crear la base de datos
 Supabase → **SQL Editor** → **+ New query** → pega esto → **Run**:
@@ -23,7 +23,7 @@ end $$;
 Si todavía no uniste la rama, pega el contenido completo de `instalar.sql`).
 
 Si aparece un aviso de operación destructiva, toca **Run this query** (es normal).
-Al final debe decir **"Barbería instalada ✅ versión 1.3"**. Se puede volver a correr cuando haya una versión nueva: no borra datos.
+Al final debe decir **"Barbería instalada ✅ versión 1.3.1"**. Se puede volver a correr cuando haya una versión nueva: no borra datos.
 
 > **Para actualizar a una versión nueva** basta con correr este mismo paso 1 otra vez (también puedes copiar la consulta en
 > la app: **Administración → Ajustes → Versión → Copiar consulta**). Al terminar, la versión se **libera sola** y a todos les
@@ -56,7 +56,7 @@ Esto también deja programadas las tareas automáticas (cada minuto):
 Esta función envía los push, crea las cuentas y restablece las claves.
 
 ## 4. Primer ingreso
-1. Abre **https://codefixservice.github.io/Barberia/** en el celular → **Instalar**
+1. Abre **https://barberia.juanjosuecastilloloyola.workers.dev/** en el celular → **Instalar**
    (iPhone: Compartir → **Agregar a inicio**, y ábrela desde el ícono).
 2. Entra con tu correo y clave: llegas a **Administración**.
 3. **⚙️ Ajustes**:
@@ -76,7 +76,7 @@ Esta función envía los push, crea las cuentas y restablece las claves.
 SQL Editor:
 ```sql
 select jobname, schedule from cron.job;           -- barberia-tick y barberia-push
-select public.db_version();                        -- 1.3
+select public.db_version();                        -- 1.3.1
 ```
 Si `cron.job` no existe: **Database → Extensions** → activa **pg_cron** y **pg_net**, y vuelve a correr el paso 1.
 
