@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.0'::text $$;
+language sql immutable as $$ select '1.1'::text $$;
 
 -- Límites Free / Premium (un solo lugar para cambiarlos).
 create or replace function public.limite(p_que text, p_premium boolean) returns int
@@ -99,6 +99,8 @@ create table if not exists public.barberias (
   created_at           timestamptz not null default now()
 );
 alter table public.barberias enable row level security;
+-- v1.1: el dueño decide si sus barberos pueden crear clientes.
+alter table public.barberias add column if not exists barberos_crean_clientes boolean not null default true;
 
 do $$ begin
   alter table public.profiles add constraint profiles_barberia_fk
@@ -257,7 +259,7 @@ begin
       'id', b.id, 'codigo', b.codigo, 'nombre', b.nombre, 'logo', b.logo, 'color', b.color, 'portada', b.portada,
       'direccion', b.direccion, 'whatsapp', b.whatsapp, 'abono', b.abono, 'link_pago', b.link_pago,
       'datos_transferencia', b.datos_transferencia, 'bienvenida', b.bienvenida, 'horario', b.horario,
-      'comision', b.comision, 'sellos_meta', b.sellos_meta,
+      'comision', b.comision, 'sellos_meta', b.sellos_meta, 'barberos_crean_clientes', b.barberos_crean_clientes,
       'premium', public.is_premium(b.owner_id), 'premium_until', o.premium_until, 'owner_id', b.owner_id) end);
 end $$;
 
@@ -554,6 +556,20 @@ begin
     end if;
     if (select count(*) from public.profiles where created_by = c.id and created_at > now() - interval '1 day') >= 60 then
       return jsonb_build_object('ok', false, 'error', 'Máximo 60 cuentas nuevas por día');
+    end if;
+  elsif c.role = 'barber' then
+    -- v1.1: los barberos también crean clientes (de toda la barbería), si el dueño lo permite.
+    if p_rol <> 'client' then return jsonb_build_object('ok', false, 'error', 'Solo puedes crear clientes'); end if;
+    if not c.activo or not coalesce((select barberos_crean_clientes from public.barberias where id = c.barberia_id), false) then
+      return jsonb_build_object('ok', false, 'error', 'El dueño no tiene activado que los barberos creen clientes');
+    end if;
+    prem := public.barberia_premium(c.barberia_id);
+    select count(*) into n from public.profiles where barberia_id = c.barberia_id and role = 'client';
+    if n >= public.limite('clientes', prem) then
+      return jsonb_build_object('ok', false, 'error', 'La barbería llegó al máximo de ' || public.limite('clientes', prem) || ' clientes');
+    end if;
+    if (select count(*) from public.profiles where created_by = c.id and created_at > now() - interval '1 day') >= 30 then
+      return jsonb_build_object('ok', false, 'error', 'Máximo 30 cuentas nuevas por día');
     end if;
   else
     return jsonb_build_object('ok', false, 'error', 'Sin permiso para crear cuentas');
@@ -937,10 +953,10 @@ begin
   return d ->> 'e';
 end $$;
 
--- ¿Este barbero recibe reservas de clientes?
+-- ¿Este barbero recibe reservas de clientes? Cada barbero (y el dueño) tiene su interruptor "agenda abierta".
 create or replace function public.reservable(p public.profiles) returns boolean
 language sql immutable as $$
-  select not p.suspended and p.activo and (p.role = 'barber' or (p.role = 'owner' and p.agenda_abierta))
+  select not p.suspended and p.activo and p.role in ('owner', 'barber') and p.agenda_abierta
 $$;
 
 -- Libera las horas apartadas sin abono (15 min) y las "por aprobar" sin respuesta.
@@ -1024,7 +1040,7 @@ begin
   return jsonb_build_object(
     'barberos', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'nombre', public.nombre_de(p), 'avatar', p.avatar, 'foto', p.foto, 'descripcion', p.descripcion,
-        'es_dueno', p.role = 'owner', 'reservable', public.reservable(p), 'activo', p.activo,
+        'es_dueno', p.role = 'owner', 'reservable', public.reservable(p), 'activo', p.activo, 'agenda_abierta', p.agenda_abierta,
         'horario', public.horario_de(p.id), 'telefono', case when staff then p.telefono end)
         order by (p.role = 'owner') desc, p.nombre), '[]'::jsonb)
       from public.profiles p where p.barberia_id = me.barberia_id and p.role in ('owner', 'barber')
@@ -1574,16 +1590,25 @@ begin
     color = case when p ? 'color' then nullif(p ->> 'color', '') else color end,
     portada = case when p ? 'portada' then nullif(p ->> 'portada', '') else portada end,
     comision = case when p ? 'comision' then greatest(0, least(100, (p ->> 'comision')::int)) else comision end,
-    sellos_meta = case when p ? 'sellos_meta' then greatest(3, least(30, (p ->> 'sellos_meta')::int)) else sellos_meta end
+    sellos_meta = case when p ? 'sellos_meta' then greatest(3, least(30, (p ->> 'sellos_meta')::int)) else sellos_meta end,
+    barberos_crean_clientes = case when p ? 'barberos_crean_clientes' then coalesce((p ->> 'barberos_crean_clientes')::boolean, true) else barberos_crean_clientes end
   where id = me.barberia_id;
   return public.mi_cuenta();
 end $$;
 
-create or replace function public.set_agenda_abierta(p_abierta boolean) returns void
+-- Abrir / cerrar ("agenda llena") la agenda a clientes: cada barbero la suya; el dueño, la de cualquiera de su equipo.
+drop function if exists public.set_agenda_abierta(boolean);
+create or replace function public.set_agenda_abierta(p_abierta boolean, p_barbero uuid default null) returns void
 language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; quien uuid;
 begin
-  if (public.yo_activo()).role <> 'owner' then raise exception 'Solo el dueño'; end if;
-  update public.profiles set agenda_abierta = coalesce(p_abierta, false) where id = auth.uid();
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  quien := coalesce(p_barbero, me.id);
+  if quien <> me.id and me.role <> 'owner' then raise exception 'Solo el dueño puede cambiar la agenda de otro barbero'; end if;
+  update public.profiles set agenda_abierta = coalesce(p_abierta, false)
+  where id = quien and barberia_id = me.barberia_id and role in ('owner', 'barber');
+  if not found then raise exception 'Barbero no encontrado'; end if;
 end $$;
 
 -- Mi perfil (todos).
@@ -1747,7 +1772,15 @@ begin
       'no_vino', (select count(*) from public.reservas r where r.cliente_id = c.id and r.estado = 'no_vino'),
       'ultima', (select max(r.inicio) from public.reservas r where r.cliente_id = c.id and r.estado = 'atendida'),
       'proxima', (select min(r.inicio) from public.reservas r where r.cliente_id = c.id and r.inicio > now()
-                  and r.estado in ('agendada', 'confirmada', 'por_aprobar', 'esperando_abono')))
+                  and r.estado in ('agendada', 'confirmada', 'por_aprobar', 'esperando_abono')),
+      'creado_por', (select public.nombre_de(x) from public.profiles x where x.id = c.created_by),
+      'ultimo_barbero', (select public.nombre_de(x) from public.caja k join public.profiles x on x.id = k.barbero_id
+                         where k.cliente_id = c.id order by k.fecha desc limit 1),
+      'ultimo_corte', (select max(k.fecha) from public.caja k where k.cliente_id = c.id),
+      'habitual', (select public.nombre_de(x) from public.caja k join public.profiles x on x.id = k.barbero_id
+                   where k.cliente_id = c.id group by x.id order by count(*) desc, max(k.fecha) desc limit 1),
+      'habitual_veces', (select count(*) from public.caja k where k.cliente_id = c.id
+                         group by k.barbero_id order by count(*) desc, max(k.fecha) desc limit 1))
       order by c.nombre), '[]'::jsonb)
     from public.profiles c where c.barberia_id = me.barberia_id and c.role = 'client');
 end $$;

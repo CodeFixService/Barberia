@@ -31,21 +31,22 @@ hora libre, abona y su barbero confirma. Cada barbero anota sus cortes en una **
 | Rol | Quién | Qué hace |
 |---|---|---|
 | **Super admin** | Solo Josué | Crea barberías, activa/corta Premium de barberías y clientes, links de pago de Premium, precios, ve todo. |
-| **Dueño** (barbero principal) | La cuenta que crea Josué | Administra todo: barberos, **clientes (solo él los crea)**, servicios, precios, horarios, abono, datos de pago, ofertas, apariencia. Ve **todas las horas de todos con nombre y detalle**. |
-| **Barbero** | Creado por el dueño | Su agenda, sus horas con detalle (las de los demás solo "Ocupado"), su Caja, sus chats. No crea clientes ni toca ajustes. |
-| **Cliente** | Creado por el dueño | Reserva y anula solo lo suyo, chatea, perfil, ofertas. Todos parten en Free. |
+| **Dueño** (barbero principal) | La cuenta que crea Josué | Administra todo: barberos, **clientes**, servicios, precios, horarios, abono, datos de pago, ofertas, apariencia. Ve **todas las horas de todos con nombre y detalle**. |
+| **Barbero** | Creado por el dueño | Su agenda (con su propio interruptor "agenda abierta / llena"), sus horas con detalle (las de los demás solo "Ocupado"), su Caja, sus chats. **Crea clientes** si el dueño lo permite (v1.1). No toca ajustes. |
+| **Cliente** | Creado por el dueño o un barbero | Es de **toda la barbería**: reserva con cualquier barbero que tenga la agenda abierta. Reserva y anula solo lo suyo, chatea, perfil, ofertas. Todos parten en Free. |
 
-- **Registro cerrado, sin página pública.** El dueño crea la cuenta del cliente y la envía por WhatsApp.
+- **Registro cerrado, sin página pública.** El dueño (o un barbero, si el dueño lo permite) crea la cuenta del cliente y la envía por WhatsApp.
+  En la ficha queda **quién lo creó**, su **último corte (con qué barbero y cuándo)** y su **barbero habitual**.
 - Barberos (contando al dueño): **Free 3 · Premium 10**.
 
-### 3.1 Agenda del dueño
-- **Si la barbería tiene un solo barbero** (el dueño), los clientes reservan directo con él.
-- **Si hay más barberos**, la agenda del dueño **no se ofrece** a los clientes: ellos reservan con los demás barberos.
-  Para atenderse con el dueño, le escriben por el chat interno, acuerdan y **el dueño agenda la hora en su calendario,
-  asociada a ese cliente**.
-- **Interruptor del dueño "Mi agenda abierta a clientes"** (decidido): cuando está disponible la abre y le reservan
-  directo; cuando tiene el cupo lleno la cierra. Viene activado si es el único barbero y desactivado si hay más.
-  Con la agenda cerrada, los clientes le escriben por chat y él les agenda la hora a mano.
+### 3.1 Agenda abierta / llena (v1.1)
+- **Cada barbero, incluido el dueño, tiene su interruptor "Mi agenda abierta a clientes"** en su inicio.
+  Si lo desmarca, los clientes lo ven con **"🔴 agenda llena"**: pueden reservar con otro barbero o escribirle por el chat
+  para coordinar, y él les agenda la hora a mano.
+- **El dueño puede abrir o cerrar la agenda de cualquier barbero** desde Más → Mi equipo.
+- La agenda del dueño viene abierta si es el único barbero y se cierra sola al crear el primer barbero (la puede volver a abrir).
+- Un barbero **inactivo** no aparece para reservar.
+- El dueño decide en **Ajustes → Equipo** si sus barberos pueden crear clientes (activado por defecto).
 
 ## 4. Horarios (todo administrable)
 - **Cada día de la semana (lunes a domingo)** puede ser **Abierto**, **A consultar** o **Cerrado**, con hora de inicio, término
@@ -268,7 +269,8 @@ Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; 
 ## 16. Decisiones cerradas (v0.4)
 - Abono solo con **link de pago o transferencia**. Sin efectivo para agendar.
 - Premium **$4.900/mes**, igual para barbería y cliente, pagado a Josué. Activación con **key mensual** o **directa**, ambas registradas con fecha de término.
-- Interruptor **"Mi agenda abierta a clientes"** para el dueño.
+- Interruptor **"Mi agenda abierta a clientes"** para cada barbero (v1.1; el dueño puede cambiar el de cualquiera).
+- Los barberos también crean clientes si el dueño lo permite (v1.1).
 - Funciones Premium visibles **en plateado con 🔒** para los Free.
 - Barberos creados por el dueño: versión tradicional (sus horas, su caja, sus chats).
 - **Solo push + campanita** (sin correo), con **estado Visto** en avisos y chats, en ambas direcciones.

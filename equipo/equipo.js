@@ -76,8 +76,8 @@
     if (yo.clave_temporal) html += '<div class="banner alerta"><div class="grow"><b>🔑 Cambia tu clave temporal</b> en Más → Mi perfil.</div></div>';
     html += '<div class="card"><div class="flex">' + C.avatar(yo, 'lg') + '<div class="grow"><h2 style="margin:0">Hola, ' + esc(yo.nombre.split(' ')[0]) + ' 💈</h2>' +
       '<div class="muted">' + C.fechaLarga(f) + '</div></div></div>' +
-      (dueno() ? '<label class="check" style="margin-top:14px"><input type="checkbox" id="chkAgenda"' + (yo.agenda_abierta ? ' checked' : '') + '> <span><b>Mi agenda abierta a clientes</b><br><span class="muted chico">' +
-        'Ábrela cuando tengas cupo; ciérrala cuando estés lleno (te escribirán por el chat).</span></span></label>' : '') + '</div>';
+      '<label class="check" style="margin-top:14px"><input type="checkbox" id="chkAgenda"' + (yo.agenda_abierta ? ' checked' : '') + '> <span><b>Mi agenda abierta a clientes</b><br><span class="muted chico">' +
+        'Desmárcala cuando estés lleno: los clientes te verán con "agenda llena" y podrán reservar con otro barbero o escribirte por el chat.</span></span></label></div>';
     html += '<div class="stats"><div class="card"><small>Horas hoy</small><b>' + deHoy.length + '</b></div>' +
       '<div class="card"><small>Por confirmar</small><b style="color:var(--consultar)">' + pend.length + '</b></div>' +
       '<div class="card"><small>Atendidas hoy</small><b>' + deHoy.filter((r) => r.estado === 'atendida').length + '</b></div>' +
@@ -106,7 +106,7 @@
     el.querySelectorAll('[data-comp]').forEach((x) => x.onclick = () => verComprobante(x.dataset.comp));
     el.querySelectorAll('[data-ver]').forEach((x) => x.onclick = () => abrirReserva(x.dataset.ver));
     if ($('chkAgenda')) $('chkAgenda').onchange = async (e) => {
-      try { await K.rpc('set_agenda_abierta', { p_abierta: e.target.checked }); yo.agenda_abierta = e.target.checked; await cargarBarberia(); C.toast(e.target.checked ? '🟢 Agenda abierta' : '🔴 Agenda cerrada a clientes'); }
+      try { await K.rpc('set_agenda_abierta', { p_abierta: e.target.checked }); yo.agenda_abierta = e.target.checked; await cargarBarberia(); C.toast(e.target.checked ? '🟢 Agenda abierta' : '🔴 Agenda llena: no te pueden reservar'); }
       catch (err) { C.toast('⚠️ ' + err.message); e.target.checked = !e.target.checked; }
     };
     $('bHoraHoy').onclick = () => nuevaHora(dueno() && !yo.agenda_abierta && B.barberos.length > 1 ? yo.id : yo.id, f, null);
@@ -451,7 +451,7 @@
       ['perfil', '👤', 'Mi perfil', 'Foto, clave, notificaciones'],
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbele a Josué']
     ] : [
-      ['clientes', '👥', 'Clientes', 'La lista de la barbería'],
+      ['clientes', '👥', 'Clientes', bar().barberos_crean_clientes !== false ? 'Ver y crear clientes' : 'La lista de la barbería'],
       ['estadisticas', '📊', 'Mis estadísticas', 'Tus cortes y ventas'],
       ['perfil', '👤', 'Mi perfil', 'Foto, clave, notificaciones'],
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbele a Josué']
@@ -482,12 +482,15 @@
     z.innerHTML = '<p class="muted">Cargando…</p>';
     try { await cargarClientes(true); } catch (e) { z.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     const lim = premium() ? 500 : 40;
-    z.innerHTML = (dueno() ? '<div class="card"><div class="flex"><div class="grow"><b>' + clientes.length + ' / ' + lim + ' clientes</b>' +
-      (premium() ? '' : '<div class="muted chico">Con Premium: hasta 500</div>') + '</div><button id="bNuevoCli">+ Nuevo cliente</button></div></div>' : '') +
+    const puedeCrear = dueno() || bar().barberos_crean_clientes !== false;
+    z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + clientes.length + ' / ' + lim + ' clientes</b>' +
+      '<div class="muted chico">Son de toda la barbería: pueden reservar con cualquier barbero' + (premium() ? '' : ' · Premium: hasta 500') + '</div></div>' +
+      (puedeCrear ? '<button id="bNuevoCli">+ Nuevo cliente</button>' : '') + '</div></div>' +
       '<input id="fCli" placeholder="🔎 Buscar cliente…" style="margin-bottom:10px"><div class="card"><ul class="list" id="lCli">' + clientes.map((c) =>
         '<li class="tap" data-c="' + c.id + '" data-n="' + esc((c.nombre + ' ' + (c.telefono || '') + ' ' + (c.email || '')).toLowerCase()) + '">' + C.avatar(c, c.premium ? 'premium' : '') +
         '<div class="grow"><b>' + esc(c.nombre) + '</b>' + (c.premium ? ' <span class="pill oro">⭐</span>' : '') + (c.bloqueado ? ' <span class="pill bad">bloqueado</span>' : '') +
         '<div class="sub">' + c.visitas + ' visita' + (c.visitas === 1 ? '' : 's') + (c.no_vino ? ' · ' + c.no_vino + ' no vino' : '') + (c.saldo ? ' · saldo ' + C.plata(c.saldo) : '') +
+        (c.ultimo_barbero ? ' · último con ' + esc(c.ultimo_barbero.split(' ')[0]) : '') +
         (c.proxima ? ' · próxima ' + C.cuando(c.proxima) : '') + '</div></div></li>').join('') + '</ul>' + (clientes.length ? '' : '<div class="empty"><span class="ico">👥</span>Aún no hay clientes.</div>') + '</div>';
     $('fCli').oninput = () => z.querySelectorAll('#lCli li').forEach((li) => li.classList.toggle('hidden', !li.dataset.n.includes($('fCli').value.toLowerCase())));
     z.querySelectorAll('[data-c]').forEach((li) => li.onclick = () => fichaCliente(clientes.find((c) => c.id === li.dataset.c)));
@@ -529,7 +532,9 @@
   function fichaCliente(c) {
     const h = C.hoja('<h2>' + C.avatar(c, 'sm' + (c.premium ? ' premium' : '')) + ' ' + esc(c.nombre) + (c.premium ? ' <span class="pill oro">⭐ Premium</span>' : '') + '</h2>' +
       '<div class="det-fila"><span>Visitas</span><b>' + c.visitas + '</b></div><div class="det-fila"><span>No vino</span><b>' + c.no_vino + '</b></div>' +
-      (c.ultima ? '<div class="det-fila"><span>Última visita</span><b>' + C.cuando(c.ultima) + '</b></div>' : '') +
+      (c.ultimo_barbero ? '<div class="det-fila"><span>✂️ Último corte</span><b>con ' + esc(c.ultimo_barbero) + ' · ' + C.cuando(c.ultimo_corte) + '</b></div>' : '') +
+      (c.habitual ? '<div class="det-fila"><span>💈 Barbero habitual</span><b>' + esc(c.habitual) + ' (' + c.habitual_veces + ' corte' + (c.habitual_veces === 1 ? '' : 's') + ')</b></div>' : '') +
+      (c.creado_por ? '<div class="det-fila"><span>👤 Creado por</span><b>' + esc(c.creado_por) + ' · ' + P.fechaCorta(c.created_at) + '</b></div>' : '') +
       (c.proxima ? '<div class="det-fila"><span>Próxima hora</span><b>' + C.cuando(c.proxima) + '</b></div>' : '') +
       (c.email ? '<div class="det-fila"><span>Correo</span><b>' + esc(c.email) + '</b></div>' : '') +
       (c.cumple ? '<div class="det-fila"><span>🎂 Cumpleaños</span><b>' + esc(c.cumple.slice(8) + '/' + c.cumple.slice(5, 7)) + '</b></div>' : '') +
@@ -568,7 +573,7 @@
     z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + B.barberos.length + ' / ' + lim + ' barberos</b><div class="muted chico">Contándote a ti' + (premium() ? '' : ' · Premium: hasta 10') + '</div></div>' +
       '<button id="bNuevoBar">+ Nuevo barbero</button></div></div><div class="card"><ul class="list">' + B.barberos.map((b) =>
         '<li class="tap" data-b="' + b.id + '">' + C.avatar(b) + '<div class="grow"><b>' + esc(b.nombre) + (b.es_dueno ? ' <span class="pill">Dueño</span>' : '') + (b.activo ? '' : ' <span class="pill bad">inactivo</span>') + '</b>' +
-        '<div class="sub">' + (b.reservable ? '🟢 Agenda abierta' : '🔴 Agenda cerrada a clientes') + (b.descripcion ? ' · ' + esc(b.descripcion) : '') + '</div></div><span>›</span></li>').join('') + '</ul></div>' +
+        '<div class="sub">' + (!b.activo ? '⚪ Inactivo' : b.agenda_abierta ? '🟢 Agenda abierta' : '🔴 Agenda llena') + (b.descripcion ? ' · ' + esc(b.descripcion) : '') + '</div></div><span>›</span></li>').join('') + '</ul></div>' +
       '<p class="muted chico">Cada barbero entra con su cuenta y ve solo el detalle de sus horas; las de los demás le aparecen como "Ocupado". Tú ves todo.</p>';
     $('bNuevoBar').onclick = () => {
       if (B.barberos.length >= lim) return premium() ? C.toast('Llegaste al máximo de barberos') : P.upsell('Hasta 10 barberos');
@@ -584,7 +589,8 @@
       '<div id="ePerfil"><label>Nombre</label><input data-n maxlength="80" value="' + esc(b.nombre) + '">' +
       '<label>Descripción <span class="opc">(la ven los clientes)</span></label><input data-d maxlength="200" value="' + esc(b.descripcion || '') + '">' +
       '<div class="btns"><button class="gris small" data-foto>📷 Foto</button></div></div>' +
-      (!esYo ? '<label class="check"><input type="checkbox" data-act' + (b.activo ? ' checked' : '') + '> Activo (recibe reservas)</label>' : '') +
+      '<label class="check"><input type="checkbox" data-agenda' + (b.agenda_abierta ? ' checked' : '') + '> Agenda abierta a clientes <span class="muted chico">(desmarca = agenda llena)</span></label>' +
+      (!esYo ? '<label class="check"><input type="checkbox" data-act' + (b.activo ? ' checked' : '') + '> Activo (si lo desactivas, no aparece para reservar)</label>' : '') +
       '<div id="eHorario"><label class="check"><input type="checkbox" data-hp' + (propio ? ' checked' : '') + '> Horario propio (si no, usa el de la barbería)</label><div data-hz class="' + (propio ? '' : 'hidden') + '"></div></div>' +
       '<div class="btns"><button data-g>Guardar</button>' + (!esYo ? '<button class="gris" data-chat>💬 Escribir</button><button class="gris" data-clave>🔑 Restablecer clave</button>' : '') + '</div>');
     let foto;
@@ -600,6 +606,10 @@
       if (premium() || esYo) { p.nombre = h.q('[data-n]').value; p.descripcion = h.q('[data-d]').value; if (foto) p.foto = foto; }
       if (premium()) p.horario = h.q('[data-hp]').checked ? leerH() : null;
       await K.rpc('guardar_barbero', { p_id: b.id, p });
+      if (h.q('[data-agenda]').checked !== !!b.agenda_abierta) {
+        await K.rpc('set_agenda_abierta', { p_abierta: h.q('[data-agenda]').checked, p_barbero: b.id });
+        if (esYo) yo.agenda_abierta = h.q('[data-agenda]').checked;
+      }
       h.cerrar(); await cargarBarberia(); secEquipo();
     }, '✅ Guardado');
     if (h.q('[data-chat]')) h.q('[data-chat]').onclick = () => { h.cerrar(); mostrar('chat'); Chat.abrir(b.id, { nombre: b.nombre, avatar: b.avatar, foto: b.foto, rol: 'barber' }); };
@@ -788,6 +798,8 @@
       '<label>Monto del abono</label><input data-k="abono" type="number" inputmode="numeric" min="0" max="100000" value="' + b.abono + '">' +
       '<label>Link de pago <span class="opc">(Mercado Pago u otro)</span></label><input data-k="link_pago" placeholder="https://…" value="' + esc(b.link_pago || '') + '">' +
       '<label>Datos de transferencia</label><textarea data-k="datos_transferencia" maxlength="400" placeholder="Nombre, RUT, banco, tipo y número de cuenta, correo">' + esc(b.datos_transferencia || '') + '</textarea></div>' +
+      '<div class="card"><h2>👥 Equipo</h2><label class="check" style="margin-top:0"><input type="checkbox" id="chkCrean"' + (b.barberos_crean_clientes !== false ? ' checked' : '') + '> ' +
+      '<span><b>Mis barberos pueden crear clientes</b><br><span class="muted chico">Los clientes son de toda la barbería y en su ficha queda quién lo creó.</span></span></label></div>' +
       '<div class="card"><h2>🕐 Horario de la semana</h2><div id="edH"></div></div>' +
       '<div class="card"><h2>⛔ Días bloqueados</h2><div id="lBloq"><p class="muted">Cargando…</p></div><div class="btns"><button class="gris" id="bBloq">+ Bloquear fechas</button></div></div>' +
       '<div class="card" id="cPrem"><h2>⭐ Premium</h2><label>Color de la app</label><div class="swatches" id="sw"></div>' +
@@ -805,7 +817,7 @@
     if ($('bSinPortada')) $('bSinPortada').onclick = () => { portada = ''; C.toast('Portada quitada, toca Guardar'); };
     if (!premium()) P.bloquear($('cPrem'), 'Colores, portada, comisiones y sellos');
     $('bGuardarAj').onclick = (ev) => C.accion(ev.target, async () => {
-      const p = { horario: leerH() };
+      const p = { horario: leerH(), barberos_crean_clientes: $('chkCrean').checked };
       z.querySelectorAll('[data-k]').forEach((i) => {
         if (!premium() && (i.dataset.k === 'comision' || i.dataset.k === 'sellos_meta')) return;
         p[i.dataset.k] = i.type === 'number' ? (+i.value || 0) : i.value;

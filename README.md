@@ -12,11 +12,11 @@ reserva con abono y comprobante, mensajes con vistos, caja de cortes y planes Fr
 | Rol | Página | Qué hace |
 |---|---|---|
 | **Super admin** (Josué) | `admin/` | Crea barberías, activa Premium (key mensual o directo), aprueba "Ya pagué", ve ventas y actividad de cada barbería con recomendaciones automáticas, avisos masivos con contador de vistos. |
-| **Dueño** | `equipo/` | Todo lo de su barbería: agenda de todos, clientes, barberos, servicios y precios, ofertas, horario lunes a domingo, abono, caja, estadísticas, logo y colores. Interruptor "Mi agenda abierta a clientes". |
-| **Barbero** | `equipo/` | Su agenda (lo de otros lo ve "Ocupado"), confirma horas, su caja y sus chats. |
+| **Dueño** | `equipo/` | Todo lo de su barbería: agenda de todos, clientes, barberos, servicios y precios, ofertas, horario lunes a domingo, abono, caja, estadísticas, logo y colores. Puede abrir o cerrar la agenda de cualquier barbero y decidir si sus barberos crean clientes. |
+| **Barbero** | `equipo/` | Su agenda con su interruptor "abierta / llena" (lo de otros lo ve "Ocupado"), confirma horas, crea clientes (si el dueño lo permite), su caja y sus chats. |
 | **Cliente** | `cliente/` | Carrito de servicios → barbero → hora → abono con comprobante. Mis horas, anular, mensajes, ofertas, perfil. |
 
-Registro cerrado: el admin crea las barberías y cada dueño crea a sus barberos y clientes (el acceso se envía por WhatsApp).
+Registro cerrado: el admin crea las barberías; cada dueño crea a sus barberos y clientes, y los barberos también crean clientes si el dueño lo permite (el acceso se envía por WhatsApp). Los clientes son de toda la barbería: reservan con cualquier barbero con agenda abierta, y su ficha muestra quién lo creó, su último corte y su barbero habitual.
 
 ## Reservas
 - Calendario por barbero: **Día · Semana · Mes** (y **Año** / **Todos en columnas** para el dueño Premium). Los clientes ven lo ocupado sin nombres.

@@ -58,7 +58,13 @@ select pg_temp.crear('dueno@test.cl', 'pedro@test.cl', 'Pedro', 'barber');
 select pg_temp.crear('dueno@test.cl', 'ana@test.cl', 'Ana', 'client');
 select pg_temp.crear('dueno@test.cl', 'beto@test.cl', 'Beto', 'client');
 select pg_temp.ok((select agenda_abierta = false from public.profiles where email = 'dueno@test.cl'), 'al crear el 1er barbero la agenda del dueño se cierra');
-select pg_temp.debe_fallar($$select pg_temp.crear('pedro@test.cl', 'x@test.cl', 'X', 'client')$$, 'Sin permiso');
+-- v1.1: un barbero también crea clientes (de toda la barbería), salvo que el dueño lo desactive.
+select pg_temp.crear('pedro@test.cl', 'x@test.cl', 'Xavi', 'client');
+select pg_temp.ok((select barberia_id = (select barberia_id from public.profiles where email = 'dueno@test.cl') from public.profiles where email = 'x@test.cl'), 'el cliente creado por un barbero queda en la barbería');
+select pg_temp.debe_fallar($$select pg_temp.crear('pedro@test.cl', 'y2@test.cl', 'Y', 'barber')$$, 'Solo puedes crear clientes');
+update public.barberias set barberos_crean_clientes = false;
+select pg_temp.debe_fallar($$select pg_temp.crear('pedro@test.cl', 'z@test.cl', 'Z', 'client')$$, 'no tiene activado');
+update public.barberias set barberos_crean_clientes = true;
 select pg_temp.debe_fallar($$select pg_temp.crear('dueno@test.cl', 'y@test.cl', 'Y', 'owner')$$, 'Solo puedes crear');
 select pg_temp.crear('dueno@test.cl', 'b2@test.cl', 'Barbero 2', 'barber');
 select pg_temp.debe_fallar($$select pg_temp.crear('dueno@test.cl', 'b3@test.cl', 'Barbero 3', 'barber')$$, 'máximo de 3 barberos');
@@ -79,6 +85,19 @@ select (((now() at time zone 'America/Santiago')::date + 2)::timestamp + interva
        (((now() at time zone 'America/Santiago')::date + 3)::timestamp + interval '12 hours') at time zone 'America/Santiago' as h2,
        (((now() at time zone 'America/Santiago')::date + 2)::timestamp + interval '23 hours') at time zone 'America/Santiago' as fuera;
 grant select on t to authenticated;
+
+-- v1.1: cada barbero abre/cierra su agenda; el dueño puede cambiar la de otros; un barbero no la de otro.
+select pg_temp.como('pedro@test.cl');
+select public.set_agenda_abierta(false);
+select pg_temp.debe_fallar($$select public.set_agenda_abierta(true, prueba.id('b2@test.cl'))$$, 'Solo el dueño');
+reset role;
+select pg_temp.como('ana@test.cl');
+select pg_temp.debe_fallar($$select public.reservar(prueba.id('pedro@test.cl'), (select h1 from t), array[prueba.serv('Corte')])$$, 'agenda abierta');
+reset role;
+select pg_temp.como('dueno@test.cl');
+select public.set_agenda_abierta(true, prueba.id('pedro@test.cl'));
+reset role;
+select pg_temp.ok((select agenda_abierta from public.profiles where email = 'pedro@test.cl'), 'el dueño abrió la agenda de Pedro');
 
 -- 3. Reservar (Ana) con abono y comprobante
 select pg_temp.como('ana@test.cl');
@@ -229,6 +248,8 @@ reset role;
 select pg_temp.como('dueno@test.cl');
 select pg_temp.ok(jsonb_array_length(public.ver_caja(current_date - 30, current_date + 1)) = 2, 'dueño Premium ve la caja de todos');
 select pg_temp.ok((public.estadisticas(current_date - 30, current_date + 1) -> 'por_barbero') is not null, 'estadísticas Premium');
+select pg_temp.ok((select x ->> 'ultimo_barbero' = 'Pedro' and x ->> 'habitual' = 'Pedro' and x ->> 'creado_por' = 'Juan Dueño'
+  from jsonb_array_elements(public.mis_clientes()) x where x ->> 'nombre' = 'Beto'), 'ficha: último barbero, habitual y creado por');
 reset role;
 
 -- 12. Liberar horas sin abono

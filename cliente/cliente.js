@@ -96,7 +96,7 @@
     // Equipo
     html += '<div class="sec-tit">💈 Nuestro equipo</div><div class="card"><ul class="list">' + B.barberos.map((x) =>
       '<li>' + C.avatar(x) + '<div class="grow"><b>' + esc(x.nombre) + '</b>' + (x.descripcion ? '<div class="sub">' + esc(x.descripcion) + '</div>' : '') +
-      (!x.reservable ? '<div class="sub">💬 Agenda por mensaje</div>' : '') + '</div>' +
+      (!x.reservable ? '<div class="sub">🔴 Agenda llena · escríbele por mensaje</div>' : '') + '</div>' +
       (yo.favorito === x.id ? '<span class="pill oro">❤️ Favorito</span>' : '') +
       '<button class="icono" data-chat="' + x.id + '" aria-label="Escribir">💬</button></li>').join('') + '</ul></div>';
     // Datos de la barbería
@@ -205,7 +205,7 @@
     html += '<div class="paso"><span class="n">2</span><b>Elige tu barbero</b></div><div class="barberos">';
     if (reservables().length > 1) html += '<button class="barb' + (barberoSel === '*' ? ' on' : '') + '" data-b="*"><span class="av">🎲</span>El que esté libre<small>más horas</small></button>';
     html += B.barberos.map((x) => '<button class="barb' + (barberoSel === x.id ? ' on' : '') + (x.reservable ? '' : ' cerrada') + '" data-b="' + x.id + '">' + C.avatar(x, yo.favorito === x.id ? 'premium' : '') +
-      esc(x.nombre.split(' ')[0]) + '<small>' + (x.reservable ? (yo.favorito === x.id ? '❤️ favorito' : 'disponible') : '💬 por mensaje') + '</small></button>').join('');
+      esc(x.nombre.split(' ')[0]) + '<small>' + (x.reservable ? (yo.favorito === x.id ? '❤️ favorito' : 'disponible') : '🔴 agenda llena') + '</small></button>').join('');
     html += '</div>';
     html += '<div class="paso"><span class="n">3</span><b class="grow">Elige día y hora</b></div>' +
       '<div class="seg" style="margin-bottom:10px"><button data-vista="dia">Día</button><button data-vista="semana">Semana</button><button data-vista="mes">Mes</button></div>' +
@@ -220,7 +220,7 @@
     el.querySelectorAll('[data-b]').forEach((x) => x.onclick = () => {
       const id = x.dataset.b;
       if (id !== '*' && !barbero(id).reservable) {
-        C.confirmar(barbero(id).nombre + ' agenda sus horas por mensaje. ¿Quieres escribirle para coordinar?', { si: '💬 Escribirle', titulo: 'Agenda por mensaje' })
+        C.confirmar(barbero(id).nombre + ' tiene la agenda llena por ahora. Puedes reservar con otro barbero o escribirle para coordinar.', { si: '💬 Escribirle', no: 'Elegir otro', titulo: '🔴 Agenda llena' })
           .then((ok) => { if (ok) { location.hash = 'chat?con=' + id; } });
         return;
       }
@@ -265,7 +265,7 @@
 
   function pintarCalendario() {
     const cal = $('cal');
-    if (!barberoSel) { cal.innerHTML = '<div class="card empty"><span class="ico">💈</span>No hay barberos con agenda abierta. Escríbele a la barbería.</div>'; return; }
+    if (!barberoSel) { cal.innerHTML = '<div class="card empty"><span class="ico">💈</span>Todos los barberos tienen la agenda llena por ahora. Escríbele a la barbería o vuelve más tarde.</div>'; return; }
     const lim = C.sumarDias(C.hoy(), diasMax());
     if (fechaSel < C.hoy()) fechaSel = C.hoy();
     if (vista === 'dia') {

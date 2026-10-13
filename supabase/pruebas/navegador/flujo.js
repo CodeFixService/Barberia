@@ -32,11 +32,9 @@ async function claveDeHoja(p) {
   return /Clave: (\S+)/.exec(t)[1];
 }
 // Próximo día de semana (lun–vie) que no sea hoy.
-function proximoHabil() {
-  const d = new Date(Date.now() + 864e5 * 2);
-  while ([0, 6].includes(d.getDay())) d.setDate(d.getDate() + 1);
-  return d.toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });
-}
+function diaChile(offset) { return new Date(Date.now() + offset * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Santiago' }); }
+function dowChile(f) { const [y, m, d] = f.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); }
+function proximoHabil() { let i = 2; while ([0, 6].includes(dowChile(diaChile(i)))) i++; return diaChile(i); }
 
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] }).catch(() => chromium.launch());
