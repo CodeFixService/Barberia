@@ -208,20 +208,30 @@
     const d = document.createElement('div');
     d.className = 'banner oscuro'; d.id = 'bUpd';
     d.innerHTML = '<div class="grow"><b>🔄 Hay una versión nueva</b><br><span class="chico">Tienes la v' + C.version + ' · Nueva: v' + nueva +
-      (admin && (!lib || mayor(nueva, lib)) ? ' (solo tú la ves: pruébala y libérala en Ajustes)' : '') + '</span></div><button class="small">Actualizar</button>';
-    d.querySelector('button').onclick = async (ev) => {
-      ev.target.disabled = true; ev.target.textContent = 'Actualizando…';
-      const reg = 'serviceWorker' in navigator && await navigator.serviceWorker.getRegistration();
-      const sw = reg && (reg.active || reg.waiting || reg.installing);
-      if (sw) await new Promise((ok) => { const ch = new MessageChannel(); ch.port1.onmessage = ok; sw.postMessage({ tipo: 'actualizar' }, [ch.port2]); setTimeout(ok, 30000); });
-      location.reload();
-    };
+      (admin && (!lib || mayor(nueva, lib)) ? ' (solo tú la ves: falta actualizar la base de datos, ve a Ajustes → Versión)' : '') + '</span></div><button class="small">Actualizar</button>';
+    d.querySelector('button').onclick = (ev) => actualizarAhora(ev.target);
     (document.querySelector('main') || document.body).prepend(d);
+    // Llegó desde el push "Nueva versión": se actualiza sola.
+    if (location.hash === '#actualizar') actualizarAhora(d.querySelector('button'));
+  }
+  async function actualizarAhora(btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Actualizando…'; }
+    C.toast('🔄 Actualizando la app…', 8000);
+    const reg = 'serviceWorker' in navigator && await navigator.serviceWorker.getRegistration();
+    const sw = reg && (reg.active || reg.waiting || reg.installing);
+    if (sw) await new Promise((ok) => { const ch = new MessageChannel(); ch.port1.onmessage = ok; sw.postMessage({ tipo: 'actualizar' }, [ch.port2]); setTimeout(ok, 30000); });
+    if (location.hash === '#actualizar') history.replaceState(null, '', location.pathname);
+    location.reload();
   }
 
   // Ir a lo que indica un aviso ("horas", "agenda?r=…", "chat?con=…", "plan"…), en la página del rol.
   function irA(url) {
     if (!url) return;
+    if (url === 'actualizar') {
+      const b = document.querySelector('#bUpd button');
+      if (b) actualizarAhora(b); else C.toast('✅ Ya tienes la última versión');
+      return;
+    }
     if (/^https?:/.test(url)) { open(url, '_blank'); return; }
     const pag = paginaDe(cuenta && cuenta.role);
     const destino = C.raiz() + pag + '#' + url;

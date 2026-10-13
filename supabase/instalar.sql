@@ -18,7 +18,11 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.1'::text $$;
+language sql immutable as $$ select '1.2'::text $$;
+
+-- Lo nuevo de esta versión (llega en el push a todos al actualizar).
+create or replace function public.notas_version() returns text
+language sql immutable as $$ select 'Actualizaciones más simples: te avisamos al tiro cuando hay una versión nueva.'::text $$;
 
 -- Límites Free / Premium (un solo lugar para cambiarlos).
 create or replace function public.limite(p_que text, p_premium boolean) returns int
@@ -2316,4 +2320,52 @@ begin
   end if;
 end $$;
 
-select 'Barbería instalada ✅ versión ' || public.db_version() as resultado;
+-- ---------------------------------------------------------------------
+-- Actualizaciones (v1.2): al correr este archivo con una versión nueva, se libera sola
+-- y les llega un push a todos para que toquen "Actualizar". Queda en el historial.
+-- ---------------------------------------------------------------------
+create table if not exists public.actualizaciones (
+  id          uuid primary key default gen_random_uuid(),
+  version     text not null,
+  notas       text,
+  avisados    int not null default 0,
+  created_at  timestamptz not null default now()
+);
+alter table public.actualizaciones enable row level security;
+
+create or replace function public.admin_actualizacion_estado() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  return jsonb_build_object(
+    'db_version', public.db_version(),
+    'liberada', (select value from public.app_settings where key = 'version_liberada'),
+    'historial', (select coalesce(jsonb_agg(to_jsonb(x) order by x.created_at desc), '[]'::jsonb) from (
+      select version, notas, avisados, created_at from public.actualizaciones order by created_at desc limit 10) x));
+end $$;
+grant execute on function public.admin_actualizacion_estado() to authenticated;
+revoke execute on function public.admin_actualizacion_estado() from public, anon;
+
+do $$
+declare
+  lib text := (select value from public.app_settings where key = 'version_liberada');
+  v text := public.db_version();
+  n int := 0;
+begin
+  if lib is distinct from v then
+    insert into public.app_settings (key, value) values ('version_liberada', v)
+    on conflict (key) do update set value = excluded.value;
+    -- Si ya hay gente usando la app, se les avisa por push (en una instalación nueva, no).
+    if lib is not null or exists (select 1 from public.profiles where role <> 'admin') then
+      insert into public.avisos (de, para, tipo, titulo, cuerpo, url)
+      select null, p.id, 'aviso', '💈 Nueva versión ' || v || ' de la app', public.notas_version() || ' Toca aquí para actualizar.', 'actualizar'
+      from public.profiles p where not p.suspended;
+      get diagnostics n = row_count;
+    end if;
+    insert into public.actualizaciones (version, notas, avisados) values (v, public.notas_version(), n);
+  end if;
+end $$;
+
+select 'Barbería instalada ✅ versión ' || public.db_version() ||
+       ' · liberada y avisada a ' || coalesce((select avisados from public.actualizaciones where version = public.db_version()
+                                               order by created_at desc limit 1), 0) || ' persona(s)' as resultado;

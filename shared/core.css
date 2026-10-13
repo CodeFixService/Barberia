@@ -428,3 +428,6 @@ ul.feat li::before { content: '⭐'; margin-right: 8px; }
 .tabla th { font-size: 12px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
 .tabla td.n { text-align: right; font-variant-numeric: tabular-nums; }
 .scroll-x { overflow-x: auto; }
+.det-fila { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 15px; }
+.det-fila:last-child { border-bottom: 0; }
+.det-fila b { text-align: right; }

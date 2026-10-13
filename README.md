@@ -63,4 +63,6 @@ supabase/pruebas/     Prueba de punta a punta del servidor en PostgreSQL local
 sw.js                 Funciona sin internet; se actualiza con botón cuando el admin libera la versión
 ```
 
-Al cambiar archivos de la app: sube la versión en `version.json` y en `shared/core.js` (`VERSION`).
+Al cambiar archivos de la app: sube la versión en `version.json`, en `shared/core.js` (`VERSION`) y en `db_version()` / `notas_version()`
+de `supabase/instalar.sql`. Para publicarla, Josué corre la consulta de actualización en Supabase: la versión se libera sola y
+a todos les llega un push para tocar "Actualizar".
