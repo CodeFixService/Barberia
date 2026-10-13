@@ -20,7 +20,9 @@
   C.marca(bar().premium);
 
   const prem = () => !!yo.is_premium;
-  const diasMax = () => (prem() ? 45 : 14);
+  const diasMax = () => K.limite('dias', prem());
+  // Días que se muestran en el calendario (los de Premium, para que el Free los vea plateados).
+  const ventana = () => Math.min(365, Math.max(K.limite('dias', true), K.limite('dias', false)) + 1);
   const servicio = (id) => B.servicios.find((s) => s.id === id);
   const barbero = (id) => B.barberos.find((b) => b.id === id);
   const reservables = () => B.barberos.filter((b) => b.reservable);
@@ -32,7 +34,7 @@
   async function cargarBarberia() { B = await K.rpc('ver_barberia'); }
   async function cargarHoras() { try { horasMias = await K.rpc('mis_horas'); } catch (e) { /* sin red */ } }
   async function cargarDatos(forzar) {
-    const desde = C.hoy(), hasta = C.sumarDias(desde, 46);
+    const desde = C.hoy(), hasta = C.sumarDias(desde, ventana());
     const clave = desde + hasta;
     if (!forzar && datosRango === clave) return;
     datos = await K.rpc('ocupacion', { p_desde: desde, p_hasta: hasta });
@@ -210,7 +212,7 @@
     html += '<div class="paso"><span class="n">3</span><b class="grow">Elige día y hora</b></div>' +
       '<div class="seg" style="margin-bottom:10px"><button data-vista="dia">Día</button><button data-vista="semana">Semana</button><button data-vista="mes">Mes</button></div>' +
       '<div id="cal"></div><div class="leyenda"><span class="l">Libre</span><span class="o">Ocupado</span><span class="m">Mía</span><span class="c">A consultar</span></div>' +
-      '<p class="muted chico">Abono para reservar: <b>' + C.plata(b.abono) + '</b> (se descuenta del total). Reservas hasta ' + diasMax() + ' días adelante' + (prem() ? '' : ' · <a href="#plan">Premium: 45</a>') + '.</p>';
+      '<p class="muted chico">Abono para reservar: <b>' + C.plata(b.abono) + '</b> (se descuenta del total). Reservas hasta ' + diasMax() + ' días adelante' + (prem() ? '' : ' · <a href="#plan">Premium: ' + K.limite('dias', true) + '</a>') + '.</p>';
     el.innerHTML = html;
     el.querySelectorAll('.serv').forEach((x) => x.onclick = () => {
       const id = x.dataset.s;
@@ -270,9 +272,9 @@
     if (fechaSel < C.hoy()) fechaSel = C.hoy();
     if (vista === 'dia') {
       cal.innerHTML = '<div class="dias" id="tira"></div><div class="card" id="slots"></div>';
-      A.tiraDias($('tira'), { cuantos: 46, sel: fechaSel, info: infoDia, alElegir: (f) => { fechaSel = f; pintarCalendario(); } });
+      A.tiraDias($('tira'), { cuantos: ventana(), sel: fechaSel, info: infoDia, alElegir: (f) => { fechaSel = f; pintarCalendario(); } });
       // Días más allá del límite: plateados (Premium).
-      $('tira').querySelectorAll('.dia').forEach((d) => { if (d.dataset.f > lim) P.bloquear(d, 'Reservar hasta 45 días adelante'); });
+      $('tira').querySelectorAll('.dia').forEach((d) => { if (d.dataset.f > lim) P.bloquear(d, 'Reservar hasta ' + K.limite('dias', true) + ' días adelante'); });
       const s = horasDe(fechaSel);
       const dh = A.diaHorario(barberoSel === '*' ? (reservables()[0] || {}).horario : barbero(barberoSel).horario, fechaSel);
       let h = '<h2>' + C.fechaLarga(fechaSel) + (dh.e === 'c' ? ' <span class="pill warn">🟡 A consultar</span>' : '') + '</h2>';
@@ -306,7 +308,7 @@
         alLibre: (c, m) => {
           const s = horasDe(c.f).find((x) => x.min >= m && x.min < m + 30 && (x.estado === 'libre' || x.estado === 'consultar'));
           if (!s) return C.toast('Esa hora no está disponible para ' + (carroDur() || 30) + ' min');
-          if (c.f > lim) return P.upsell('Reservar hasta 45 días adelante');
+          if (c.f > lim) return P.upsell('Reservar hasta ' + K.limite('dias', true) + ' días adelante');
           confirmar(s, c.f);
         } });
     } else {
@@ -316,8 +318,8 @@
       const mover = (n) => { const d = new Date(Date.UTC(y, m - 1 + n, 1)); mesSel = d.getUTCFullYear() + '-' + C.pad(d.getUTCMonth() + 1); pintarCalendario(); };
       $('mAnt').onclick = () => mover(-1);
       $('mSig').onclick = () => mover(1);
-      A.mes($('mes'), { mes: mesSel, info: (f) => (f < C.hoy() || f > C.sumarDias(C.hoy(), 46) ? { cerrado: f < C.hoy() } : infoDia(f)),
-        alDia: (f) => { if (f < C.hoy()) return; if (f > lim) return P.upsell('Reservar hasta 45 días adelante'); fechaSel = f; vista = 'dia'; pintarAgendar(); } });
+      A.mes($('mes'), { mes: mesSel, info: (f) => (f < C.hoy() || f > C.sumarDias(C.hoy(), ventana()) ? { cerrado: f < C.hoy() } : infoDia(f)),
+        alDia: (f) => { if (f < C.hoy()) return; if (f > lim) return P.upsell('Reservar hasta ' + K.limite('dias', true) + ' días adelante'); fechaSel = f; vista = 'dia'; pintarAgendar(); } });
     }
   }
 
@@ -448,7 +450,7 @@
     const prox = horasMias.filter((h) => new Date(h.fin) > ahora && h.estado !== 'anulada').sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
     const hist = horasMias.filter((h) => !(new Date(h.fin) > ahora && h.estado !== 'anulada'));
     el.innerHTML = '<div class="card"><h2><span class="grow">🗓️ Mis horas</span><button class="small" id="bNueva">+ Agendar</button></h2>' +
-      '<p class="muted chico" style="margin:0">Horas activas: ' + prox.filter((h) => ACTIVA.includes(h.estado)).length + ' de ' + (prem() ? 3 : 1) + (prem() ? '' : ' · <a href="#plan">Premium: hasta 3</a>') + '</p></div>' +
+      '<p class="muted chico" style="margin:0">Horas activas: ' + prox.filter((h) => ACTIVA.includes(h.estado)).length + ' de ' + K.limite('activas', prem()) + (prem() ? '' : ' · <a href="#plan">Premium: hasta ' + K.limite('activas', true) + '</a>') + '</p></div>' +
       (prox.length ? prox.map((h) => tarjetaHora(h, true)).join('') : '<div class="card empty"><span class="ico">📅</span>No tienes horas próximas.</div>') +
       (hist.length ? '<div class="sec-tit">Historial</div>' + hist.slice(0, 30).map((h) => tarjetaHora(h)).join('') : '');
     $('bNueva').onclick = () => { location.hash = 'agendar'; };

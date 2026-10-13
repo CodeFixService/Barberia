@@ -18,23 +18,44 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.3.1'::text $$;
+language sql immutable as $$ select '1.4'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'La app se mudó a una dirección nueva y más rápida: ábrela desde https://barberia.juanjosuecastilloloyola.workers.dev/ e instálala de nuevo.'::text $$;
+language sql immutable as $$ select 'Dos links de pago para el abono y planes que se ajustan desde el panel.'::text $$;
 
--- Límites Free / Premium (un solo lugar para cambiarlos).
+-- Planes Free / Premium (v1.4): el admin los edita desde su panel. Estos son los valores de partida.
+create table if not exists public.planes (
+  grupo    text not null check (grupo in ('barberia', 'cliente')),
+  clave    text not null,
+  free     int not null default 0,
+  premium  int not null default 0,
+  primary key (grupo, clave)
+);
+alter table public.planes enable row level security;
+insert into public.planes (grupo, clave, free, premium) values
+  ('barberia', 'barberos', 3, 10),      -- contando al dueño
+  ('barberia', 'clientes', 40, 500),
+  ('barberia', 'servicios', 8, 100),
+  ('barberia', 'ofertas', 1, 50),
+  ('barberia', 'precio', 0, 4900),      -- precio mensual de Premium
+  ('barberia', 'prueba_dias', 0, 7),    -- días de prueba gratis (0 = sin prueba)
+  ('cliente', 'activas', 1, 3),         -- horas activas a la vez
+  ('cliente', 'dias', 14, 45),          -- días hacia adelante para reservar
+  ('cliente', 'mensajes', 3, 0),        -- mensajes seguidos sin respuesta (0 = sin límite)
+  ('cliente', 'precio', 0, 4900),
+  ('cliente', 'prueba_dias', 0, 7)
+on conflict (grupo, clave) do nothing;
+
+create or replace function public.plan_valor(p_grupo text, p_clave text, p_premium boolean) returns int
+language sql stable security definer set search_path = '' as $$
+  select case when p_premium then premium else free end from public.planes where grupo = p_grupo and clave = p_clave
+$$;
+
+-- Límites Free / Premium (se leen de la tabla de planes).
 create or replace function public.limite(p_que text, p_premium boolean) returns int
-language sql immutable as $$
-  select case p_que
-    when 'barberos'  then case when p_premium then 10 else 3 end     -- contando al dueño
-    when 'clientes'  then case when p_premium then 500 else 40 end
-    when 'servicios' then case when p_premium then 100 else 8 end
-    when 'ofertas'   then case when p_premium then 50 else 1 end
-    when 'activas'   then case when p_premium then 3 else 1 end      -- horas activas del cliente
-    when 'dias'      then case when p_premium then 45 else 14 end    -- días hacia adelante
-  end
+language sql stable security definer set search_path = '' as $$
+  select public.plan_valor(case when p_que in ('activas', 'dias', 'mensajes') then 'cliente' else 'barberia' end, p_que, p_premium)
 $$;
 
 -- ---------------------------------------------------------------------
@@ -105,6 +126,14 @@ create table if not exists public.barberias (
 alter table public.barberias enable row level security;
 -- v1.1: el dueño decide si sus barberos pueden crear clientes.
 alter table public.barberias add column if not exists barberos_crean_clientes boolean not null default true;
+-- v1.4: dos links de pago para el abono (monto + link). El activo define el abono y el link que ven los clientes.
+alter table public.barberias add column if not exists pago1_monto int;
+alter table public.barberias add column if not exists pago1_link text;
+alter table public.barberias add column if not exists pago2_monto int;
+alter table public.barberias add column if not exists pago2_link text;
+alter table public.barberias add column if not exists pago_activo smallint not null default 1;
+alter table public.barberias alter column pago1_monto set default 4000;
+update public.barberias set pago1_monto = abono, pago1_link = coalesce(pago1_link, link_pago) where pago1_monto is null;
 
 do $$ begin
   alter table public.profiles add constraint profiles_barberia_fk
@@ -264,6 +293,9 @@ begin
       'direccion', b.direccion, 'whatsapp', b.whatsapp, 'abono', b.abono, 'link_pago', b.link_pago,
       'datos_transferencia', b.datos_transferencia, 'bienvenida', b.bienvenida, 'horario', b.horario,
       'comision', b.comision, 'sellos_meta', b.sellos_meta, 'barberos_crean_clientes', b.barberos_crean_clientes,
+      'pagos', case when me.role = 'owner' then jsonb_build_object('activo', b.pago_activo,
+        'p1', jsonb_build_object('monto', coalesce(b.pago1_monto, b.abono), 'link', coalesce(b.pago1_link, b.link_pago)),
+        'p2', jsonb_build_object('monto', b.pago2_monto, 'link', b.pago2_link)) end,
       'premium', public.is_premium(b.owner_id), 'premium_until', o.premium_until, 'owner_id', b.owner_id) end);
 end $$;
 
@@ -283,20 +315,51 @@ create table if not exists public.app_settings (
 );
 alter table public.app_settings enable row level security;
 insert into public.app_settings (key, value) values ('precio_premium', '4900') on conflict do nothing;
+-- v1.4: si ya habías cambiado el precio, los dos planes parten con ese precio (solo la primera vez).
+do $$ begin
+  if not exists (select 1 from public.app_settings where key = 'planes_v14') then
+    update public.planes set premium = coalesce((select value::int from public.app_settings where key = 'precio_premium'), premium)
+    where clave = 'precio';
+    insert into public.app_settings (key, value) values ('planes_v14', '1');
+  end if;
+end $$;
 
 create or replace function public.ajustes_publicos() returns jsonb
 language sql stable security definer set search_path = '' as $$
-  select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) from public.app_settings where key <> 'url_enviar'
+  select coalesce(jsonb_object_agg(key, value), '{}'::jsonb)
+    || jsonb_build_object('planes', (select jsonb_object_agg(g.grupo, g.v) from (
+         select grupo, jsonb_object_agg(clave, jsonb_build_object('free', free, 'premium', premium)) as v
+         from public.planes group by grupo) g))
+  from public.app_settings where key not in ('url_enviar', 'planes_v14')
 $$;
+
+-- El admin guarda los planes: { "barberia": { "clientes": { "free": 40, "premium": 500 }, ... }, "cliente": { ... } }
+create or replace function public.admin_guardar_planes(p jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r record; f int; pr int;
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  for r in select * from public.planes loop
+    if p -> r.grupo -> r.clave is null then continue; end if;
+    f := coalesce((p -> r.grupo -> r.clave ->> 'free')::int, r.free);
+    pr := coalesce((p -> r.grupo -> r.clave ->> 'premium')::int, r.premium);
+    if f < 0 or pr < 0 or f > 10000000 or pr > 10000000 then raise exception 'Valor no válido en %', r.clave; end if;
+    if r.clave in ('barberos', 'dias') and (f < 1 or pr < 1) then raise exception '% debe ser al menos 1', r.clave; end if;
+    update public.planes set free = f, premium = pr where grupo = r.grupo and clave = r.clave;
+  end loop;
+  update public.app_settings set value = (select premium::text from public.planes where grupo = 'barberia' and clave = 'precio')
+  where key = 'precio_premium';
+  return public.ajustes_publicos();
+end $$;
 
 create or replace function public.admin_ajuste(p_key text, p_value text) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
   if not public.is_admin() then raise exception 'Solo el administrador'; end if;
-  if p_key not in ('precio_premium', 'link_pago', 'whatsapp_admin', 'version_liberada', 'datos_transferencia') then
+  if p_key not in ('precio_premium', 'link_pago', 'link_pago_barberia', 'link_pago_cliente', 'whatsapp_admin', 'version_liberada', 'datos_transferencia') then
     raise exception 'Ajuste no permitido';
   end if;
-  if p_key = 'link_pago' and coalesce(p_value, '') <> '' and p_value !~* '^https://' then
+  if p_key like 'link_pago%' and coalesce(p_value, '') <> '' and p_value !~* '^https://' then
     raise exception 'El link debe empezar con https://';
   end if;
   if coalesce(trim(p_value), '') = '' then delete from public.app_settings where key = p_key;
@@ -567,13 +630,13 @@ begin
       select count(*) + 1 into n from public.profiles where barberia_id = c.barberia_id and role = 'barber';
       if n >= public.limite('barberos', prem) then
         return jsonb_build_object('ok', false, 'error', 'Llegaste al máximo de ' || public.limite('barberos', prem) ||
-          ' barberos (contándote)' || case when prem then '' else '. Con Premium puedes tener hasta 10.' end);
+          ' barberos (contándote)' || case when prem then '' else '. Con Premium puedes tener hasta ' || public.limite('barberos', true) || '.' end);
       end if;
     else
       select count(*) into n from public.profiles where barberia_id = c.barberia_id and role = 'client';
       if n >= public.limite('clientes', prem) then
         return jsonb_build_object('ok', false, 'error', 'Llegaste al máximo de ' || public.limite('clientes', prem) ||
-          ' clientes' || case when prem then '' else '. Con Premium puedes tener hasta 500.' end);
+          ' clientes' || case when prem then '' else '. Con Premium puedes tener hasta ' || public.limite('clientes', true) || '.' end);
       end if;
     end if;
     if (select count(*) from public.profiles where created_by = c.id and created_at > now() - interval '1 day') >= 60 then
@@ -679,7 +742,7 @@ begin
   if p_tipo not in ('barberia', 'cliente') then raise exception 'Tipo no válido'; end if;
   insert into public.licenses (key, tipo, para_nombre, meses, precio, nota)
   values (public.nueva_key(), p_tipo, left(coalesce(trim(p_para), ''), 80), greatest(1, least(12, coalesce(p_meses, 1))),
-          coalesce(p_precio, (select value::int from public.app_settings where key = 'precio_premium'), 4900) * greatest(1, least(12, coalesce(p_meses, 1))),
+          coalesce(p_precio, public.plan_valor(p_tipo, 'precio', true), 4900) * greatest(1, least(12, coalesce(p_meses, 1))),
           p_nota)
   returning * into l;
   return to_jsonb(l);
@@ -735,7 +798,7 @@ begin
   insert into public.licenses (key, tipo, para_nombre, meses, precio, origen)
   values (public.nueva_key(), case when p.role = 'owner' then 'barberia' else 'cliente' end, public.nombre_de(p),
           greatest(1, least(12, coalesce(p_meses, 1))),
-          coalesce(p_precio, (select value::int from public.app_settings where key = 'precio_premium'), 4900) * greatest(1, least(12, coalesce(p_meses, 1))),
+          coalesce(p_precio, public.plan_valor(case when p.role = 'owner' then 'barberia' else 'cliente' end, 'precio', true), 4900) * greatest(1, least(12, coalesce(p_meses, 1))),
           'directo')
   returning * into l;
   return jsonb_build_object('hasta', public.extender_premium(p_user, l.id), 'key', l.key);
@@ -780,16 +843,18 @@ alter table public.requests enable row level security;
 -- Prueba de 7 días: se activa sola, una vez por cuenta.
 create or replace function public.probar_premium() returns jsonb
 language plpgsql security definer set search_path = '' as $$
-declare me public.profiles;
+declare me public.profiles; dias int;
 begin
   me := public.yo_activo();
   if me.role not in ('owner', 'client') then raise exception 'Esta cuenta no tiene plan'; end if;
   if me.trial_used then raise exception 'Ya usaste tu prueba gratis'; end if;
   if public.is_premium(me.id) then raise exception 'Ya eres Premium'; end if;
-  update public.profiles set plan = 'premium', premium_until = now() + interval '7 days', trial_used = true where id = me.id;
+  dias := coalesce(public.plan_valor(case when me.role = 'owner' then 'barberia' else 'cliente' end, 'prueba_dias', true), 0);
+  if dias <= 0 then raise exception 'La prueba gratis no está disponible por ahora'; end if;
+  update public.profiles set plan = 'premium', premium_until = now() + make_interval(days => dias), trial_used = true where id = me.id;
   insert into public.requests (user_id, kind, status, resolved_at) values (me.id, 'prueba', 'aprobada', now());
   perform public.avisar(me.id, public.admin_id(), 'plan', '🎁 Prueba Premium',
-    public.nombre_de(me) || ' (' || case when me.role = 'owner' then 'barbería' else 'cliente' end || ') activó sus 7 días gratis', 'admin');
+    public.nombre_de(me) || ' (' || case when me.role = 'owner' then 'barbería' else 'cliente' end || ') activó sus ' || dias || ' días gratis', 'admin');
   return public.mi_cuenta();
 end $$;
 
@@ -1172,12 +1237,12 @@ begin
   if p_inicio < now() + interval '1 hour' then raise exception 'Reserva con al menos 1 hora de anticipación'; end if;
   if p_inicio > now() + make_interval(days => public.limite('dias', prem)) then
     raise exception 'Puedes reservar hasta % días adelante%', public.limite('dias', prem),
-      case when prem then '' else ' (Premium: 45 días)' end;
+      case when prem then '' else ' (Premium: ' || public.limite('dias', true) || ' días)' end;
   end if;
   if (select count(*) from public.reservas where cliente_id = me.id and fin > now()
       and estado in ('esperando_abono', 'por_aprobar', 'agendada', 'confirmada')) >= public.limite('activas', prem) then
     raise exception 'Ya tienes % hora(s) activa(s)%', public.limite('activas', prem),
-      case when prem then '' else '. Con Premium puedes tener hasta 3.' end;
+      case when prem then '' else '. Con Premium puedes tener hasta ' || public.limite('activas', true) || '.' end;
   end if;
   if (select count(*) from public.reservas where cliente_id = me.id and created_at > now() - interval '1 day') >= 5 then
     raise exception 'Máximo 5 reservas por día';
@@ -1597,6 +1662,25 @@ begin
   if p ? 'horario' and not public.horario_valido(p -> 'horario') then raise exception 'Horario no válido'; end if;
   if not public.img_ok(p ->> 'logo', 30000) or not public.img_ok(p ->> 'portada', 150000) then raise exception 'Imagen muy pesada'; end if;
   if coalesce(p ->> 'link_pago', '') <> '' and p ->> 'link_pago' !~* '^https://' then raise exception 'El link de pago debe empezar con https://'; end if;
+  -- v1.4: dos links de pago; el activo pasa a ser el abono y el link que ven los clientes.
+  if p ? 'pagos' then
+    if coalesce(p -> 'pagos' ->> 'activo', '1') not in ('1', '2') then raise exception 'Elige el link 1 o el 2'; end if;
+    if coalesce(p -> 'pagos' -> 'p1' ->> 'link', '') <> '' and p -> 'pagos' -> 'p1' ->> 'link' !~* '^https://' then raise exception 'El link 1 debe empezar con https://'; end if;
+    if coalesce(p -> 'pagos' -> 'p2' ->> 'link', '') <> '' and p -> 'pagos' -> 'p2' ->> 'link' !~* '^https://' then raise exception 'El link 2 debe empezar con https://'; end if;
+    if (p -> 'pagos' ->> 'activo') = '2' and nullif(p -> 'pagos' -> 'p2' ->> 'monto', '') is null then raise exception 'Pon el monto del link 2 antes de activarlo'; end if;
+    update public.barberias set
+      pago1_monto = greatest(0, least(100000, coalesce(nullif(p -> 'pagos' -> 'p1' ->> 'monto', '')::int, pago1_monto, abono))),
+      pago1_link = nullif(trim(p -> 'pagos' -> 'p1' ->> 'link'), ''),
+      pago2_monto = greatest(0, least(100000, nullif(p -> 'pagos' -> 'p2' ->> 'monto', '')::int)),
+      pago2_link = nullif(trim(p -> 'pagos' -> 'p2' ->> 'link'), ''),
+      pago_activo = coalesce((p -> 'pagos' ->> 'activo')::smallint, 1)
+    where id = me.barberia_id;
+    update public.barberias set
+      abono = case when pago_activo = 2 then coalesce(pago2_monto, 0) else coalesce(pago1_monto, 0) end,
+      link_pago = case when pago_activo = 2 then pago2_link else pago1_link end
+    where id = me.barberia_id;
+    p := p - 'abono' - 'link_pago';
+  end if;
   if (coalesce(p ->> 'color', '') <> '' or coalesce(p ->> 'portada', '') <> '') and not prem then
     raise exception 'Colores y portada son Premium ⭐';
   end if;
@@ -1899,8 +1983,8 @@ language sql stable security definer set search_path = '' as $$
   select case
     when me.role = 'admin' then null
     when public.rango(me.role) > public.rango(o.role) then null
-    when me.role = 'client' and public.is_premium(me.id) then null
-    else greatest(0, 3 - (select count(*) from public.messages m
+    when me.role = 'client' and coalesce(public.limite('mensajes', public.is_premium(me.id)), 3) = 0 then null
+    else greatest(0, (case when me.role = 'client' then coalesce(public.limite('mensajes', public.is_premium(me.id)), 3) else 3 end) - (select count(*) from public.messages m
       where m.sender = me.id and m.recipient = o.id and not m.sistema
         and m.created_at > coalesce((select max(x.created_at) from public.messages x where x.sender = o.id and x.recipient = me.id), '-infinity')))::int
   end
@@ -1919,7 +2003,7 @@ begin
     raise exception 'La conversación está bloqueada';
   end if;
   left_ := public.chat_restantes(p_to);
-  if left_ is not null and left_ <= 0 then raise exception 'Ya enviaste 3 mensajes. Espera que te respondan 🙂'; end if;
+  if left_ is not null and left_ <= 0 then raise exception 'Llegaste al máximo de mensajes seguidos. Espera que te respondan 🙂'; end if;
   if me.role <> 'admin' and (select count(*) from public.messages where sender = me.id and created_at > now() - interval '1 day') >= 100 then
     raise exception 'Llegaste al máximo de 100 mensajes por día';
   end if;

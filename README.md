@@ -21,7 +21,7 @@ Registro cerrado: el admin crea las barberías; cada dueño crea a sus barberos 
 ## Reservas
 - Calendario por barbero: **Día · Semana · Mes** (y **Año** / **Todos en columnas** para el dueño Premium). Los clientes ven lo ocupado sin nombres.
 - Horas cada 15 min, mínimo 1 h de anticipación, hasta 14 días (Free) o 45 (Premium) adelante. Días **a consultar** (fin de semana por defecto) quedan *por aprobar*.
-- **Abono fijo** (por defecto $4.000) por link de pago o transferencia: 15 min para tocar **"Ya aboné"** con la foto del comprobante, que llega al chat del barbero. Si no, la hora se libera sola.
+- **Abono fijo** (por defecto $4.000) con **dos links de pago intercambiables** (el activo define el monto) o transferencia: 15 min para tocar **"Ya aboné"** con la foto del comprobante, que llega al chat del barbero. Si no, la hora se libera sola.
 - Estados: Esperando abono → Agendada → **Confirmada** (aviso al cliente) → Atendida (pasa sola a la caja) / No vino / Anulada.
 - Anular con 24 h (o 1 h si reservó para el mismo día) → abono a favor; si no, se pierde. Si anula la barbería, siempre queda a favor.
 - El servidor impide tomar dos veces la misma hora (restricción de exclusión en PostgreSQL).
@@ -34,7 +34,7 @@ Registro cerrado: el admin crea las barberías; cada dueño crea a sus barberos 
 - Chat con ✓ / ✓✓ / ✓✓ azul. **Máximo 3 mensajes seguidos** hacia arriba (cliente → barbero, barbero → barbero, barbería → Josué) hasta que contesten; el que responde, sin límite. El cliente Premium escribe sin límite.
 - Clave olvidada: botón en el inicio de sesión → WhatsApp de su barbería → el dueño pone una clave genérica → el cliente la cambia en su perfil.
 
-## Free vs Premium ($4.900/mes, barbería y cliente, se paga a Josué)
+## Free vs Premium (valores de partida; el admin los cambia en Ajustes → Planes)
 | Barbería | Free | Premium |
 |---|---|---|
 | Barberos (con el dueño) / clientes | 3 / 40 | 10 / 500 |
