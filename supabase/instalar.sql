@@ -18,11 +18,11 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '1.4'::text $$;
+language sql immutable as $$ select '2.0'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'Dos links de pago para el abono y planes que se ajustan desde el panel.'::text $$;
+language sql immutable as $$ select 'Reserva sin cuenta con el link o QR de tu barbería, abono en revisión, calificaciones y pagos con comprobante.'::text $$;
 
 -- Planes Free / Premium (v1.4): el admin los edita desde su panel. Estos son los valores de partida.
 create table if not exists public.planes (
@@ -47,9 +47,56 @@ insert into public.planes (grupo, clave, free, premium) values
   ('cliente', 'prueba_dias', 0, 7)
 on conflict (grupo, clave) do nothing;
 
+-- v2.0: opciones sí/no de cada plan (1 = incluido, 0 = no). Parten igual que antes: todo esto es Premium.
+insert into public.planes (grupo, clave, free, premium) values
+  ('barberia', 'estadisticas', 0, 1),
+  ('barberia', 'recordatorios', 0, 1),
+  ('barberia', 'caja_reportes', 0, 1),
+  ('barberia', 'colores', 0, 1),
+  ('barberia', 'ofertas_vip', 0, 1),
+  ('barberia', 'sellos', 0, 1),
+  ('barberia', 'horario_barbero', 0, 1),
+  ('barberia', 'vista_todos', 0, 1),
+  ('cliente', 'lista_espera', 0, 1),
+  ('cliente', 'favorito', 0, 1),
+  ('cliente', 'recordatorios', 0, 1),
+  ('cliente', 'ofertas_vip', 0, 1),
+  ('cliente', 'colores', 0, 1)
+on conflict (grupo, clave) do nothing;
+
+-- v2.0: nombre, descripción, beneficios y duración de cada plan (los edita el admin).
+create table if not exists public.planes_info (
+  grupo          text not null check (grupo in ('barberia', 'cliente')),
+  nivel          text not null check (nivel in ('free', 'premium')),
+  nombre         text not null default '',
+  descripcion    text not null default '',
+  beneficios     jsonb not null default '[]'::jsonb,
+  duracion_dias  int not null default 30 check (duracion_dias between 1 and 3650),
+  primary key (grupo, nivel)
+);
+alter table public.planes_info enable row level security;
+insert into public.planes_info (grupo, nivel, nombre, descripcion) values
+  ('barberia', 'free', 'Free', 'Lo básico para recibir reservas con abono.'),
+  ('barberia', 'premium', 'Premium', 'Todo para hacer crecer tu barbería.'),
+  ('cliente', 'free', 'Free', 'Reserva tu hora y sigue tus reservas.'),
+  ('cliente', 'premium', 'Premium', 'Para clientes que no quieren esperar.')
+on conflict (grupo, nivel) do nothing;
+
 create or replace function public.plan_valor(p_grupo text, p_clave text, p_premium boolean) returns int
 language sql stable security definer set search_path = '' as $$
   select case when p_premium then premium else free end from public.planes where grupo = p_grupo and clave = p_clave
+$$;
+
+-- ¿El plan incluye esta opción sí/no?
+create or replace function public.tiene(p_grupo text, p_clave text, p_premium boolean) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select coalesce(public.plan_valor(p_grupo, p_clave, p_premium), 0) > 0
+$$;
+
+-- Duración (días) de un mes de Premium.
+create or replace function public.duracion_plan(p_grupo text) returns int
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select duracion_dias from public.planes_info where grupo = p_grupo and nivel = 'premium'), 30)
 $$;
 
 -- Límites Free / Premium (se leen de la tabla de planes).
@@ -134,6 +181,16 @@ alter table public.barberias add column if not exists pago2_link text;
 alter table public.barberias add column if not exists pago_activo smallint not null default 1;
 alter table public.barberias alter column pago1_monto set default 4000;
 update public.barberias set pago1_monto = abono, pago1_link = coalesce(pago1_link, link_pago) where pago1_monto is null;
+-- v2.0: un texto por link (ej. "Abono normal", "Abono fin de semana").
+alter table public.barberias add column if not exists pago1_texto text;
+alter table public.barberias add column if not exists pago2_texto text;
+-- v2.0: "Días a consultar" ya no existe: cada día está abierto o cerrado (los "a consultar" pasan a abiertos).
+update public.barberias set horario = (select jsonb_agg(case when d ->> 'e' = 'c' then jsonb_set(d, '{e}', '"a"') else d end order by n)
+                                       from jsonb_array_elements(horario) with ordinality x(d, n))
+where horario::text like '%"e": "c"%';
+update public.profiles set horario = (select jsonb_agg(case when d ->> 'e' = 'c' then jsonb_set(d, '{e}', '"a"') else d end order by n)
+                                      from jsonb_array_elements(horario) with ordinality x(d, n))
+where horario is not null and horario::text like '%"e": "c"%';
 
 do $$ begin
   alter table public.profiles add constraint profiles_barberia_fk
@@ -169,29 +226,81 @@ begin
   return c;
 end $$;
 
+-- Teléfono normalizado (últimos 9 dígitos) para reconocer a un cliente aunque no tenga cuenta.
+create or replace function public.tel_norm(t text) returns text
+language sql immutable as $$ select right(regexp_replace(coalesce(t, ''), '\D', '', 'g'), 9) $$;
+
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = '' as $$
 declare
   inv public.user_invites;
   es_admin boolean := lower(new.email) = public.admin_email();
+  meta jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
   b uuid;
+  bb public.barberias;
+  rol text;
+  bid uuid;
+  v_tel text;
+  dias int;
 begin
   select * into inv from public.user_invites
   where email = lower(new.email) and created_at > now() - interval '1 hour';
-  if not es_admin and inv.email is null then
-    raise exception 'El registro está cerrado. Tu barbería te crea la cuenta.';
+  if es_admin then
+    insert into public.profiles (id, email, nombre, role) values (new.id, lower(new.email), 'Administrador', 'admin')
+    on conflict (id) do nothing;
+    return new;
   end if;
-  insert into public.profiles (id, email, nombre, role, barberia_id, telefono, created_by)
-  values (new.id, lower(new.email), left(coalesce(inv.nombre, 'Administrador'), 80),
-          case when es_admin then 'admin' else inv.role end,
-          case when es_admin then null else inv.barberia_id end,
-          inv.telefono, inv.created_by)
-  on conflict (id) do nothing;
-  if not es_admin and inv.role = 'owner' then
+  if inv.email is not null then
+    rol := inv.role; bid := inv.barberia_id; v_tel := inv.telefono;
+    insert into public.profiles (id, email, nombre, role, barberia_id, telefono, created_by)
+    values (new.id, lower(new.email), left(coalesce(inv.nombre, ''), 80), rol, bid, v_tel, inv.created_by)
+    on conflict (id) do nothing;
+  elsif meta ->> 'rol' = 'cliente' and coalesce(meta ->> 'barberia', '') <> '' then
+    -- v2.0: el cliente se crea su cuenta desde el link o QR de su barbería (solo así; lo demás sigue cerrado).
+    select * into bb from public.barberias where codigo = lower(trim(meta ->> 'barberia'));
+    if bb.id is null or exists (select 1 from public.profiles o where o.id = bb.owner_id and o.suspended) then
+      raise exception 'Esta barbería no está recibiendo clientes nuevos';
+    end if;
+    if (select count(*) from public.profiles where barberia_id = bb.id and role = 'client')
+       >= public.limite('clientes', public.barberia_premium(bb.id)) then
+      raise exception 'Esta barbería llegó a su máximo de clientes con cuenta. Puedes reservar sin cuenta.';
+    end if;
+    if coalesce(trim(meta ->> 'nombre'), '') = '' or length(public.tel_norm(meta ->> 'telefono')) < 8 then
+      raise exception 'Escribe tu nombre y tu WhatsApp';
+    end if;
+    rol := 'client'; bid := bb.id; v_tel := nullif(regexp_replace(meta ->> 'telefono', '[^0-9+]', '', 'g'), '');
+    insert into public.profiles (id, email, nombre, role, barberia_id, telefono)
+    values (new.id, lower(new.email), left(trim(meta ->> 'nombre'), 80), 'client', bid, v_tel)
+    on conflict (id) do nothing;
+    perform public.avisar(new.id, bb.owner_id, 'aviso', '👤 Nuevo cliente con cuenta',
+      left(trim(meta ->> 'nombre'), 80) || ' se registró desde tu link.', 'clientes');
+  else
+    raise exception 'El registro está cerrado. Entra con el link o QR de tu barbería.';
+  end if;
+  if rol = 'owner' then
+    dias := public.regla('dias_regalo');
     insert into public.barberias (codigo, nombre, owner_id, whatsapp)
-    values (public.nuevo_codigo(), left(coalesce(nullif(inv.extra ->> 'barberia', ''), inv.nombre), 80), new.id, inv.telefono)
+    values (public.nuevo_codigo(), left(coalesce(nullif(inv.extra ->> 'barberia', ''), inv.nombre), 80), new.id, v_tel)
     returning id into b;
-    update public.profiles set barberia_id = b where id = new.id;
+    -- v2.0: la barbería parte con días de Premium de regalo (Reglas → días de regalo).
+    update public.profiles set barberia_id = b, trial_used = true,
+      plan = case when dias > 0 then 'premium' else plan end,
+      premium_until = case when dias > 0 then now() + make_interval(days => dias) else premium_until end
+    where id = new.id;
+    if dias > 0 then
+      insert into public.licenses (key, tipo, para_nombre, meses, dias, precio, origen, redeemed_by, redeemed_at, inicio, termino, nota)
+      values (public.nueva_key(), 'barberia', left(coalesce(nullif(inv.extra ->> 'barberia', ''), inv.nombre), 80), 1, dias, 0, 'regalo',
+              new.id, now(), now(), now() + make_interval(days => dias), 'Regalo de bienvenida');
+    end if;
+  end if;
+  -- v2.0: si ya había reservado sin cuenta con este WhatsApp, sus horas y calificaciones pasan a su cuenta.
+  if rol = 'client' and length(public.tel_norm(v_tel)) >= 8 then
+    update public.reservas set cliente_id = new.id
+    where barberia_id = bid and cliente_id is null and cliente_tel = public.tel_norm(v_tel);
+    update public.calificaciones set cliente_id = new.id
+    where barberia_id = bid and cliente_id is null and cliente_tel = public.tel_norm(v_tel);
+    update public.lista_negra set cliente_id = new.id
+    where barberia_id = bid and cliente_id is null and tel = public.tel_norm(v_tel);
   end if;
   delete from public.user_invites where email = lower(new.email);
   return new;
@@ -290,12 +399,16 @@ begin
     'is_admin', public.is_admin(),
     'barberia', case when b.id is null then null else jsonb_build_object(
       'id', b.id, 'codigo', b.codigo, 'nombre', b.nombre, 'logo', b.logo, 'color', b.color, 'portada', b.portada,
-      'direccion', b.direccion, 'whatsapp', b.whatsapp, 'abono', b.abono, 'link_pago', b.link_pago,
-      'datos_transferencia', b.datos_transferencia, 'bienvenida', b.bienvenida, 'horario', b.horario,
+      'direccion', b.direccion, 'whatsapp', b.whatsapp,
+      -- v2.0: el barbero no ve montos ni links de pago (solo el dueño y los clientes).
+      'abono', case when me.role <> 'barber' then b.abono end, 'link_pago', case when me.role <> 'barber' then b.link_pago end,
+      'abono_texto', case when me.role <> 'barber' then case when b.pago_activo = 2 then b.pago2_texto else b.pago1_texto end end,
+      'datos_transferencia', case when me.role <> 'barber' then b.datos_transferencia end, 'bienvenida', b.bienvenida, 'horario', b.horario,
+      'calificacion', public.nota_barberia(b.id),
       'comision', b.comision, 'sellos_meta', b.sellos_meta, 'barberos_crean_clientes', b.barberos_crean_clientes,
       'pagos', case when me.role = 'owner' then jsonb_build_object('activo', b.pago_activo,
-        'p1', jsonb_build_object('monto', coalesce(b.pago1_monto, b.abono), 'link', coalesce(b.pago1_link, b.link_pago)),
-        'p2', jsonb_build_object('monto', b.pago2_monto, 'link', b.pago2_link)) end,
+        'p1', jsonb_build_object('monto', coalesce(b.pago1_monto, b.abono), 'link', coalesce(b.pago1_link, b.link_pago), 'texto', b.pago1_texto),
+        'p2', jsonb_build_object('monto', b.pago2_monto, 'link', b.pago2_link, 'texto', b.pago2_texto)) end,
       'premium', public.is_premium(b.owner_id), 'premium_until', o.premium_until, 'owner_id', b.owner_id) end);
 end $$;
 
@@ -315,6 +428,18 @@ create table if not exists public.app_settings (
 );
 alter table public.app_settings enable row level security;
 insert into public.app_settings (key, value) values ('precio_premium', '4900') on conflict do nothing;
+
+-- Reglas que el admin ajusta (minutos, horas, días). Si falta una, usa el valor de partida.
+create or replace function public.regla(p_clave text) returns int
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select nullif(value, '')::int from public.app_settings where key = 'regla_' || p_clave and value ~ '^-?\d+$'),
+    case p_clave
+      when 'minutos_pago' then 10 when 'minutos_devolucion' then 10 when 'horas_cancelacion' then 24
+      when 'dias_saldo' then 90 when 'dias_regalo' then 30 when 'dias_aviso' then 3 when 'dias_comprobantes' then 30
+      when 'dias_anuladas' then 30 when 'estrellas_lista_negra' then 2 when 'minutos_recordar_revision' then 15
+      when 'activas_invitado' then 1 else 0 end)
+$$;
+
 -- v1.4: si ya habías cambiado el precio, los dos planes parten con ese precio (solo la primera vez).
 do $$ begin
   if not exists (select 1 from public.app_settings where key = 'planes_v14') then
@@ -324,13 +449,72 @@ do $$ begin
   end if;
 end $$;
 
+-- v2.0: textos de la app que el admin edita.
+create table if not exists public.textos (
+  clave  text primary key,
+  valor  text not null default ''
+);
+alter table public.textos enable row level security;
+insert into public.textos (clave, valor) values
+  ('app_lema', 'Reserva tu hora en segundos 💈'),
+  ('vista_bienvenida', 'Elige tu corte, tu barbero y tu hora. No necesitas crear cuenta.'),
+  ('reserva_pago', 'Tienes {minutos} minutos para pagar el abono y subir la foto del comprobante. Si no, la hora se libera.'),
+  ('reserva_revision', 'Recibimos tu comprobante. Tu barbero está verificando la transferencia: apenas la apruebe, tu hora queda agendada.'),
+  ('reserva_politica', 'Si cancelas dentro de los primeros {devolucion} minutos, se te devuelve el abono. Después, con {horas} horas o más de anticipación, el abono queda como saldo a favor para reagendar. Con menos de {horas} horas o si no llegas, se pierde. El abono se descuenta del total.'),
+  ('premium_barberia_texto', 'Más barberos y clientes, estadísticas, recordatorios automáticos y tu barbería con tus colores.'),
+  ('premium_cliente_texto', 'Reserva con más anticipación, más horas a la vez, mensajes sin límite y ofertas VIP.'),
+  ('pago_instrucciones', 'Toca "Pagar", paga con Mercado Pago, toma una captura del comprobante y súbela aquí. Te avisamos apenas se apruebe.'),
+  ('bienvenida_barberia', '¡Bienvenido! Completa tu perfil, tu horario, tus servicios y el link del abono para empezar a recibir reservas.'),
+  ('terminos', 'Al reservar aceptas que tu nombre y WhatsApp se usen solo para gestionar tus horas con la barbería.')
+on conflict (clave) do nothing;
+
+-- v2.0: registro de cambios del admin.
+create table if not exists public.auditoria (
+  id          uuid primary key default gen_random_uuid(),
+  quien       uuid,
+  accion      text not null,
+  detalle     text not null default '',
+  created_at  timestamptz not null default now()
+);
+create index if not exists auditoria_fecha_idx on public.auditoria (created_at desc);
+alter table public.auditoria enable row level security;
+
+create or replace function public.auditar(p_accion text, p_detalle text) returns void
+language sql security definer set search_path = '' as $$
+  insert into public.auditoria (quien, accion, detalle) values (auth.uid(), left(p_accion, 80), left(coalesce(p_detalle, ''), 400))
+$$;
+
+-- v2.0: links de pago de Premium (2 por plan, uno activo). El precio publicado es el del link activo.
+insert into public.app_settings (key, value)
+select 'links_premium', jsonb_build_object(
+  'barberia', jsonb_build_object('activo', 1,
+    's1', jsonb_build_object('monto', (select premium from public.planes where grupo = 'barberia' and clave = 'precio'),
+                             'url', coalesce((select value from public.app_settings where key = 'link_pago_barberia'), (select value from public.app_settings where key = 'link_pago'), ''), 'texto', ''),
+    's2', jsonb_build_object('monto', null, 'url', '', 'texto', '')),
+  'cliente', jsonb_build_object('activo', 1,
+    's1', jsonb_build_object('monto', (select premium from public.planes where grupo = 'cliente' and clave = 'precio'),
+                             'url', coalesce((select value from public.app_settings where key = 'link_pago_cliente'), (select value from public.app_settings where key = 'link_pago'), ''), 'texto', ''),
+    's2', jsonb_build_object('monto', null, 'url', '', 'texto', '')))::text
+on conflict (key) do nothing;
+
+create or replace function public.reglas() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_object_agg(k, public.regla(k)) from unnest(array['minutos_pago', 'minutos_devolucion', 'horas_cancelacion', 'dias_saldo',
+    'dias_regalo', 'dias_aviso', 'dias_comprobantes', 'dias_anuladas', 'estrellas_lista_negra', 'minutos_recordar_revision', 'activas_invitado']) k
+$$;
+
 create or replace function public.ajustes_publicos() returns jsonb
 language sql stable security definer set search_path = '' as $$
   select coalesce(jsonb_object_agg(key, value), '{}'::jsonb)
     || jsonb_build_object('planes', (select jsonb_object_agg(g.grupo, g.v) from (
          select grupo, jsonb_object_agg(clave, jsonb_build_object('free', free, 'premium', premium)) as v
          from public.planes group by grupo) g))
-  from public.app_settings where key not in ('url_enviar', 'planes_v14')
+    || jsonb_build_object('planes_info', (select jsonb_object_agg(g.grupo, g.v) from (
+         select grupo, jsonb_object_agg(nivel, jsonb_build_object('nombre', nombre, 'descripcion', descripcion, 'beneficios', beneficios,
+           'duracion_dias', duracion_dias)) as v from public.planes_info group by grupo) g))
+    || jsonb_build_object('reglas', public.reglas(), 'textos', (select coalesce(jsonb_object_agg(clave, valor), '{}'::jsonb) from public.textos),
+         'links_premium', (select value::jsonb from public.app_settings where key = 'links_premium'))
+  from public.app_settings where key not in ('url_enviar', 'planes_v14', 'links_premium') and key not like 'regla\_%' and key not like '\_%'
 $$;
 
 -- El admin guarda los planes: { "barberia": { "clientes": { "free": 40, "premium": 500 }, ... }, "cliente": { ... } }
@@ -345,11 +529,92 @@ begin
     pr := coalesce((p -> r.grupo -> r.clave ->> 'premium')::int, r.premium);
     if f < 0 or pr < 0 or f > 10000000 or pr > 10000000 then raise exception 'Valor no válido en %', r.clave; end if;
     if r.clave in ('barberos', 'dias') and (f < 1 or pr < 1) then raise exception '% debe ser al menos 1', r.clave; end if;
+    -- v2.0: el precio se toma del link de pago activo (Ajustes → Precios y links).
+    if r.clave = 'precio' then continue; end if;
+    if r.clave in ('estadisticas', 'recordatorios', 'caja_reportes', 'colores', 'ofertas_vip', 'sellos', 'horario_barbero', 'vista_todos',
+                   'lista_espera', 'favorito') then f := least(f, 1); pr := least(pr, 1); end if;
     update public.planes set free = f, premium = pr where grupo = r.grupo and clave = r.clave;
   end loop;
-  update public.app_settings set value = (select premium::text from public.planes where grupo = 'barberia' and clave = 'precio')
-  where key = 'precio_premium';
+  -- Nombre, descripción, beneficios (uno por línea) y duración de cada plan.
+  if jsonb_typeof(p -> 'info') = 'object' then
+    for r in select * from public.planes_info loop
+      if p -> 'info' -> r.grupo -> r.nivel is null then continue; end if;
+      update public.planes_info set
+        nombre = coalesce(left(nullif(trim(p -> 'info' -> r.grupo -> r.nivel ->> 'nombre'), ''), 40), nombre),
+        descripcion = coalesce(left(p -> 'info' -> r.grupo -> r.nivel ->> 'descripcion', 300), descripcion),
+        beneficios = case when jsonb_typeof(p -> 'info' -> r.grupo -> r.nivel -> 'beneficios') = 'array'
+          then (select coalesce(jsonb_agg(left(trim(x), 160)), '[]'::jsonb) from jsonb_array_elements_text(p -> 'info' -> r.grupo -> r.nivel -> 'beneficios') x
+                where trim(x) <> '') else beneficios end,
+        duracion_dias = greatest(1, least(3650, coalesce((p -> 'info' -> r.grupo -> r.nivel ->> 'duracion_dias')::int, duracion_dias)))
+      where grupo = r.grupo and nivel = r.nivel;
+    end loop;
+  end if;
+  perform public.auditar('Planes', 'Cambió los planes Free / Premium');
   return public.ajustes_publicos();
+end $$;
+
+-- v2.0: links de pago de Premium. p = { barberia: { activo: 1, s1: { monto, url, texto }, s2: {…} }, cliente: {…} }
+create or replace function public.admin_guardar_links(p jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare g text; n int; act int; x jsonb; nuevo jsonb := '{}'::jsonb; m int;
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  foreach g in array array['barberia', 'cliente'] loop
+    act := coalesce((p -> g ->> 'activo')::int, 1);
+    if act not in (1, 2) then raise exception 'Elige el espacio 1 o el 2'; end if;
+    x := jsonb_build_object('activo', act);
+    for n in 1..2 loop
+      m := nullif(p -> g -> ('s' || n) ->> 'monto', '')::int;
+      if m is not null and (m < 0 or m > 10000000) then raise exception 'Monto no válido'; end if;
+      if coalesce(p -> g -> ('s' || n) ->> 'url', '') <> '' and p -> g -> ('s' || n) ->> 'url' !~* '^https://' then
+        raise exception 'El link debe empezar con https://';
+      end if;
+      x := x || jsonb_build_object('s' || n, jsonb_build_object('monto', m, 'url', left(trim(coalesce(p -> g -> ('s' || n) ->> 'url', '')), 300),
+             'texto', left(trim(coalesce(p -> g -> ('s' || n) ->> 'texto', '')), 300)));
+    end loop;
+    if (x -> ('s' || act) ->> 'monto') is null then raise exception 'Pon el precio del espacio % antes de activarlo', act; end if;
+    nuevo := nuevo || jsonb_build_object(g, x);
+    update public.planes set premium = (x -> ('s' || act) ->> 'monto')::int where grupo = g and clave = 'precio';
+    insert into public.app_settings (key, value) values ('link_pago_' || g, x -> ('s' || act) ->> 'url')
+    on conflict (key) do update set value = excluded.value;
+  end loop;
+  insert into public.app_settings (key, value) values ('links_premium', nuevo::text) on conflict (key) do update set value = excluded.value;
+  update public.app_settings set value = (select premium::text from public.planes where grupo = 'barberia' and clave = 'precio') where key = 'precio_premium';
+  perform public.auditar('Precios y links', 'Barbería ' || (nuevo -> 'barberia' -> ('s' || (nuevo -> 'barberia' ->> 'activo')) ->> 'monto') ||
+    ' · Cliente ' || (nuevo -> 'cliente' -> ('s' || (nuevo -> 'cliente' ->> 'activo')) ->> 'monto'));
+  return public.ajustes_publicos();
+end $$;
+
+-- v2.0: reglas (minutos, horas y días).
+create or replace function public.admin_guardar_reglas(p jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare k text; v int; lim int[];
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  for k in select jsonb_object_keys(p) loop
+    lim := case k
+      when 'minutos_pago' then array[3, 240] when 'minutos_devolucion' then array[0, 1440] when 'horas_cancelacion' then array[0, 720]
+      when 'dias_saldo' then array[1, 3650] when 'dias_regalo' then array[0, 365] when 'dias_aviso' then array[1, 60]
+      when 'dias_comprobantes' then array[1, 3650] when 'dias_anuladas' then array[7, 3650] when 'estrellas_lista_negra' then array[0, 4]
+      when 'minutos_recordar_revision' then array[5, 720] when 'activas_invitado' then array[1, 10] end;
+    if lim is null then raise exception 'Regla desconocida: %', k; end if;
+    v := nullif(p ->> k, '')::int;
+    if v is null or v < lim[1] or v > lim[2] then raise exception 'El valor de % debe estar entre % y %', k, lim[1], lim[2]; end if;
+    insert into public.app_settings (key, value) values ('regla_' || k, v::text) on conflict (key) do update set value = excluded.value;
+  end loop;
+  perform public.auditar('Reglas', p::text);
+  return public.reglas();
+end $$;
+
+create or replace function public.admin_guardar_textos(p jsonb) returns void
+language plpgsql security definer set search_path = '' as $$
+declare k text;
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  for k in select jsonb_object_keys(p) loop
+    update public.textos set valor = left(coalesce(p ->> k, ''), 1000) where clave = k;
+  end loop;
+  perform public.auditar('Textos', 'Editó ' || (select string_agg(x, ', ') from jsonb_object_keys(p) x));
 end $$;
 
 create or replace function public.admin_ajuste(p_key text, p_value text) returns void
@@ -545,14 +810,15 @@ begin
   end if;
   update public.messages set delivered_at = now() where recipient = me.id and delivered_at is null;
   update public.avisos set entregado_at = now() where para = me.id and entregado_at is null;
+  -- v2.0: pendientes = comprobantes por revisar (y devoluciones, para el dueño); admin = pagos por revisar.
   if me.role = 'owner' then
     select count(*) into pend from public.reservas r
-    where r.barberia_id = me.barberia_id and r.estado in ('agendada', 'por_aprobar') and r.fin > now();
+    where r.barberia_id = me.barberia_id and (r.estado in ('en_revision', 'por_aprobar') or r.devolucion = 'pendiente');
   elsif me.role = 'barber' then
     select count(*) into pend from public.reservas r
-    where r.barbero_id = me.id and r.estado in ('agendada', 'por_aprobar') and r.fin > now();
+    where r.barbero_id = me.id and r.estado in ('en_revision', 'por_aprobar');
   elsif me.role = 'admin' then
-    select count(*) into pend from public.requests where status = 'pendiente';
+    select count(*) into pend from public.pagos where estado = 'en_revision';
   end if;
   return jsonb_build_object(
     'avisos', (select count(*) from public.avisos where para = me.id and visto_at is null and tipo <> 'chat' and not oculto),
@@ -726,6 +992,13 @@ create table if not exists public.licenses (
   revoked      boolean not null default false
 );
 alter table public.licenses enable row level security;
+-- v2.0: Premium por días (pagos con comprobante, regalos) y nuevos orígenes en el historial.
+alter table public.licenses add column if not exists dias int;
+alter table public.licenses drop constraint if exists licenses_origen_check;
+alter table public.licenses add constraint licenses_origen_check check (origen in ('key', 'directo', 'solicitud', 'pago', 'regalo'));
+-- v2.0: las keys sin usar se desactivan (el Premium se paga con comprobante).
+update public.licenses set revoked = true, nota = coalesce(nota || ' · ', '') || 'Desactivada en v2.0 (sin usar)'
+where origen = 'key' and redeemed_by is null and not revoked;
 
 create or replace function public.nueva_key() returns text
 language sql volatile as $$
@@ -739,6 +1012,7 @@ language plpgsql security definer set search_path = '' as $$
 declare l public.licenses;
 begin
   if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  raise exception 'Las keys ya no se usan: el Premium se paga con comprobante (pestaña Pagos) o se activa directo.';
   if p_tipo not in ('barberia', 'cliente') then raise exception 'Tipo no válido'; end if;
   insert into public.licenses (key, tipo, para_nombre, meses, precio, nota)
   values (public.nueva_key(), p_tipo, left(coalesce(trim(p_para), ''), 80), greatest(1, least(12, coalesce(p_meses, 1))),
@@ -772,6 +1046,7 @@ declare me public.profiles; l public.licenses; k text := upper(regexp_replace(co
 begin
   me := public.yo_activo();
   if me.role not in ('owner', 'client') then raise exception 'Esta cuenta no usa keys'; end if;
+  -- v2.0: solo se aceptan las keys que ya estaban entregadas (las sin usar se desactivaron).
   if me.failed_redeems >= 10 and me.last_failed_at > now() - interval '1 hour' then
     raise exception 'Demasiados intentos. Espera una hora.';
   end if;
@@ -804,6 +1079,35 @@ begin
   return jsonb_build_object('hasta', public.extender_premium(p_user, l.id), 'key', l.key);
 end $$;
 
+-- v2.0: suma (o regala) días de Premium. Queda en el historial con su precio (0 = regalo).
+create or replace function public.dar_premium(p_user uuid, p_dias int, p_precio int, p_origen text, p_nota text) returns timestamptz
+language plpgsql security definer set search_path = '' as $$
+declare p public.profiles; ini timestamptz; fin timestamptz;
+begin
+  select * into p from public.profiles where id = p_user for update;
+  if p.role not in ('owner', 'client') then raise exception 'Solo barberías (dueños) y clientes tienen Premium'; end if;
+  ini := greatest(coalesce(case when p.plan = 'premium' then p.premium_until end, now()), now());
+  fin := ini + make_interval(days => p_dias);
+  update public.profiles set plan = 'premium', premium_until = fin, aviso_vence_at = null where id = p_user;
+  insert into public.licenses (key, tipo, para_nombre, meses, dias, precio, origen, redeemed_by, redeemed_at, inicio, termino, nota)
+  values (public.nueva_key(), case when p.role = 'owner' then 'barberia' else 'cliente' end, public.nombre_de(p),
+          greatest(1, least(12, round(p_dias / 30.0)::int)), p_dias, greatest(0, coalesce(p_precio, 0)), p_origen, p_user, now(), ini, fin, p_nota);
+  perform public.avisar(public.admin_id(), p_user, 'plan', '⭐ ¡Premium activado!',
+    'Tu Premium dura hasta el ' || to_char(fin at time zone public.tz(), 'DD/MM/YYYY') || '.', 'plan');
+  return fin;
+end $$;
+
+create or replace function public.admin_dias(p_user uuid, p_dias int) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare fin timestamptz;
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  if coalesce(p_dias, 0) not between 1 and 3650 then raise exception 'Días entre 1 y 3650'; end if;
+  fin := public.dar_premium(p_user, p_dias, 0, 'regalo', 'Días de regalo del admin');
+  perform public.auditar('Días de regalo', p_dias || ' días a ' || (select public.nombre_de(x) from public.profiles x where x.id = p_user));
+  return jsonb_build_object('hasta', fin);
+end $$;
+
 create or replace function public.admin_revocar_key(p_id uuid) returns void
 language plpgsql security definer set search_path = '' as $$
 declare uid uuid;
@@ -820,6 +1124,7 @@ language plpgsql security definer set search_path = '' as $$
 begin
   if not public.is_admin() then raise exception 'Solo el administrador'; end if;
   update public.profiles set plan = 'free', premium_until = null where id = p_user and role <> 'admin';
+  perform public.auditar('Quitar Premium', (select public.nombre_de(x) from public.profiles x where x.id = p_user));
 end $$;
 
 create or replace function public.admin_suspender(p_user uuid, p_suspender boolean) returns void
@@ -827,6 +1132,7 @@ language plpgsql security definer set search_path = '' as $$
 begin
   if not public.is_admin() then raise exception 'Solo el administrador'; end if;
   update public.profiles set suspended = coalesce(p_suspender, false) where id = p_user and role <> 'admin';
+  perform public.auditar(case when p_suspender then 'Suspender' else 'Reactivar' end, (select public.nombre_de(x) from public.profiles x where x.id = p_user));
 end $$;
 
 create table if not exists public.requests (
@@ -847,6 +1153,8 @@ declare me public.profiles; dias int;
 begin
   me := public.yo_activo();
   if me.role not in ('owner', 'client') then raise exception 'Esta cuenta no tiene plan'; end if;
+  -- v2.0: las barberías parten con días de regalo al crearlas; la prueba queda para los clientes.
+  if me.role = 'owner' then raise exception 'Tu barbería ya partió con días de Premium de regalo'; end if;
   if me.trial_used then raise exception 'Ya usaste tu prueba gratis'; end if;
   if public.is_premium(me.id) then raise exception 'Ya eres Premium'; end if;
   dias := coalesce(public.plan_valor(case when me.role = 'owner' then 'barberia' else 'cliente' end, 'prueba_dias', true), 0);
@@ -858,12 +1166,107 @@ begin
   return public.mi_cuenta();
 end $$;
 
--- "Ya pagué": le llega un push a Josué para que active.
+-- v2.0: pagos de Premium con foto del comprobante (barbería o cliente → Josué), se aprueban en el panel.
+create table if not exists public.pagos (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references public.profiles (id) on delete cascade,
+  tipo         text not null check (tipo in ('barberia', 'cliente')),
+  monto        int not null default 0,
+  dias         int not null default 30,
+  comprobante  text,
+  estado       text not null default 'en_revision' check (estado in ('en_revision', 'aprobado', 'rechazado')),
+  nota         text,
+  motivo       text,
+  created_at   timestamptz not null default now(),
+  resuelto_at  timestamptz
+);
+create index if not exists pagos_estado_idx on public.pagos (estado, created_at desc);
+create index if not exists pagos_user_idx on public.pagos (user_id, created_at desc);
+alter table public.pagos enable row level security;
+-- Los "Ya pagué" antiguos (sin comprobante) pasan a Pagos para que se resuelvan ahí.
+alter table public.requests add column if not exists migrado boolean not null default false;
+with x as (
+  update public.requests r set migrado = true where r.kind = 'pago' and r.status = 'pendiente' and not r.migrado returning r.*)
+insert into public.pagos (user_id, tipo, monto, dias, nota, created_at)
+select x.user_id, case when p.role = 'owner' then 'barberia' else 'cliente' end,
+       coalesce(public.plan_valor(case when p.role = 'owner' then 'barberia' else 'cliente' end, 'precio', true), 0), 30,
+       'Aviso "Ya pagué" antiguo, sin comprobante' || coalesce(' · ' || nullif(trim(x.note), ''), ''), x.created_at
+from x join public.profiles p on p.id = x.user_id;
+
+create or replace function public.premium_pagar(p_imagen text, p_nota text default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; g text; m int; pg public.pagos; b text;
+begin
+  me := public.yo_activo();
+  if me.role not in ('owner', 'client') then raise exception 'Esta cuenta no tiene plan'; end if;
+  if not public.img_ok(p_imagen, 600000) or coalesce(p_imagen, '') = '' then raise exception 'Sube la foto del comprobante'; end if;
+  if exists (select 1 from public.pagos where user_id = me.id and estado = 'en_revision') then
+    raise exception 'Ya tienes un comprobante en revisión. Te avisamos apenas se apruebe.';
+  end if;
+  g := case when me.role = 'owner' then 'barberia' else 'cliente' end;
+  m := coalesce(public.plan_valor(g, 'precio', true), 0);
+  insert into public.pagos (user_id, tipo, monto, dias, comprobante, nota)
+  values (me.id, g, m, public.duracion_plan(g), p_imagen, left(nullif(trim(p_nota), ''), 200)) returning * into pg;
+  select nombre into b from public.barberias where id = me.barberia_id;
+  perform public.avisar(me.id, public.admin_id(), 'plan', '💰 Pago Premium por revisar',
+    public.nombre_de(me) || ' · ' || case when g = 'barberia' then 'barbería ' else 'cliente de ' end || coalesce(b, '') || ' · ' || public.pesos(m), 'pagos');
+  return jsonb_build_object('id', pg.id, 'estado', pg.estado);
+end $$;
+
+create or replace function public.mi_pago() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('id', id, 'monto', monto, 'estado', estado, 'motivo', motivo, 'created_at', created_at, 'resuelto_at', resuelto_at)
+  from public.pagos where user_id = auth.uid() order by created_at desc limit 1
+$$;
+
+create or replace function public.admin_pagos(p_estado text) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', g.id, 'tipo', g.tipo, 'monto', g.monto, 'dias', g.dias, 'estado', g.estado,
+      'nota', g.nota, 'motivo', g.motivo, 'created_at', g.created_at, 'resuelto_at', g.resuelto_at, 'tiene_comprobante', g.comprobante is not null,
+      'user_id', p.id, 'nombre', p.nombre, 'email', p.email, 'telefono', coalesce(p.telefono, b.whatsapp), 'rol', p.role, 'barberia', b.nombre,
+      'premium_until', p.premium_until, 'premium', public.is_premium(p.id))
+      order by g.created_at desc), '[]'::jsonb)
+    from (select * from public.pagos where estado = coalesce(p_estado, estado) order by created_at desc limit 300) g
+    join public.profiles p on p.id = g.user_id left join public.barberias b on b.id = p.barberia_id);
+end $$;
+
+create or replace function public.admin_pago_comprobante(p_id uuid) returns text
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  return (select comprobante from public.pagos where id = p_id);
+end $$;
+
+create or replace function public.admin_pago_resolver(p_id uuid, p_aprobar boolean, p_motivo text default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare g public.pagos; fin timestamptz;
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  select * into g from public.pagos where id = p_id and estado = 'en_revision' for update;
+  if g.id is null then raise exception 'Este pago ya fue revisado'; end if;
+  if not p_aprobar and coalesce(trim(p_motivo), '') = '' then raise exception 'Escribe el motivo del rechazo'; end if;
+  update public.pagos set estado = case when p_aprobar then 'aprobado' else 'rechazado' end, resuelto_at = now(),
+    motivo = left(nullif(trim(p_motivo), ''), 300) where id = g.id;
+  if p_aprobar then
+    fin := public.dar_premium(g.user_id, g.dias, g.monto, 'pago', 'Pago con comprobante');
+  else
+    perform public.avisar(public.admin_id(), g.user_id, 'plan', 'Pago Premium rechazado',
+      trim(p_motivo) || '. Puedes volver a subir el comprobante en Mi plan.', 'plan');
+  end if;
+  perform public.auditar(case when p_aprobar then 'Pago aprobado' else 'Pago rechazado' end,
+    (select public.nombre_de(x) from public.profiles x where x.id = g.user_id) || ' · ' || public.pesos(g.monto) || coalesce(' · ' || nullif(trim(p_motivo), ''), ''));
+  return jsonb_build_object('hasta', fin);
+end $$;
+
+-- "Ya pagué" (v1.x): desde v2.0 se paga subiendo el comprobante.
 create or replace function public.ya_pague(p_nota text default null) returns void
 language plpgsql security definer set search_path = '' as $$
 declare me public.profiles; b text;
 begin
   me := public.yo_activo();
+  raise exception 'Actualiza la app: ahora el pago se envía con la foto del comprobante en Mi plan.';
   if me.role not in ('owner', 'client') then raise exception 'Esta cuenta no tiene plan'; end if;
   if exists (select 1 from public.requests where user_id = me.id and kind = 'pago' and status = 'pendiente') then
     raise exception 'Ya avisaste tu pago. Josué lo revisará pronto.';
@@ -888,18 +1291,26 @@ begin
          'No encontramos tu pago. Escríbele a CodeFix por el chat.', 'plan'); end if;
 end $$;
 
--- Cada día: avisa 3 días antes de que venza el Premium.
+-- Cada día: avisa N días antes de que venza el Premium (con botón para pagar) y cuando vence.
 create or replace function public.avisar_vencimientos() returns int
 language plpgsql security definer set search_path = '' as $$
-declare n int := 0; p record;
+declare n int := 0; p record; d int := public.regla('dias_aviso');
 begin
   for p in select * from public.profiles
-           where plan = 'premium' and premium_until between now() and now() + interval '3 days'
-             and (aviso_vence_at is null or aviso_vence_at < premium_until - interval '4 days') loop
+           where plan = 'premium' and role in ('owner', 'client') and premium_until between now() and now() + make_interval(days => d)
+             and (aviso_vence_at is null or aviso_vence_at < premium_until - make_interval(days => d + 1)) loop
     perform public.avisar(public.admin_id(), p.id, 'plan', '⏳ Tu Premium vence pronto',
-      'Vence el ' || to_char(p.premium_until at time zone public.tz(), 'DD/MM/YYYY') || '. Renuévalo en Mi plan para no perder tus beneficios.', 'plan');
+      'Vence el ' || to_char(p.premium_until at time zone public.tz(), 'DD/MM/YYYY') || '. Toca para pagar y subir tu comprobante.', 'plan');
     update public.profiles set aviso_vence_at = now() where id = p.id;
     n := n + 1;
+  end loop;
+  -- Venció: vuelve a Free sin perder nada (se avisa una vez).
+  for p in select * from public.profiles
+           where plan = 'premium' and role in ('owner', 'client') and premium_until < now() and premium_until > now() - interval '2 days'
+             and (aviso_vence_at is null or aviso_vence_at < premium_until) loop
+    perform public.avisar(public.admin_id(), p.id, 'plan', 'Tu Premium venció',
+      'Volviste a Free: no pierdes nada, solo no puedes agregar más de lo que permite el plan. Renueva cuando quieras.', 'plan');
+    update public.profiles set aviso_vence_at = now() where id = p.id;
   end loop;
   return n;
 end $$;
@@ -990,11 +1401,48 @@ create index if not exists reservas_cliente_idx on public.reservas (cliente_id, 
 create index if not exists reservas_vence_idx on public.reservas (expira_at) where estado in ('esperando_abono', 'por_aprobar');
 alter table public.reservas enable row level security;
 
-do $$ begin
-  alter table public.reservas add constraint reservas_sin_choque
-    exclude using gist (barbero_id with =, tstzrange(inicio, fin, '[)') with &&)
-    where (estado in ('esperando_abono', 'por_aprobar', 'agendada', 'confirmada'));
-exception when duplicate_object or duplicate_table then null; end $$;
+-- v2.0: reservas sin cuenta (invitados), link personal, abono "en revisión", devoluciones y reagendar.
+alter table public.reservas add column if not exists token text;
+alter table public.reservas add column if not exists cliente_tel text;
+alter table public.reservas add column if not exists reagendada int not null default 0;
+alter table public.reservas add column if not exists saldo_hasta timestamptz;
+alter table public.reservas add column if not exists devolucion text;
+alter table public.reservas add column if not exists devuelta_at timestamptz;
+alter table public.reservas add column if not exists aprobada_por uuid;
+alter table public.reservas add column if not exists revision_paso int not null default 0;
+alter table public.reservas add column if not exists revision_previa boolean not null default false;
+update public.reservas set token = replace(gen_random_uuid()::text, '-', '') || substr(md5(random()::text), 1, 8) where token is null;
+alter table public.reservas alter column token set default replace(gen_random_uuid()::text, '-', '') || substr(md5(random()::text), 1, 8);
+alter table public.reservas alter column token set not null;
+create unique index if not exists reservas_token_idx on public.reservas (token);
+create index if not exists reservas_tel_idx on public.reservas (barberia_id, cliente_tel);
+create index if not exists reservas_revision_idx on public.reservas (comprobante_at) where estado = 'en_revision';
+alter table public.reservas drop constraint if exists reservas_estado_check;
+alter table public.reservas add constraint reservas_estado_check check (estado in ('esperando_abono', 'en_revision', 'por_aprobar',
+  'agendada', 'confirmada', 'atendida', 'no_vino', 'anulada'));
+alter table public.reservas drop constraint if exists reservas_abono_destino_check;
+alter table public.reservas add constraint reservas_abono_destino_check check (abono_destino in ('saldo', 'perdido', 'devolucion'));
+alter table public.reservas drop constraint if exists reservas_devolucion_check;
+alter table public.reservas add constraint reservas_devolucion_check check (devolucion in ('pendiente', 'devuelta'));
+
+-- Una misma hora no se puede tomar dos veces (también mientras espera el abono o está en revisión).
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'reservas_sin_choque' and pg_get_constraintdef(oid) like '%en_revision%') then
+    alter table public.reservas drop constraint if exists reservas_sin_choque;
+    -- Las horas que esperaban confirmación pasan a "en revisión"; las confirmadas quedan como "agendada" (un solo paso).
+    update public.reservas set estado = 'en_revision', expira_at = null, comprobante_at = coalesce(comprobante_at, created_at)
+    where estado = 'por_aprobar' or (estado = 'agendada' and confirmada_at is null and coalesce(pagado_con, '') in ('link', 'transferencia'));
+    update public.reservas set estado = 'agendada', expira_at = null where estado = 'confirmada';
+    update public.reservas set estado = 'agendada', expira_at = null where estado = 'agendada' and expira_at is not null;
+    alter table public.reservas add constraint reservas_sin_choque
+      exclude using gist (barbero_id with =, tstzrange(inicio, fin, '[)') with &&)
+      where (estado in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada'));
+  end if;
+end $$;
+-- El teléfono del cliente con cuenta también queda en sus horas (lista negra y fichas por WhatsApp).
+update public.reservas r set cliente_tel = public.tel_norm(p.telefono)
+from public.profiles p where p.id = r.cliente_id and r.cliente_tel is null and coalesce(p.telefono, '') <> '';
 
 create or replace function public.pesos(n int) returns text
 language sql immutable as $$ select '$' || replace(to_char(coalesce(n, 0), 'FM999,999,999'), ',', '.') $$;
@@ -1008,11 +1456,11 @@ $$;
 -- Horario que rige para un barbero (el suyo si la barbería es Premium y lo tiene; si no, el de la barbería).
 create or replace function public.horario_de(p_barbero uuid) returns jsonb
 language sql stable security definer set search_path = '' as $$
-  select case when p.horario is not null and public.barberia_premium(p.barberia_id) then p.horario else b.horario end
+  select case when p.horario is not null and public.tiene('barberia', 'horario_barbero', public.barberia_premium(p.barberia_id)) then p.horario else b.horario end
   from public.profiles p join public.barberias b on b.id = p.barberia_id where p.id = p_barbero
 $$;
 
--- Valida que la hora calce con el horario y bloqueos. Devuelve 'a' (abierto) o 'c' (a consultar).
+-- Valida que la hora calce con el horario y bloqueos. v2.0: cada día está abierto o cerrado ('c' antiguo = abierto).
 create or replace function public.validar_hora(p_barbero uuid, p_inicio timestamptz, p_fin timestamptz) returns text
 language plpgsql stable security definer set search_path = '' as $$
 declare
@@ -1037,7 +1485,7 @@ begin
              and tstzrange(k.desde, k.hasta) && tstzrange(p_inicio, p_fin)) then
     raise exception 'Ese horario está bloqueado';
   end if;
-  return d ->> 'e';
+  return 'a';
 end $$;
 
 -- ¿Este barbero recibe reservas de clientes? Cada barbero (y el dueño) tiene su interruptor "agenda abierta".
@@ -1046,7 +1494,8 @@ language sql immutable as $$
   select not p.suspended and p.activo and p.role in ('owner', 'barber') and p.agenda_abierta
 $$;
 
--- Libera las horas apartadas sin abono (15 min) y las "por aprobar" sin respuesta.
+-- Libera las horas apartadas sin abono (pasado el tiempo de Reglas → minutos para pagar).
+-- v2.0: una hora "en revisión" (con comprobante) NO se libera sola: espera que el barbero la revise.
 create or replace function public.liberar_vencidas() returns int
 language plpgsql security definer set search_path = '' as $$
 declare r record; n int := 0;
@@ -1055,20 +1504,92 @@ begin
            where estado = 'esperando_abono' and expira_at < now() returning * loop
     n := n + 1;
     perform public.avisar(null, r.cliente_id, 'reserva', '⌛ Hora liberada',
-      'No alcanzaste a abonar en 15 minutos. La hora del ' || public.fecha_txt(r.inicio) || ' quedó libre.', 'horas', r.id);
-  end loop;
-  for r in update public.reservas set estado = 'anulada', anulada_at = now(), motivo = 'El barbero no alcanzó a responder',
-              abono_destino = case when abono > 0 and pagado_con in ('link', 'transferencia', 'saldo') then 'saldo' end
-           where estado = 'por_aprobar' and expira_at < now() returning * loop
-    n := n + 1;
-    if r.abono_destino = 'saldo' then update public.profiles set saldo = saldo + r.abono where id = r.cliente_id; end if;
-    perform public.avisar(null, r.cliente_id, 'reserva', 'Hora no aprobada',
-      'El barbero no alcanzó a responder tu solicitud del ' || public.fecha_txt(r.inicio) ||
-      case when r.abono_destino = 'saldo' then '. Tu abono quedó como saldo a favor.' else '.' end, 'horas', r.id);
-    perform public.avisar_espera(r.barberia_id, r.barbero_id, r.inicio);
+      'No alcanzaste a subir el comprobante a tiempo. La hora del ' || public.fecha_txt(r.inicio) || ' quedó libre.', 'horas', r.id);
   end loop;
   return n;
 end $$;
+
+-- ---------------------------------------------------------------------
+-- v2.0: Calificaciones (una por visita, en ambos sentidos) y lista negra
+-- ---------------------------------------------------------------------
+create table if not exists public.calificaciones (
+  id           uuid primary key default gen_random_uuid(),
+  reserva_id   uuid references public.reservas (id) on delete set null,
+  barberia_id  uuid not null references public.barberias (id) on delete cascade,
+  autor        text not null check (autor in ('cliente', 'barberia')),
+  cliente_id   uuid references public.profiles (id) on delete set null,
+  cliente_tel  text,
+  cliente_nombre text,
+  estrellas    int not null check (estrellas between 1 and 5),
+  motivo       text,
+  comentario   text,
+  created_by   uuid references public.profiles (id) on delete set null,
+  created_at   timestamptz not null default now()
+);
+create unique index if not exists calificaciones_uni on public.calificaciones (reserva_id, autor) where reserva_id is not null;
+create index if not exists calificaciones_barberia_idx on public.calificaciones (barberia_id, autor, created_at desc);
+create index if not exists calificaciones_tel_idx on public.calificaciones (barberia_id, cliente_tel);
+alter table public.calificaciones enable row level security;
+
+create table if not exists public.lista_negra (
+  id           uuid primary key default gen_random_uuid(),
+  barberia_id  uuid not null references public.barberias (id) on delete cascade,
+  cliente_id   uuid references public.profiles (id) on delete set null,
+  tel          text,
+  nombre       text,
+  motivo       text,
+  activo       boolean not null default true,
+  agregado_por uuid references public.profiles (id) on delete set null,
+  quitado_por  uuid references public.profiles (id) on delete set null,
+  created_at   timestamptz not null default now(),
+  quitado_at   timestamptz
+);
+create index if not exists lista_negra_idx on public.lista_negra (barberia_id, activo);
+alter table public.lista_negra enable row level security;
+
+-- Promedio de estrellas que los clientes le dan a la barbería (lo ven todos).
+create or replace function public.nota_barberia(p_barberia uuid) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('promedio', round(avg(estrellas)::numeric, 1), 'total', count(*))
+  from public.calificaciones where barberia_id = p_barberia and autor = 'cliente'
+$$;
+
+-- Promedio que la barbería le dio a un cliente (lo ve solo la barbería).
+create or replace function public.nota_cliente(p_barberia uuid, p_cliente uuid, p_tel text) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select case when count(*) = 0 then null else jsonb_build_object('promedio', round(avg(estrellas)::numeric, 1), 'total', count(*)) end
+  from public.calificaciones where barberia_id = p_barberia and autor = 'barberia'
+    and ((p_cliente is not null and cliente_id = p_cliente) or (coalesce(p_tel, '') <> '' and cliente_tel = public.tel_norm(p_tel)))
+$$;
+
+create or replace function public.en_lista_negra(p_barberia uuid, p_cliente uuid, p_tel text) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('id', id, 'motivo', motivo, 'desde', created_at) from public.lista_negra
+  where barberia_id = p_barberia and activo
+    and ((p_cliente is not null and cliente_id = p_cliente) or (length(public.tel_norm(p_tel)) >= 8 and tel = public.tel_norm(p_tel)))
+  order by created_at desc limit 1
+$$;
+
+-- Política de cancelación de una hora en este momento:
+--   libre (no hay abono) · devolucion (primeros N minutos) · saldo (con X horas) · pierde · null (ya no se puede)
+create or replace function public.politica(r public.reservas) returns text
+language sql stable security definer set search_path = '' as $$
+  select case
+    when r.estado = 'esperando_abono' then 'libre'
+    when r.estado not in ('en_revision', 'por_aprobar', 'agendada', 'confirmada') or r.inicio <= now() then null
+    when r.abono = 0 or coalesce(r.pagado_con, '') not in ('link', 'transferencia', 'saldo') then 'libre'
+    when r.pagado_con <> 'saldo' and r.reagendada = 0
+         and now() - coalesce(r.comprobante_at, r.created_at) <= make_interval(mins => public.regla('minutos_devolucion')) then 'devolucion'
+    when r.inicio - now() >= make_interval(hours => public.regla('horas_cancelacion')) then 'saldo'
+    else 'pierde' end
+$$;
+
+-- ¿Se puede reagendar ahora? (agendada con X horas de anticipación, o anulada con saldo vigente si no tiene cuenta)
+create or replace function public.reagendable(r public.reservas) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select (r.estado in ('agendada', 'confirmada') and r.inicio - now() >= make_interval(hours => public.regla('horas_cancelacion')))
+      or (r.estado = 'anulada' and r.abono_destino = 'saldo' and r.cliente_id is null and r.saldo_hasta > now())
+$$;
 
 -- ---------------------------------------------------------------------
 -- Lista de espera (cliente Premium): avisa cuando se libera una hora ese día
@@ -1104,7 +1625,7 @@ declare me public.profiles;
 begin
   me := public.yo_activo();
   if me.role <> 'client' then raise exception 'Solo clientes'; end if;
-  if not public.is_premium(me.id) then raise exception 'La lista de espera es Premium ⭐'; end if;
+  if not public.tiene('cliente', 'lista_espera', public.is_premium(me.id)) then raise exception 'La lista de espera es Premium ⭐'; end if;
   if p_fecha < (now() at time zone public.tz())::date then raise exception 'Esa fecha ya pasó'; end if;
   if (select count(*) from public.lista_espera where cliente_id = me.id and not avisado and fecha >= current_date) >= 5 then
     raise exception 'Máximo 5 días en lista de espera';
@@ -1118,12 +1639,13 @@ end $$;
 -- ---------------------------------------------------------------------
 create or replace function public.ver_barberia() returns jsonb
 language plpgsql security definer set search_path = '' as $$
-declare me public.profiles; prem_cli boolean; staff boolean;
+declare me public.profiles; prem_cli boolean; staff boolean; ve_vip boolean;
 begin
   me := public.yo_activo();
   if me.barberia_id is null then raise exception 'Sin barbería'; end if;
   prem_cli := public.is_premium(me.id);
   staff := public.es_staff(me);
+  ve_vip := staff or public.tiene('cliente', 'ofertas_vip', prem_cli);
   return jsonb_build_object(
     'barberos', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'nombre', public.nombre_de(p), 'avatar', p.avatar, 'foto', p.foto, 'descripcion', p.descripcion,
@@ -1133,25 +1655,27 @@ begin
         order by (p.role = 'owner') desc, p.nombre), '[]'::jsonb)
       from public.profiles p where p.barberia_id = me.barberia_id and p.role in ('owner', 'barber')
         and (staff or p.activo)),
+    -- v2.0: el barbero no ve precios.
     'servicios', (select coalesce(jsonb_agg(jsonb_build_object(
-        'id', s.id, 'nombre', s.nombre, 'precio', s.precio, 'duracion', s.duracion, 'categoria', s.categoria,
+        'id', s.id, 'nombre', s.nombre, 'precio', case when me.role <> 'barber' then s.precio end, 'duracion', s.duracion, 'categoria', s.categoria,
         'descripcion', s.descripcion, 'foto', s.foto, 'visible', s.visible, 'orden', s.orden, 'barberos', s.barberos)
         order by s.orden, s.nombre), '[]'::jsonb)
       from public.servicios s where s.barberia_id = me.barberia_id and (staff or s.visible)),
     'ofertas', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', o.id, 'titulo', o.titulo, 'vip', o.vip, 'activa', o.activa, 'hasta', o.hasta, 'created_at', o.created_at,
-        'bloqueada', o.vip and not prem_cli and not staff,
-        'detalle', case when o.vip and not prem_cli and not staff then null else o.detalle end,
-        'precio', case when o.vip and not prem_cli and not staff then null else o.precio end,
-        'imagen', case when o.vip and not prem_cli and not staff then null else o.imagen end)
+        'bloqueada', o.vip and not ve_vip,
+        'detalle', case when o.vip and not ve_vip then null else o.detalle end,
+        'precio', case when o.vip and not ve_vip then null else o.precio end,
+        'imagen', case when o.vip and not ve_vip then null else o.imagen end)
         order by o.created_at desc), '[]'::jsonb)
       from public.ofertas o where o.barberia_id = me.barberia_id
-        and (staff or (o.activa and (o.hasta is null or o.hasta >= (now() at time zone public.tz())::date)))));
+        and (staff or (o.activa and (o.hasta is null or o.hasta >= (now() at time zone public.tz())::date)))),
+    'calificacion', public.nota_barberia(me.barberia_id));
 end $$;
 
 -- ---------------------------------------------------------------------
 -- Calendario: horas ocupadas en un rango (cada uno ve el detalle que le corresponde)
---   dueño: todo con detalle · barbero: el detalle de las suyas · cliente: solo las suyas
+--   dueño: todo con detalle · barbero: el detalle de las suyas (sin montos) · cliente: solo las suyas
 -- ---------------------------------------------------------------------
 create or replace function public.ocupacion(p_desde date, p_hasta date, p_barberia uuid default null) returns jsonb
 language plpgsql security definer set search_path = '' as $$
@@ -1160,6 +1684,7 @@ declare
   bid uuid;
   t0 timestamptz;
   t1 timestamptz;
+  plata boolean;
 begin
   perform public.liberar_vencidas();
   if public.is_admin() and p_barberia is not null then
@@ -1173,22 +1698,30 @@ begin
   if p_hasta < p_desde or p_hasta - p_desde > 400 then raise exception 'Rango no válido'; end if;
   t0 := (p_desde::timestamp) at time zone public.tz();
   t1 := ((p_hasta + 1)::timestamp) at time zone public.tz();
+  plata := me.role <> 'barber';
   return jsonb_build_object(
     'reservas', (select coalesce(jsonb_agg(
       case when me.role in ('owner', 'admin') or (me.role = 'barber' and r.barbero_id = me.id) or r.cliente_id = me.id then
-        jsonb_build_object('id', r.id, 'barbero_id', r.barbero_id, 'inicio', r.inicio, 'fin', r.fin, 'estado', r.estado,
+        jsonb_build_object('id', r.id, 'barbero_id', r.barbero_id, 'inicio', r.inicio, 'fin', r.fin,
+          'estado', case when r.estado = 'confirmada' then 'agendada' when r.estado = 'por_aprobar' then 'en_revision' else r.estado end,
           'mia', r.cliente_id = me.id, 'detalle', true, 'cliente_id', r.cliente_id,
-          'cliente', coalesce(c.nombre, r.cliente_nombre, 'Cliente'), 'cliente_avatar', c.avatar, 'cliente_tel', c.telefono,
+          'cliente', coalesce(c.nombre, r.cliente_nombre, 'Cliente'), 'cliente_avatar', c.avatar,
+          'cliente_tel', case when me.role <> 'client' then coalesce(c.telefono, r.cliente_tel) end,
+          'invitado', r.cliente_id is null and r.creada_por is null,
           'cliente_premium', public.is_premium(c.id),
-          'servicios', r.servicios, 'total', r.total, 'abono', r.abono, 'pagado_con', r.pagado_con,
-          'consultar', r.consultar, 'expira_at', r.expira_at, 'tiene_comprobante', r.comprobante is not null,
+          'servicios', case when plata then r.servicios else (select coalesce(jsonb_agg(x - 'precio'), '[]'::jsonb) from jsonb_array_elements(r.servicios) x) end,
+          'total', case when plata then r.total end, 'abono', case when plata then r.abono end, 'pagado_con', r.pagado_con,
+          'expira_at', r.expira_at, 'tiene_comprobante', r.comprobante is not null, 'comprobante_at', r.comprobante_at,
           'nota', r.nota, 'confirmada_at', r.confirmada_at, 'motivo', r.motivo, 'abono_destino', r.abono_destino,
-          'created_at', r.created_at)
+          'devolucion', r.devolucion, 'reagendada', r.reagendada, 'created_at', r.created_at,
+          'lista_negra', case when me.role <> 'client' then public.en_lista_negra(r.barberia_id, r.cliente_id, coalesce(c.telefono, r.cliente_tel)) end,
+          'nota_cliente', case when me.role <> 'client' then public.nota_cliente(r.barberia_id, r.cliente_id, coalesce(c.telefono, r.cliente_tel)) end,
+          'calificado', case when me.role <> 'client' then exists (select 1 from public.calificaciones q where q.reserva_id = r.id and q.autor = 'barberia') end)
       else jsonb_build_object('id', null, 'barbero_id', r.barbero_id, 'inicio', r.inicio, 'fin', r.fin,
           'estado', 'ocupado', 'mia', false, 'detalle', false) end order by r.inicio), '[]'::jsonb)
       from public.reservas r left join public.profiles c on c.id = r.cliente_id
       where r.barberia_id = bid and r.inicio < t1 and r.fin > t0
-        and (r.estado in ('esperando_abono', 'por_aprobar', 'agendada', 'confirmada', 'atendida', 'no_vino')
+        and (r.estado in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada', 'atendida', 'no_vino')
              or (r.estado = 'anulada' and (me.role in ('owner', 'admin') or r.barbero_id = me.id or r.cliente_id = me.id)))
         and (me.role in ('owner', 'admin', 'barber') or r.estado not in ('atendida', 'no_vino') or r.cliente_id = me.id)),
     'bloqueos', (select coalesce(jsonb_agg(jsonb_build_object('id', k.id, 'barbero_id', k.barbero_id, 'desde', k.desde,
@@ -1197,20 +1730,46 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
--- Reservar (cliente)
+-- Reservar
 -- ---------------------------------------------------------------------
+-- Valida barbero, servicios y hora; devuelve duración, total y los servicios elegidos.
+create or replace function public.armar_reserva(p_barberia uuid, p_barbero uuid, p_inicio timestamptz, p_servicios uuid[], p_premium boolean)
+returns jsonb language plpgsql stable security definer set search_path = '' as $$
+declare bar public.profiles; dur int; tot int; items jsonb;
+begin
+  select * into bar from public.profiles where id = p_barbero and barberia_id = p_barberia and role in ('owner', 'barber');
+  if bar.id is null then raise exception 'Barbero no encontrado'; end if;
+  if not public.reservable(bar) then
+    raise exception '% no tiene la agenda abierta. Elige otro barbero o escríbele para coordinar.', public.nombre_de(bar);
+  end if;
+  if coalesce(cardinality(p_servicios), 0) = 0 then raise exception 'Agrega al menos un servicio'; end if;
+  if cardinality(p_servicios) > 10 then raise exception 'Máximo 10 servicios'; end if;
+  select coalesce(sum(s.duracion), 0), coalesce(sum(s.precio), 0),
+         coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'nombre', s.nombre, 'precio', s.precio, 'duracion', s.duracion)), '[]'::jsonb)
+    into dur, tot, items
+  from unnest(p_servicios) as u(id) join public.servicios s on s.id = u.id
+  where s.barberia_id = p_barberia and s.visible and (s.barberos is null or p_barbero = any(s.barberos));
+  if jsonb_array_length(items) <> cardinality(p_servicios) then
+    raise exception 'Algún servicio no está disponible con este barbero';
+  end if;
+  if extract(epoch from p_inicio)::bigint % 900 <> 0 then raise exception 'Elige una hora del calendario'; end if;
+  if p_inicio < now() + interval '1 hour' then raise exception 'Reserva con al menos 1 hora de anticipación'; end if;
+  if p_inicio > now() + make_interval(days => public.limite('dias', p_premium)) then
+    raise exception 'Puedes reservar hasta % días adelante%', public.limite('dias', p_premium),
+      case when p_premium then '' else ' (Premium: ' || public.limite('dias', true) || ' días)' end;
+  end if;
+  perform public.validar_hora(p_barbero, p_inicio, p_inicio + make_interval(mins => dur));
+  return jsonb_build_object('dur', dur, 'tot', tot, 'items', items);
+end $$;
+
+-- Reservar (cliente con cuenta).
 create or replace function public.reservar(p_barbero uuid, p_inicio timestamptz, p_servicios uuid[]) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   me public.profiles;
-  bar public.profiles;
   b public.barberias;
   prem boolean;
-  dur int;
-  tot int;
-  items jsonb;
-  dia text;
-  fin_ timestamptz;
+  x jsonb;
   r public.reservas;
   usa_saldo boolean;
 begin
@@ -1218,48 +1777,26 @@ begin
   if me.role <> 'client' then raise exception 'Solo los clientes reservan desde aquí'; end if;
   if me.bloqueado then raise exception 'Tu cuenta no puede reservar. Escríbele a tu barbería.'; end if;
   select * into b from public.barberias where id = me.barberia_id;
-  select * into bar from public.profiles where id = p_barbero and barberia_id = me.barberia_id and role in ('owner', 'barber');
-  if bar.id is null then raise exception 'Barbero no encontrado'; end if;
-  if not public.reservable(bar) then
-    raise exception '% no tiene la agenda abierta. Escríbele por el chat para coordinar.', public.nombre_de(bar);
-  end if;
   prem := public.is_premium(me.id);
-  if coalesce(cardinality(p_servicios), 0) = 0 then raise exception 'Agrega al menos un servicio'; end if;
-  select coalesce(sum(s.duracion), 0), coalesce(sum(s.precio), 0),
-         coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'nombre', s.nombre, 'precio', s.precio, 'duracion', s.duracion)), '[]'::jsonb)
-    into dur, tot, items
-  from unnest(p_servicios) as u(id) join public.servicios s on s.id = u.id
-  where s.barberia_id = b.id and s.visible and (s.barberos is null or p_barbero = any(s.barberos));
-  if jsonb_array_length(items) <> cardinality(p_servicios) then
-    raise exception 'Algún servicio no está disponible con este barbero';
-  end if;
-  if extract(epoch from p_inicio)::bigint % 900 <> 0 then raise exception 'Elige una hora del calendario'; end if;
-  if p_inicio < now() + interval '1 hour' then raise exception 'Reserva con al menos 1 hora de anticipación'; end if;
-  if p_inicio > now() + make_interval(days => public.limite('dias', prem)) then
-    raise exception 'Puedes reservar hasta % días adelante%', public.limite('dias', prem),
-      case when prem then '' else ' (Premium: ' || public.limite('dias', true) || ' días)' end;
-  end if;
+  x := public.armar_reserva(b.id, p_barbero, p_inicio, p_servicios, prem);
   if (select count(*) from public.reservas where cliente_id = me.id and fin > now()
-      and estado in ('esperando_abono', 'por_aprobar', 'agendada', 'confirmada')) >= public.limite('activas', prem) then
+      and estado in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada')) >= public.limite('activas', prem) then
     raise exception 'Ya tienes % hora(s) activa(s)%', public.limite('activas', prem),
       case when prem then '' else '. Con Premium puedes tener hasta ' || public.limite('activas', true) || '.' end;
   end if;
   if (select count(*) from public.reservas where cliente_id = me.id and created_at > now() - interval '1 day') >= 5 then
     raise exception 'Máximo 5 reservas por día';
   end if;
-  fin_ := p_inicio + make_interval(mins => dur);
-  dia := public.validar_hora(p_barbero, p_inicio, fin_);
   perform public.liberar_vencidas();
   usa_saldo := b.abono = 0 or me.saldo >= b.abono;
   begin
-    insert into public.reservas (barberia_id, barbero_id, cliente_id, inicio, fin, servicios, total, abono, pagado_con, estado,
-                                 consultar, expira_at, creada_por)
-    values (b.id, p_barbero, me.id, p_inicio, fin_, items, tot, b.abono,
+    insert into public.reservas (barberia_id, barbero_id, cliente_id, cliente_tel, inicio, fin, servicios, total, abono, pagado_con, estado,
+                                 expira_at, creada_por)
+    values (b.id, p_barbero, me.id, nullif(public.tel_norm(me.telefono), ''), p_inicio, p_inicio + make_interval(mins => (x ->> 'dur')::int),
+            x -> 'items', (x ->> 'tot')::int, b.abono,
             case when usa_saldo then 'saldo' end,
-            case when not usa_saldo then 'esperando_abono' when dia = 'c' then 'por_aprobar' else 'agendada' end,
-            dia = 'c',
-            case when not usa_saldo then now() + interval '15 minutes'
-                 when dia = 'c' then least(now() + interval '12 hours', p_inicio - interval '1 hour') end,
+            case when usa_saldo then 'agendada' else 'esperando_abono' end,
+            case when not usa_saldo then now() + make_interval(mins => public.regla('minutos_pago')) end,
             me.id)
     returning * into r;
   exception when exclusion_violation then
@@ -1267,50 +1804,112 @@ begin
   end;
   if usa_saldo then
     update public.profiles set saldo = saldo - b.abono where id = me.id;
+    update public.reservas set confirmada_at = now() where id = r.id returning * into r;
     perform public.notificar_reserva(r);
   end if;
   return to_jsonb(r) - 'comprobante';
 end $$;
 
--- Aviso al barbero de la hora y al dueño.
+-- v2.0: reservar SIN cuenta, desde el link o QR de la barbería (nombre + WhatsApp). Devuelve el link personal (token).
+create or replace function public.reservar_invitado(p_codigo text, p_barbero uuid, p_inicio timestamptz, p_servicios uuid[],
+                                                    p_nombre text, p_telefono text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  b public.barberias;
+  x jsonb;
+  r public.reservas;
+  tel text := public.tel_norm(p_telefono);
+  nom text := left(trim(coalesce(p_nombre, '')), 60);
+begin
+  select * into b from public.barberias where codigo = lower(trim(coalesce(p_codigo, '')));
+  if b.id is null or exists (select 1 from public.profiles o where o.id = b.owner_id and o.suspended) then
+    raise exception 'Esta barbería no está recibiendo reservas';
+  end if;
+  if length(nom) < 2 then raise exception 'Escribe tu nombre'; end if;
+  if length(tel) < 8 then raise exception 'Escribe tu WhatsApp (ej. +56 9 1234 5678)'; end if;
+  if b.abono > 0 and b.link_pago is null and b.datos_transferencia is null then
+    raise exception 'La barbería aún no configura cómo recibir el abono. Escríbele por WhatsApp.';
+  end if;
+  perform public.liberar_vencidas();
+  x := public.armar_reserva(b.id, p_barbero, p_inicio, p_servicios, false);
+  -- Antiabuso: una hora apartada a la vez por WhatsApp, horas activas según Reglas y máximo 5 al día.
+  if exists (select 1 from public.reservas where barberia_id = b.id and cliente_tel = tel and estado = 'esperando_abono' and expira_at > now()) then
+    raise exception 'Ya tienes una hora esperando el abono. Termina ese pago o espera que se libere.';
+  end if;
+  if (select count(*) from public.reservas where barberia_id = b.id and cliente_tel = tel and fin > now()
+      and estado in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada')) >= public.regla('activas_invitado') then
+    raise exception 'Ya tienes % hora(s) activa(s) en esta barbería. Para tener más, crea tu cuenta.', public.regla('activas_invitado');
+  end if;
+  if (select count(*) from public.reservas where barberia_id = b.id and cliente_tel = tel and created_at > now() - interval '1 day') >= 5 then
+    raise exception 'Máximo 5 reservas por día';
+  end if;
+  if (select count(*) from public.reservas where barberia_id = b.id and cliente_id is null and estado = 'esperando_abono' and expira_at > now()) >= 25 then
+    raise exception 'Hay muchas reservas en proceso. Intenta en unos minutos 🙏';
+  end if;
+  begin
+    insert into public.reservas (barberia_id, barbero_id, cliente_nombre, cliente_tel, inicio, fin, servicios, total, abono, estado, expira_at,
+                                 comprobante_at)
+    values (b.id, p_barbero, nom, tel, p_inicio, p_inicio + make_interval(mins => (x ->> 'dur')::int), x -> 'items', (x ->> 'tot')::int, b.abono,
+            case when b.abono > 0 then 'esperando_abono' else 'en_revision' end,
+            case when b.abono > 0 then now() + make_interval(mins => public.regla('minutos_pago')) end,
+            case when b.abono > 0 then null else now() end)
+    returning * into r;
+  exception when exclusion_violation then
+    raise exception 'Esa hora se acaba de ocupar. Elige otra 🙏';
+  end;
+  if r.estado = 'en_revision' then perform public.notificar_reserva(r); end if;
+  return jsonb_build_object('token', r.token, 'estado', r.estado, 'expira_at', r.expira_at);
+end $$;
+
+-- Aviso al barbero de la hora y al dueño (con alerta si el cliente está en la lista negra).
 create or replace function public.notificar_reserva(r public.reservas) returns void
 language plpgsql security definer set search_path = '' as $$
-declare c public.profiles; own uuid; t text; cu text;
+declare c public.profiles; own uuid; t text; cu text; ln jsonb;
 begin
   select * into c from public.profiles where id = r.cliente_id;
   select owner_id into own from public.barberias where id = r.barberia_id;
-  t := case when r.estado = 'por_aprobar' then '🟡 Solicitud de hora (a consultar)' else '📅 Nueva reserva' end;
-  cu := public.nombre_de(c) || ' · ' || public.fecha_txt(r.inicio) || ' · ' ||
-        (select string_agg(x ->> 'nombre', ' + ') from jsonb_array_elements(r.servicios) x) ||
-        case when r.pagado_con = 'saldo' then ' · abono con saldo a favor' when r.comprobante is not null then ' · 🧾 con comprobante' else '' end;
+  ln := public.en_lista_negra(r.barberia_id, r.cliente_id, coalesce(c.telefono, r.cliente_tel));
+  t := case when r.estado = 'en_revision' then '🧾 Revisa el abono para aceptar la hora' else '📅 Nueva reserva' end;
+  cu := coalesce(public.nombre_de(c), coalesce(r.cliente_nombre, 'Cliente') || ' (sin cuenta)') || ' · ' || public.fecha_txt(r.inicio) || ' · ' ||
+        coalesce((select string_agg(x ->> 'nombre', ' + ') from jsonb_array_elements(r.servicios) x), '') ||
+        case when r.pagado_con = 'saldo' then ' · abono con saldo a favor' when r.comprobante is not null then ' · 🧾 con comprobante' else '' end ||
+        case when ln is not null then ' · ⚠️ LISTA NEGRA' else '' end;
   perform public.avisar(r.cliente_id, r.barbero_id, 'reserva', t, cu, 'agenda?r=' || r.id, r.id);
   if own <> r.barbero_id then perform public.avisar(r.cliente_id, own, 'reserva', t, cu, 'agenda?r=' || r.id, r.id); end if;
 end $$;
 
--- "Ya aboné": con la foto del comprobante, que también llega al chat del barbero.
+-- Guarda el comprobante: el reloj se detiene y la hora queda "en revisión" (retenida) hasta que el barbero la revise.
+create or replace function public.subir_comprobante(p_id uuid, p_comprobante text, p_medio text) returns public.reservas
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas;
+begin
+  select * into r from public.reservas where id = p_id for update;
+  if r.estado <> 'esperando_abono' then raise exception 'Esta reserva ya no espera abono'; end if;
+  if r.expira_at < now() then
+    perform public.liberar_vencidas();
+    raise exception 'Se pasó el tiempo y la hora se liberó. Vuelve a reservar.';
+  end if;
+  if coalesce(p_comprobante, '') !~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' or length(p_comprobante) > 600000 then
+    raise exception 'Adjunta la foto del comprobante';
+  end if;
+  update public.reservas set estado = 'en_revision', pagado_con = case when p_medio = 'link' then 'link' else 'transferencia' end,
+    comprobante = p_comprobante, comprobante_at = now(), expira_at = null, revision_paso = 0, revision_previa = false
+  where id = r.id returning * into r;
+  perform public.notificar_reserva(r);
+  return r;
+end $$;
+
+-- "Ya aboné" (cliente con cuenta): con la foto del comprobante, que también llega al chat del barbero.
 create or replace function public.ya_abone(p_reserva uuid, p_comprobante text, p_medio text default 'transferencia') returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare me public.profiles; r public.reservas;
 begin
   me := public.yo_activo();
-  select * into r from public.reservas where id = p_reserva and cliente_id = me.id for update;
+  select * into r from public.reservas where id = p_reserva and cliente_id = me.id;
   if r.id is null then raise exception 'Reserva no encontrada'; end if;
-  if r.estado <> 'esperando_abono' then raise exception 'Esta reserva ya no espera abono'; end if;
-  if r.expira_at < now() then
-    perform public.liberar_vencidas();
-    raise exception 'Se pasaron los 15 minutos y la hora se liberó. Vuelve a reservar.';
-  end if;
-  if coalesce(p_comprobante, '') !~ '^data:image/(jpeg|png|webp);base64,' or length(p_comprobante) > 400000 then
-    raise exception 'Adjunta la foto del comprobante';
-  end if;
-  update public.reservas set estado = case when consultar then 'por_aprobar' else 'agendada' end,
-    pagado_con = case when p_medio = 'link' then 'link' else 'transferencia' end,
-    comprobante = p_comprobante, comprobante_at = now(),
-    expira_at = case when consultar then least(now() + interval '12 hours', inicio - interval '1 hour') end
-  where id = r.id returning * into r;
+  r := public.subir_comprobante(r.id, p_comprobante, p_medio);
   insert into public.messages (sender, recipient, body, imagen, reserva_id, sistema)
   values (me.id, r.barbero_id, '🧾 Comprobante de abono (' || public.pesos(r.abono) || ') · ' || public.fecha_txt(r.inicio), p_comprobante, r.id, true);
-  perform public.notificar_reserva(r);
   return to_jsonb(r) - 'comprobante';
 end $$;
 
@@ -1326,7 +1925,7 @@ begin
   return r.comprobante;
 end $$;
 
--- Mis horas (cliente): próximas e historial, con si el barbero vio el aviso.
+-- Mis horas (cliente): próximas e historial, con si el barbero vio el aviso y qué puede hacer con cada una.
 create or replace function public.mis_horas() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare me public.profiles;
@@ -1334,43 +1933,258 @@ begin
   perform public.liberar_vencidas();
   me := public.yo_activo();
   return (select coalesce(jsonb_agg(x order by x.inicio desc), '[]'::jsonb) from (
-    select r.id, r.inicio, r.fin, r.estado, r.servicios, r.total, r.abono, r.pagado_con, r.expira_at, r.consultar,
-           r.motivo, r.abono_destino, r.created_at, r.confirmada_at, r.barbero_id, public.nombre_de(p) as barbero,
-           p.avatar as barbero_avatar, p.foto as barbero_foto,
+    select r.id, r.inicio, r.fin, case when r.estado = 'confirmada' then 'agendada' when r.estado = 'por_aprobar' then 'en_revision' else r.estado end as estado,
+           r.servicios, r.total, r.abono, r.pagado_con, r.expira_at, r.consultar,
+           r.motivo, r.abono_destino, r.devolucion, r.created_at, r.confirmada_at, r.comprobante_at, r.reagendada, r.barbero_id,
+           public.nombre_de(p) as barbero, p.avatar as barbero_avatar, p.foto as barbero_foto,
+           public.politica(r) as politica, public.reagendable(r) as reagendable,
+           exists (select 1 from public.calificaciones q where q.reserva_id = r.id and q.autor = 'cliente') as calificada,
            (select max(a.visto_at) from public.avisos a where a.reserva_id = r.id and a.para = r.barbero_id) as visto_barbero
     from public.reservas r join public.profiles p on p.id = r.barbero_id
     where r.cliente_id = me.id and r.inicio > now() - interval '365 days'
     order by r.inicio desc limit 100) x);
 end $$;
 
--- Anular (cliente): con 24 h (o 1 h si reservó para el mismo día) el abono queda a favor; si no, se pierde.
+-- Cancelar según las reglas: devolución (primeros N min) · saldo a favor (con X horas) · pierde el abono.
+create or replace function public.cancelar_reserva(r public.reservas, p_por uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare pol text := public.politica(r); dest text; own uuid; quien text;
+begin
+  if pol is null then raise exception 'Esta hora ya no se puede anular'; end if;
+  dest := case pol when 'devolucion' then 'devolucion' when 'saldo' then 'saldo' when 'pierde' then 'perdido' end;
+  update public.reservas set estado = 'anulada', anulada_at = now(), anulada_por = p_por, motivo = 'Anulada por el cliente', expira_at = null,
+    abono_destino = dest, devolucion = case when dest = 'devolucion' then 'pendiente' end,
+    saldo_hasta = case when dest = 'saldo' and r.cliente_id is null then now() + make_interval(days => public.regla('dias_saldo')) end
+  where id = r.id;
+  if dest = 'saldo' and r.cliente_id is not null then update public.profiles set saldo = saldo + r.abono where id = r.cliente_id; end if;
+  if r.estado <> 'esperando_abono' then
+    select owner_id into own from public.barberias where id = r.barberia_id;
+    quien := coalesce((select public.nombre_de(p) from public.profiles p where p.id = r.cliente_id), r.cliente_nombre || ' (sin cuenta)');
+    perform public.avisar(r.cliente_id, r.barbero_id, 'reserva', '❌ Hora anulada',
+      quien || ' anuló su hora del ' || public.fecha_txt(r.inicio), 'agenda?r=' || r.id, r.id);
+    if dest = 'devolucion' then
+      perform public.avisar(r.cliente_id, own, 'reserva', '💸 Devolver abono',
+        'Devuelve ' || public.pesos(r.abono) || ' a ' || quien || coalesce(' (' || r.cliente_tel || ')', '') ||
+        ': anuló dentro de los primeros ' || public.regla('minutos_devolucion') || ' minutos. Márcalo como devuelto en Inicio.', 'hoy', r.id);
+    elsif own <> r.barbero_id then
+      perform public.avisar(r.cliente_id, own, 'reserva', '❌ Hora anulada',
+        quien || ' anuló su hora del ' || public.fecha_txt(r.inicio), 'agenda?r=' || r.id, r.id);
+    end if;
+    perform public.avisar_espera(r.barberia_id, r.barbero_id, r.inicio);
+  end if;
+  return jsonb_build_object('abono_destino', dest, 'abono', r.abono, 'politica', pol);
+end $$;
+
+-- Reagendar a otra hora con el mismo barbero (también una hora anulada con saldo a favor, si no tiene cuenta).
+create or replace function public.reagendar_reserva(r public.reservas, p_inicio timestamptz) returns public.reservas
+language plpgsql security definer set search_path = '' as $$
+declare dur int := (extract(epoch from (r.fin - r.inicio)) / 60)::int; bar public.profiles; prem boolean; own uuid; quien text;
+begin
+  if not public.reagendable(r) then
+    raise exception 'Ya no se puede reagendar (faltan menos de % horas o venció el saldo)', public.regla('horas_cancelacion');
+  end if;
+  select * into bar from public.profiles where id = r.barbero_id;
+  if not public.reservable(bar) then raise exception '% no tiene la agenda abierta. Escríbele para coordinar.', public.nombre_de(bar); end if;
+  prem := r.cliente_id is not null and public.is_premium(r.cliente_id);
+  if extract(epoch from p_inicio)::bigint % 900 <> 0 then raise exception 'Elige una hora del calendario'; end if;
+  if p_inicio < now() + interval '1 hour' then raise exception 'Reserva con al menos 1 hora de anticipación'; end if;
+  if p_inicio > now() + make_interval(days => public.limite('dias', prem)) then
+    raise exception 'Puedes reservar hasta % días adelante', public.limite('dias', prem);
+  end if;
+  perform public.validar_hora(r.barbero_id, p_inicio, p_inicio + make_interval(mins => dur));
+  begin
+    update public.reservas set inicio = p_inicio, fin = p_inicio + make_interval(mins => dur), estado = 'agendada',
+      abono_destino = null, saldo_hasta = null, anulada_at = null, anulada_por = null, motivo = null,
+      reagendada = reagendada + 1, recordado24 = false, recordado2 = false, confirmada_at = coalesce(confirmada_at, now())
+    where id = r.id returning * into r;
+  exception when exclusion_violation then raise exception 'Esa hora ya está ocupada. Elige otra 🙏';
+  end;
+  select owner_id into own from public.barberias where id = r.barberia_id;
+  quien := coalesce((select public.nombre_de(p) from public.profiles p where p.id = r.cliente_id), r.cliente_nombre || ' (sin cuenta)');
+  perform public.avisar(r.cliente_id, r.barbero_id, 'reserva', '🔁 Hora reagendada', quien || ' · ahora el ' || public.fecha_txt(p_inicio), 'agenda?r=' || r.id, r.id);
+  if own <> r.barbero_id then
+    perform public.avisar(r.cliente_id, own, 'reserva', '🔁 Hora reagendada', quien || ' · ahora el ' || public.fecha_txt(p_inicio), 'agenda?r=' || r.id, r.id);
+  end if;
+  return r;
+end $$;
+
+-- Anular (cliente con cuenta).
 create or replace function public.anular_mia(p_reserva uuid) returns jsonb
 language plpgsql security definer set search_path = '' as $$
-declare me public.profiles; r public.reservas; limite_ timestamptz; dest text; own uuid;
+declare me public.profiles; r public.reservas;
 begin
   me := public.yo_activo();
   select * into r from public.reservas where id = p_reserva and cliente_id = me.id for update;
   if r.id is null then raise exception 'Reserva no encontrada'; end if;
-  if r.estado not in ('esperando_abono', 'por_aprobar', 'agendada', 'confirmada') then raise exception 'Esta hora ya no se puede anular'; end if;
-  if r.inicio < now() then raise exception 'Esta hora ya pasó'; end if;
-  limite_ := case when r.created_at > r.inicio - interval '24 hours' then r.inicio - interval '1 hour' else r.inicio - interval '24 hours' end;
-  if r.estado = 'esperando_abono' or coalesce(r.pagado_con, '') not in ('link', 'transferencia', 'saldo') or r.abono = 0 then dest := null;
-  elsif now() <= limite_ then dest := 'saldo';
-  else dest := 'perdido'; end if;
-  update public.reservas set estado = 'anulada', anulada_at = now(), anulada_por = me.id, motivo = 'Anulada por el cliente',
-    abono_destino = dest where id = r.id;
-  if dest = 'saldo' then update public.profiles set saldo = saldo + r.abono where id = me.id; end if;
-  if r.estado <> 'esperando_abono' then
-    select owner_id into own from public.barberias where id = r.barberia_id;
-    perform public.avisar(me.id, r.barbero_id, 'reserva', '❌ Hora anulada',
-      public.nombre_de(me) || ' anuló su hora del ' || public.fecha_txt(r.inicio), 'agenda?r=' || r.id, r.id);
-    if own <> r.barbero_id then
-      perform public.avisar(me.id, own, 'reserva', '❌ Hora anulada',
-        public.nombre_de(me) || ' anuló su hora del ' || public.fecha_txt(r.inicio), 'agenda?r=' || r.id, r.id);
-    end if;
-    perform public.avisar_espera(r.barberia_id, r.barbero_id, r.inicio);
-  end if;
-  return jsonb_build_object('abono_destino', dest, 'abono', r.abono, 'limite', limite_);
+  return public.cancelar_reserva(r, me.id);
+end $$;
+
+create or replace function public.reagendar_mia(p_reserva uuid, p_inicio timestamptz) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; r public.reservas;
+begin
+  me := public.yo_activo();
+  select * into r from public.reservas where id = p_reserva and cliente_id = me.id for update;
+  if r.id is null then raise exception 'Reserva no encontrada'; end if;
+  r := public.reagendar_reserva(r, p_inicio);
+  return to_jsonb(r) - 'comprobante';
+end $$;
+
+-- ---------------------------------------------------------------------
+-- v2.0: Página de la reserva SIN cuenta (link personal r/?t=…): ver, pagar, cancelar, reagendar y calificar.
+-- ---------------------------------------------------------------------
+create or replace function public.reserva_por_token(p_token text) returns public.reservas
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas;
+begin
+  if length(coalesce(p_token, '')) < 30 then raise exception 'Reserva no encontrada'; end if;
+  select * into r from public.reservas where token = p_token for update;
+  if r.id is null then raise exception 'Reserva no encontrada'; end if;
+  return r;
+end $$;
+
+create or replace function public.reserva_ver(p_token text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas; b public.barberias; bar public.profiles; c public.profiles;
+begin
+  perform public.liberar_vencidas();
+  select * into r from public.reservas where token = p_token and length(coalesce(p_token, '')) >= 30;
+  if r.id is null then return null; end if;
+  select * into b from public.barberias where id = r.barberia_id;
+  select * into bar from public.profiles where id = r.barbero_id;
+  select * into c from public.profiles where id = r.cliente_id;
+  return jsonb_build_object(
+    'token', r.token, 'estado', case when r.estado = 'confirmada' then 'agendada' when r.estado = 'por_aprobar' then 'en_revision' else r.estado end,
+    'inicio', r.inicio, 'fin', r.fin, 'servicios', r.servicios, 'total', r.total, 'abono', r.abono, 'pagado_con', r.pagado_con,
+    'expira_at', r.expira_at, 'comprobante_at', r.comprobante_at, 'motivo', r.motivo, 'abono_destino', r.abono_destino,
+    'devolucion', r.devolucion, 'saldo_hasta', r.saldo_hasta, 'reagendada', r.reagendada, 'created_at', r.created_at,
+    'nombre', coalesce(c.nombre, r.cliente_nombre), 'con_cuenta', r.cliente_id is not null,
+    'politica', public.politica(r), 'reagendable', public.reagendable(r) and r.cliente_id is null,
+    'calificada', exists (select 1 from public.calificaciones q where q.reserva_id = r.id and q.autor = 'cliente'),
+    'barbero', jsonb_build_object('id', bar.id, 'nombre', public.nombre_de(bar), 'avatar', bar.avatar, 'foto', bar.foto,
+      'horario', public.horario_de(bar.id), 'reservable', public.reservable(bar)),
+    'barberia', jsonb_build_object('codigo', b.codigo, 'nombre', b.nombre, 'logo', b.logo, 'color', case when public.barberia_premium(b.id) then b.color end,
+      'direccion', b.direccion, 'whatsapp', b.whatsapp,
+      'link_pago', case when r.estado = 'esperando_abono' then b.link_pago end,
+      'abono_texto', case when r.estado = 'esperando_abono' then case when b.pago_activo = 2 then b.pago2_texto else b.pago1_texto end end,
+      'datos_transferencia', case when r.estado = 'esperando_abono' then b.datos_transferencia end),
+    'dias_max', public.limite('dias', false));
+end $$;
+
+create or replace function public.reserva_comprobante(p_token text, p_imagen text, p_medio text default 'transferencia') returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas;
+begin
+  r := public.reserva_por_token(p_token);
+  perform public.subir_comprobante(r.id, p_imagen, p_medio);
+  return public.reserva_ver(p_token);
+end $$;
+
+create or replace function public.reserva_cancelar(p_token text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas; x jsonb;
+begin
+  r := public.reserva_por_token(p_token);
+  if r.cliente_id is not null then raise exception 'Esta hora es de una cuenta: anúlala desde la app'; end if;
+  x := public.cancelar_reserva(r, null);
+  return x || jsonb_build_object('reserva', public.reserva_ver(p_token));
+end $$;
+
+create or replace function public.reserva_reagendar(p_token text, p_inicio timestamptz) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas;
+begin
+  r := public.reserva_por_token(p_token);
+  if r.cliente_id is not null then raise exception 'Esta hora es de una cuenta: reagéndala desde la app'; end if;
+  perform public.reagendar_reserva(r, p_inicio);
+  return public.reserva_ver(p_token);
+end $$;
+
+-- Calificación del cliente a la barbería (una vez por visita, después de "Atendida").
+create or replace function public.calificar_visita(r public.reservas, p_estrellas int, p_comentario text) returns void
+language plpgsql security definer set search_path = '' as $$
+declare own uuid;
+begin
+  if r.estado <> 'atendida' then raise exception 'Podrás calificar cuando te atiendan'; end if;
+  if coalesce(p_estrellas, 0) not between 1 and 5 then raise exception 'Elige de 1 a 5 estrellas'; end if;
+  if exists (select 1 from public.calificaciones where reserva_id = r.id and autor = 'cliente') then raise exception 'Ya calificaste esta visita'; end if;
+  insert into public.calificaciones (reserva_id, barberia_id, autor, cliente_id, cliente_tel, cliente_nombre, estrellas, comentario, created_by)
+  values (r.id, r.barberia_id, 'cliente', r.cliente_id, r.cliente_tel,
+          coalesce((select nombre from public.profiles where id = r.cliente_id), r.cliente_nombre), p_estrellas,
+          left(nullif(trim(p_comentario), ''), 300), r.cliente_id);
+  select owner_id into own from public.barberias where id = r.barberia_id;
+  perform public.avisar(r.cliente_id, own, 'aviso', '⭐ Nueva calificación', 'Te dejaron ' || p_estrellas || ' estrella(s)', 'hoy');
+end $$;
+
+create or replace function public.reserva_calificar(p_token text, p_estrellas int, p_comentario text default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas;
+begin
+  r := public.reserva_por_token(p_token);
+  perform public.calificar_visita(r, p_estrellas, p_comentario);
+  return public.reserva_ver(p_token);
+end $$;
+
+create or replace function public.calificar_barberia(p_reserva uuid, p_estrellas int, p_comentario text default null) returns void
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; r public.reservas;
+begin
+  me := public.yo_activo();
+  select * into r from public.reservas where id = p_reserva and cliente_id = me.id;
+  if r.id is null then raise exception 'Reserva no encontrada'; end if;
+  perform public.calificar_visita(r, p_estrellas, p_comentario);
+end $$;
+
+-- ---------------------------------------------------------------------
+-- v2.0: Vista libre (sin cuenta) desde el link o QR de la barbería
+-- ---------------------------------------------------------------------
+create or replace function public.vista_publica(p_codigo text) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare b public.barberias; prem boolean; susp boolean;
+begin
+  select * into b from public.barberias where codigo = lower(trim(coalesce(p_codigo, '')));
+  if b.id is null then return null; end if;
+  susp := exists (select 1 from public.profiles o where o.id = b.owner_id and o.suspended);
+  prem := public.barberia_premium(b.id);
+  return jsonb_build_object(
+    'codigo', b.codigo, 'nombre', b.nombre, 'logo', b.logo, 'color', case when prem then b.color end,
+    'portada', case when prem then b.portada end, 'direccion', b.direccion, 'whatsapp', b.whatsapp, 'bienvenida', b.bienvenida,
+    'horario', b.horario, 'abono', b.abono, 'suspendida', susp,
+    'recibe', not susp and (b.abono = 0 or b.link_pago is not null or b.datos_transferencia is not null),
+    'calificacion', public.nota_barberia(b.id),
+    'registro', not susp and (select count(*) from public.profiles where barberia_id = b.id and role = 'client') < public.limite('clientes', prem),
+    'dias_max', public.limite('dias', false),
+    'barberos', (select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'nombre', public.nombre_de(p), 'avatar', p.avatar, 'foto', p.foto,
+        'descripcion', p.descripcion, 'reservable', public.reservable(p), 'horario', public.horario_de(p.id))
+        order by (p.role = 'owner') desc, p.nombre), '[]'::jsonb)
+      from public.profiles p where p.barberia_id = b.id and p.role in ('owner', 'barber') and p.activo and not p.suspended),
+    'servicios', (select coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'nombre', s.nombre, 'precio', s.precio, 'duracion', s.duracion,
+        'categoria', s.categoria, 'descripcion', s.descripcion, 'foto', s.foto, 'barberos', s.barberos) order by s.orden, s.nombre), '[]'::jsonb)
+      from public.servicios s where s.barberia_id = b.id and s.visible),
+    'ofertas', (select coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'titulo', o.titulo, 'detalle', o.detalle, 'precio', o.precio,
+        'imagen', o.imagen, 'hasta', o.hasta) order by o.created_at desc), '[]'::jsonb)
+      from public.ofertas o where o.barberia_id = b.id and o.activa and not o.vip
+        and (o.hasta is null or o.hasta >= (now() at time zone public.tz())::date)));
+end $$;
+
+-- Horas ocupadas (sin nombres) para la vista libre. p_token marca la hora propia al reagendar.
+create or replace function public.ocupacion_publica(p_codigo text, p_desde date, p_hasta date, p_token text default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare bid uuid; t0 timestamptz; t1 timestamptz;
+begin
+  select id into bid from public.barberias where codigo = lower(trim(coalesce(p_codigo, '')));
+  if bid is null then raise exception 'Barbería no encontrada'; end if;
+  if p_hasta < p_desde or p_hasta - p_desde > 120 then raise exception 'Rango no válido'; end if;
+  perform public.liberar_vencidas();
+  t0 := (p_desde::timestamp) at time zone public.tz();
+  t1 := ((p_hasta + 1)::timestamp) at time zone public.tz();
+  return jsonb_build_object(
+    'reservas', (select coalesce(jsonb_agg(jsonb_build_object('barbero_id', r.barbero_id, 'inicio', r.inicio, 'fin', r.fin,
+        'estado', 'ocupado', 'mia', r.token = p_token, 'detalle', false) order by r.inicio), '[]'::jsonb)
+      from public.reservas r where r.barberia_id = bid and r.inicio < t1 and r.fin > t0
+        and r.estado in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada')),
+    'bloqueos', (select coalesce(jsonb_agg(jsonb_build_object('barbero_id', k.barbero_id, 'desde', k.desde, 'hasta', k.hasta)), '[]'::jsonb)
+      from public.bloqueos k where k.barberia_id = bid and k.desde < t1 and k.hasta > t0));
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -1388,63 +2202,84 @@ begin
   return r;
 end $$;
 
--- Confirmar (agendada → confirmada) o aprobar (por_aprobar → confirmada).
+-- Aprobar el abono (en revisión → agendada). Un solo paso: queda agendada y se le avisa al cliente.
 create or replace function public.confirmar_hora(p_reserva uuid) returns void
 language plpgsql security definer set search_path = '' as $$
 declare r public.reservas; bname text;
 begin
   r := public.reserva_staff(p_reserva);
-  if r.estado not in ('agendada', 'por_aprobar') then raise exception 'Esta hora no está pendiente'; end if;
-  update public.reservas set estado = 'confirmada', confirmada_at = now(), expira_at = null where id = r.id;
+  if not (r.estado in ('en_revision', 'por_aprobar') or (r.estado = 'agendada' and r.confirmada_at is null)) then
+    raise exception 'Esta hora no está pendiente';
+  end if;
+  update public.reservas set estado = 'agendada', confirmada_at = now(), aprobada_por = auth.uid(), expira_at = null where id = r.id;
   select public.nombre_de(p) into bname from public.profiles p where p.id = r.barbero_id;
-  perform public.avisar(auth.uid(), r.cliente_id, 'reserva', '✅ Tu hora está confirmada',
+  perform public.avisar(auth.uid(), r.cliente_id, 'reserva', '✅ Tu hora quedó agendada',
     public.fecha_txt(r.inicio) || ' con ' || bname || '. ¡Te esperamos!', 'horas', r.id);
 end $$;
 
+-- Rechazar el comprobante (la hora se libera) o anular una hora agendada (el abono queda a favor).
 create or replace function public.rechazar_hora(p_reserva uuid, p_motivo text default null) returns void
 language plpgsql security definer set search_path = '' as $$
-declare r public.reservas; dest text;
+declare r public.reservas; dest text; revision boolean;
 begin
   r := public.reserva_staff(p_reserva);
-  if r.estado not in ('esperando_abono', 'por_aprobar', 'agendada', 'confirmada') then raise exception 'Esta hora ya no está activa'; end if;
-  dest := case when r.abono > 0 and r.pagado_con in ('link', 'transferencia', 'saldo') and r.estado <> 'esperando_abono' then 'saldo' end;
-  update public.reservas set estado = 'anulada', anulada_at = now(), anulada_por = auth.uid(),
-    motivo = coalesce(nullif(trim(p_motivo), ''), 'Anulada por la barbería'), abono_destino = dest where id = r.id;
-  if dest = 'saldo' then update public.profiles set saldo = saldo + r.abono where id = r.cliente_id; end if;
-  perform public.avisar(auth.uid(), r.cliente_id, 'reserva', '❌ Tu hora fue anulada',
+  if r.estado not in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada') then raise exception 'Esta hora ya no está activa'; end if;
+  revision := r.estado in ('en_revision', 'por_aprobar');
+  if revision and coalesce(trim(p_motivo), '') = '' then raise exception 'Escribe el motivo del rechazo (ej. "No llegó la transferencia")'; end if;
+  dest := case when not revision and r.abono > 0 and r.pagado_con in ('link', 'transferencia', 'saldo') and r.estado <> 'esperando_abono' then 'saldo' end;
+  update public.reservas set estado = 'anulada', anulada_at = now(), anulada_por = auth.uid(), expira_at = null,
+    motivo = coalesce(nullif(trim(p_motivo), ''), 'Anulada por la barbería'), abono_destino = dest,
+    saldo_hasta = case when dest = 'saldo' and r.cliente_id is null then now() + make_interval(days => public.regla('dias_saldo')) end
+  where id = r.id;
+  if dest = 'saldo' and r.cliente_id is not null then update public.profiles set saldo = saldo + r.abono where id = r.cliente_id; end if;
+  perform public.avisar(auth.uid(), r.cliente_id, 'reserva', case when revision then '❌ Tu comprobante fue rechazado' else '❌ Tu hora fue anulada' end,
     public.fecha_txt(r.inicio) || coalesce(' · ' || nullif(trim(p_motivo), ''), '') ||
     case when dest = 'saldo' then '. Tu abono quedó como saldo a favor.' else '' end, 'horas', r.id);
   perform public.avisar_espera(r.barberia_id, r.barbero_id, r.inicio);
 end $$;
 
+-- El dueño marca que ya devolvió el abono.
+create or replace function public.marcar_devuelto(p_reserva uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if me.role <> 'owner' then raise exception 'Solo el dueño'; end if;
+  update public.reservas set devolucion = 'devuelta', devuelta_at = now()
+  where id = p_reserva and barberia_id = me.barberia_id and devolucion = 'pendiente';
+  if not found then raise exception 'No hay una devolución pendiente en esta hora'; end if;
+end $$;
+
 -- Marcar Atendida (pasa sola a la Caja) o No vino.
 create or replace function public.marcar_hora(p_reserva uuid, p_estado text, p_medio text default 'efectivo', p_propina int default 0)
 returns void language plpgsql security definer set search_path = '' as $$
-declare r public.reservas; nv int;
+declare r public.reservas; nv int; me public.profiles := public.yo();
 begin
   r := public.reserva_staff(p_reserva);
   if p_estado not in ('atendida', 'no_vino') then raise exception 'Estado no válido'; end if;
-  if r.estado not in ('agendada', 'confirmada', 'por_aprobar', 'atendida', 'no_vino') then raise exception 'Esta hora no se puede marcar'; end if;
+  if r.estado not in ('agendada', 'confirmada', 'en_revision', 'por_aprobar', 'atendida', 'no_vino') then raise exception 'Esta hora no se puede marcar'; end if;
   if r.inicio > now() + interval '30 minutes' then raise exception 'Todavía no llega la hora'; end if;
-  update public.reservas set estado = p_estado, expira_at = null,
+  update public.reservas set estado = p_estado, expira_at = null, confirmada_at = coalesce(confirmada_at, now()),
     abono_destino = case when p_estado = 'no_vino' and abono > 0 and pagado_con in ('link', 'transferencia', 'saldo') then 'perdido' else abono_destino end
   where id = r.id;
   if p_estado = 'atendida' then
     insert into public.caja (barberia_id, barbero_id, reserva_id, fecha, servicio, monto, abono, medio, cliente_id, cliente_nombre, propina, created_by)
     select r.barberia_id, r.barbero_id, r.id, r.inicio,
-           (select string_agg(x ->> 'nombre', ' + ') from jsonb_array_elements(r.servicios) x),
+           coalesce((select string_agg(x ->> 'nombre', ' + ') from jsonb_array_elements(r.servicios) x), 'Corte'),
            r.total, case when r.pagado_con in ('link', 'transferencia', 'saldo') then r.abono else 0 end,
            case when p_medio = 'transferencia' then 'transferencia' else 'efectivo' end,
            r.cliente_id, coalesce((select nombre from public.profiles where id = r.cliente_id), r.cliente_nombre),
-           greatest(0, coalesce(p_propina, 0)), auth.uid()
+           case when me.role = 'barber' then 0 else greatest(0, coalesce(p_propina, 0)) end, auth.uid()
     on conflict (reserva_id) do nothing;
   else
     delete from public.caja where reserva_id = r.id;
-    select count(*) into nv from public.reservas where cliente_id = r.cliente_id and estado = 'no_vino';
+    select count(*) into nv from public.reservas
+    where barberia_id = r.barberia_id and estado = 'no_vino'
+      and ((r.cliente_id is not null and cliente_id = r.cliente_id) or (r.cliente_id is null and cliente_tel = r.cliente_tel));
     if nv >= 3 then
       perform public.avisar(null, (select owner_id from public.barberias where id = r.barberia_id), 'aviso',
-        '⚠️ Cliente con ' || nv || ' "No vino"', coalesce((select nombre from public.profiles where id = r.cliente_id), 'Un cliente') ||
-        ' ya faltó ' || nv || ' veces. Puedes bloquearlo para reservar en Clientes.', 'clientes');
+        '⚠️ Cliente con ' || nv || ' "No vino"', coalesce((select nombre from public.profiles where id = r.cliente_id), r.cliente_nombre, 'Un cliente') ||
+        ' ya faltó ' || nv || ' veces. Califícalo para que quede en la lista negra.', 'clientes');
     end if;
   end if;
 end $$;
@@ -1456,7 +2291,7 @@ declare me public.profiles; r public.reservas; bar public.profiles; fin_ timesta
 begin
   r := public.reserva_staff(p_reserva);
   me := public.yo();
-  if r.estado not in ('esperando_abono', 'por_aprobar', 'agendada', 'confirmada') then raise exception 'Esta hora ya no está activa'; end if;
+  if r.estado not in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada') then raise exception 'Esta hora ya no está activa'; end if;
   select * into bar from public.profiles where id = coalesce(p_barbero, r.barbero_id) and barberia_id = r.barberia_id and role in ('owner', 'barber');
   if bar.id is null then raise exception 'Barbero no encontrado'; end if;
   if me.role = 'barber' and bar.id <> me.id then raise exception 'Solo el dueño puede pasar una hora a otro barbero'; end if;
@@ -1470,9 +2305,11 @@ begin
     'Ahora es el ' || public.fecha_txt(p_inicio) || ' con ' || public.nombre_de(bar) || '.', 'horas', r.id);
 end $$;
 
--- Hora creada por el equipo (cliente que escribió, llamó o llegó). Sin restricciones de horario.
+-- Hora creada por el equipo (cliente que escribió, llamó o llegó). Sin restricciones de horario. Queda agendada.
+drop function if exists public.crear_hora(uuid, timestamptz, uuid[], uuid, text, int, text);
 create or replace function public.crear_hora(p_barbero uuid, p_inicio timestamptz, p_servicios uuid[], p_cliente uuid,
-                                             p_nombre text default null, p_minutos int default null, p_nota text default null)
+                                             p_nombre text default null, p_minutos int default null, p_nota text default null,
+                                             p_telefono text default null)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare me public.profiles; bar public.profiles; c public.profiles; dur int; tot int; items jsonb; r public.reservas;
 begin
@@ -1493,10 +2330,11 @@ begin
   dur := coalesce(nullif(p_minutos, 0), nullif(dur, 0), 30);
   if dur not between 5 and 480 then raise exception 'Duración no válida'; end if;
   begin
-    insert into public.reservas (barberia_id, barbero_id, cliente_id, cliente_nombre, inicio, fin, servicios, total, abono,
+    insert into public.reservas (barberia_id, barbero_id, cliente_id, cliente_nombre, cliente_tel, inicio, fin, servicios, total, abono,
                                  pagado_con, estado, confirmada_at, creada_por, nota)
-    values (me.barberia_id, bar.id, c.id, case when c.id is null then left(trim(p_nombre), 60) end, p_inicio,
-            p_inicio + make_interval(mins => dur), items, tot, 0, 'interno', 'confirmada', now(), me.id, left(p_nota, 200))
+    values (me.barberia_id, bar.id, c.id, case when c.id is null then left(trim(p_nombre), 60) end,
+            nullif(public.tel_norm(coalesce(c.telefono, p_telefono)), ''), p_inicio,
+            p_inicio + make_interval(mins => dur), items, tot, 0, 'interno', 'agendada', now(), me.id, left(p_nota, 200))
     returning * into r;
   exception when exclusion_violation then raise exception 'Esa hora ya está ocupada';
   end;
@@ -1505,6 +2343,112 @@ begin
       public.fecha_txt(p_inicio) || ' con ' || public.nombre_de(bar) || '. ¡Te esperamos!', 'horas', r.id);
   end if;
   return to_jsonb(r) - 'comprobante';
+end $$;
+
+-- Calificar al cliente (una vez por visita, después de Atendida o No vino). Con 2 estrellas o menos entra a la lista negra.
+create or replace function public.calificar_cliente(p_reserva uuid, p_estrellas int, p_motivo text default null, p_comentario text default null) returns void
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas; c public.profiles; me public.profiles := public.yo(); tel text;
+begin
+  r := public.reserva_staff(p_reserva);
+  if r.estado not in ('atendida', 'no_vino') then raise exception 'Califica después de marcar Atendida o No vino'; end if;
+  if coalesce(p_estrellas, 0) not between 1 and 5 then raise exception 'Elige de 1 a 5 estrellas'; end if;
+  if r.cliente_id is null and coalesce(r.cliente_tel, '') = '' then raise exception 'Esta hora no tiene un cliente para calificar'; end if;
+  if exists (select 1 from public.calificaciones where reserva_id = r.id and autor = 'barberia') then raise exception 'Ya calificaste esta visita'; end if;
+  select * into c from public.profiles where id = r.cliente_id;
+  tel := nullif(public.tel_norm(coalesce(c.telefono, r.cliente_tel)), '');
+  insert into public.calificaciones (reserva_id, barberia_id, autor, cliente_id, cliente_tel, cliente_nombre, estrellas, motivo, comentario, created_by)
+  values (r.id, r.barberia_id, 'barberia', r.cliente_id, tel, coalesce(c.nombre, r.cliente_nombre), p_estrellas,
+          left(nullif(trim(p_motivo), ''), 60), left(nullif(trim(p_comentario), ''), 300), me.id);
+  if p_estrellas <= public.regla('estrellas_lista_negra') and public.en_lista_negra(r.barberia_id, r.cliente_id, tel) is null then
+    insert into public.lista_negra (barberia_id, cliente_id, tel, nombre, motivo, agregado_por)
+    values (r.barberia_id, r.cliente_id, tel, coalesce(c.nombre, r.cliente_nombre),
+            coalesce(nullif(trim(p_motivo), ''), p_estrellas || ' estrella(s)') || coalesce(' · ' || nullif(trim(p_comentario), ''), ''), me.id);
+  end if;
+end $$;
+
+create or replace function public.ver_lista_negra() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', l.id, 'cliente_id', l.cliente_id, 'nombre', coalesce(c.nombre, l.nombre),
+      'tel', coalesce(c.telefono, l.tel), 'motivo', l.motivo, 'desde', l.created_at, 'por', public.nombre_de(a),
+      'nota', public.nota_cliente(l.barberia_id, l.cliente_id, coalesce(c.telefono, l.tel))) order by l.created_at desc), '[]'::jsonb)
+    from public.lista_negra l left join public.profiles c on c.id = l.cliente_id left join public.profiles a on a.id = l.agregado_por
+    where l.barberia_id = me.barberia_id and l.activo);
+end $$;
+
+create or replace function public.quitar_lista_negra(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if me.role <> 'owner' then raise exception 'Solo el dueño saca a alguien de la lista negra'; end if;
+  update public.lista_negra set activo = false, quitado_por = me.id, quitado_at = now()
+  where id = p_id and barberia_id = me.barberia_id and activo;
+end $$;
+
+-- Calificaciones recibidas (dueño): promedio y comentarios.
+create or replace function public.mis_calificaciones() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if me.role <> 'owner' then raise exception 'Solo el dueño'; end if;
+  return jsonb_build_object('nota', public.nota_barberia(me.barberia_id),
+    'ultimas', (select coalesce(jsonb_agg(jsonb_build_object('estrellas', q.estrellas, 'comentario', q.comentario, 'nombre', q.cliente_nombre,
+        'created_at', q.created_at) order by q.created_at desc), '[]'::jsonb)
+      from (select * from public.calificaciones where barberia_id = me.barberia_id and autor = 'cliente' order by created_at desc limit 50) q));
+end $$;
+
+-- Recordar al barbero (y luego al dueño) los comprobantes que esperan revisión.
+create or replace function public.recordar_revisiones() returns int
+language plpgsql security definer set search_path = '' as $$
+declare r record; n int := 0; m int := public.regla('minutos_recordar_revision'); own uuid; quien text; ln jsonb;
+begin
+  for r in select * from public.reservas where estado = 'en_revision' loop
+    select owner_id into own from public.barberias where id = r.barberia_id;
+    quien := coalesce((select public.nombre_de(p) from public.profiles p where p.id = r.cliente_id), r.cliente_nombre || ' (sin cuenta)');
+    -- La hora ya pasó hace 24 h sin revisión: el abono queda a favor del cliente (no pierde su plata).
+    if r.inicio < now() - interval '24 hours' then
+      update public.reservas set estado = 'anulada', anulada_at = now(), motivo = 'La barbería no revisó el comprobante a tiempo',
+        abono_destino = case when abono > 0 then 'saldo' end,
+        saldo_hasta = case when abono > 0 and cliente_id is null then now() + make_interval(days => public.regla('dias_saldo')) end
+      where id = r.id;
+      if r.abono > 0 and r.cliente_id is not null then update public.profiles set saldo = saldo + r.abono where id = r.cliente_id; end if;
+      perform public.avisar(null, r.cliente_id, 'reserva', 'Tu abono quedó a favor',
+        'La barbería no alcanzó a revisar tu comprobante del ' || public.fecha_txt(r.inicio) || '. Tu abono quedó como saldo a favor.', 'horas', r.id);
+      perform public.avisar(null, own, 'reserva', '⚠️ Comprobante sin revisar', quien || ' · ' || public.fecha_txt(r.inicio) ||
+        ': pasaron 24 h sin revisión y su abono quedó como saldo a favor.', 'agenda?r=' || r.id, r.id);
+      n := n + 1;
+      continue;
+    end if;
+    if r.revision_paso = 0 and r.comprobante_at < now() - make_interval(mins => m) then
+      perform public.avisar(null, r.barbero_id, 'reserva', '🧾 Tienes un abono por revisar',
+        quien || ' · ' || public.fecha_txt(r.inicio) || '. Revisa que llegó la transferencia y aprueba la hora.', 'agenda?r=' || r.id, r.id);
+      update public.reservas set revision_paso = 1 where id = r.id;
+      n := n + 1;
+    elsif r.revision_paso = 1 and r.comprobante_at < now() - make_interval(mins => m * 2) then
+      if own <> r.barbero_id then
+        perform public.avisar(null, own, 'reserva', '🧾 Abono sin revisar', quien || ' · ' || public.fecha_txt(r.inicio) ||
+          ' sigue esperando revisión de ' || (select public.nombre_de(p) from public.profiles p where p.id = r.barbero_id) || '.', 'agenda?r=' || r.id, r.id);
+      else
+        perform public.avisar(null, r.barbero_id, 'reserva', '🧾 Abono sin revisar', quien || ' · ' || public.fecha_txt(r.inicio) ||
+          ' sigue esperando que apruebes su hora.', 'agenda?r=' || r.id, r.id);
+      end if;
+      update public.reservas set revision_paso = 2 where id = r.id;
+      n := n + 1;
+    end if;
+    if not r.revision_previa and r.inicio between now() and now() + interval '1 hour' then
+      perform public.avisar(null, r.barbero_id, 'reserva', '⏰ Hora en 1 hora sin aprobar',
+        quien || ' llega a las ' || to_char(r.inicio at time zone public.tz(), 'HH24:MI') || ' y su abono sigue en revisión.', 'agenda?r=' || r.id, r.id);
+      update public.reservas set revision_previa = true where id = r.id;
+      n := n + 1;
+    end if;
+  end loop;
+  return n;
 end $$;
 
 -- Historial de avisos de una hora (quién lo vio y cuándo).
@@ -1582,6 +2526,21 @@ begin
     raise exception 'Barbero no encontrado';
   end if;
   if cli is not null and not exists (select 1 from public.profiles where id = cli and barberia_id = me.barberia_id) then cli := null; end if;
+  -- v2.0: el barbero no ve ni escribe montos: el precio sale del servicio elegido (o lo completa el dueño).
+  if me.role = 'barber' then
+    if nullif(p ->> 'servicio_id', '') is not null then
+      select p || jsonb_build_object('servicio', s.nombre, 'monto', s.precio) into p from public.servicios s
+      where s.id = (p ->> 'servicio_id')::uuid and s.barberia_id = me.barberia_id;
+    end if;
+    if nullif(p ->> 'id', '') is not null then
+      p := p || jsonb_build_object('monto', coalesce((select case when nullif(p ->> 'servicio_id', '') is null then k.monto end
+             from public.caja k where k.id = (p ->> 'id')::uuid), (p ->> 'monto')::int, 0),
+             'propina', (select k.propina from public.caja k where k.id = (p ->> 'id')::uuid));
+    else
+      p := p || jsonb_build_object('monto', case when nullif(p ->> 'servicio_id', '') is not null then coalesce((p ->> 'monto')::int, 0) else 0 end,
+                                   'propina', 0);
+    end if;
+  end if;
   if coalesce(trim(p ->> 'servicio'), '') = '' then raise exception 'Falta el servicio'; end if;
   if coalesce((p ->> 'monto')::int, -1) < 0 then raise exception 'Falta el monto'; end if;
   if nullif(p ->> 'id', '') is not null then
@@ -1614,14 +2573,17 @@ declare me public.profiles; prem boolean; hoy date := (now() at time zone public
 begin
   me := public.yo_activo();
   if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
-  prem := public.barberia_premium(me.barberia_id);
+  prem := public.tiene('barberia', 'caja_reportes', public.barberia_premium(me.barberia_id));
   if not prem and (p_desde <> hoy or p_hasta <> hoy) then raise exception 'Los reportes de caja son Premium ⭐'; end if;
   if me.role = 'barber' then quien := me.id;
   elsif p_barbero is null and not prem then quien := me.id;
   else quien := p_barbero; end if;
+  -- v2.0: el barbero ve sus cortes, sin montos.
   return (select coalesce(jsonb_agg(jsonb_build_object('id', k.id, 'barbero_id', k.barbero_id, 'barbero', public.nombre_de(p),
-      'fecha', k.fecha, 'servicio', k.servicio, 'monto', k.monto, 'abono', k.abono, 'medio', k.medio, 'cliente_id', k.cliente_id,
-      'cliente', k.cliente_nombre, 'propina', k.propina, 'nota', k.nota, 'reserva_id', k.reserva_id) order by k.fecha desc), '[]'::jsonb)
+      'fecha', k.fecha, 'servicio', k.servicio, 'medio', k.medio, 'cliente_id', k.cliente_id, 'cliente', k.cliente_nombre, 'nota', k.nota,
+      'reserva_id', k.reserva_id)
+      || case when me.role = 'barber' then '{}'::jsonb else jsonb_build_object('monto', k.monto, 'abono', k.abono, 'propina', k.propina) end
+      order by k.fecha desc), '[]'::jsonb)
     from public.caja k join public.profiles p on p.id = k.barbero_id
     where k.barberia_id = me.barberia_id and (quien is null or k.barbero_id = quien)
       and (k.fecha at time zone public.tz())::date between p_desde and p_hasta);
@@ -1673,6 +2635,8 @@ begin
       pago1_link = nullif(trim(p -> 'pagos' -> 'p1' ->> 'link'), ''),
       pago2_monto = greatest(0, least(100000, nullif(p -> 'pagos' -> 'p2' ->> 'monto', '')::int)),
       pago2_link = nullif(trim(p -> 'pagos' -> 'p2' ->> 'link'), ''),
+      pago1_texto = left(nullif(trim(p -> 'pagos' -> 'p1' ->> 'texto'), ''), 120),
+      pago2_texto = left(nullif(trim(p -> 'pagos' -> 'p2' ->> 'texto'), ''), 120),
       pago_activo = coalesce((p -> 'pagos' ->> 'activo')::smallint, 1)
     where id = me.barberia_id;
     update public.barberias set
@@ -1681,7 +2645,7 @@ begin
     where id = me.barberia_id;
     p := p - 'abono' - 'link_pago';
   end if;
-  if (coalesce(p ->> 'color', '') <> '' or coalesce(p ->> 'portada', '') <> '') and not prem then
+  if (coalesce(p ->> 'color', '') <> '' or coalesce(p ->> 'portada', '') <> '') and not public.tiene('barberia', 'colores', prem) then
     raise exception 'Colores y portada son Premium ⭐';
   end if;
   update public.barberias set
@@ -1724,7 +2688,8 @@ language plpgsql security definer set search_path = '' as $$
 declare me public.profiles; prem boolean;
 begin
   me := public.yo_activo();
-  prem := public.is_premium(me.id) or (public.es_staff(me) and public.barberia_premium(me.barberia_id));
+  prem := case when me.role = 'admin' then true when public.es_staff(me) then public.tiene('barberia', 'colores', public.barberia_premium(me.barberia_id))
+               else public.tiene('cliente', 'colores', public.is_premium(me.id)) end;
   if not public.img_ok(p ->> 'foto', 40000) then raise exception 'Foto muy pesada'; end if;
   -- v1.3: Free elige entre 4 colores conocidos; Premium, cualquier color (también uno personalizado).
   if coalesce(p ->> 'color', '') <> '' then
@@ -1734,7 +2699,7 @@ begin
     end if;
   end if;
   if p ? 'favorito' and nullif(p ->> 'favorito', '') is not null then
-    if not prem then raise exception 'Barbero favorito es Premium ⭐'; end if;
+    if not public.tiene('cliente', 'favorito', public.is_premium(me.id)) then raise exception 'Barbero favorito es Premium ⭐'; end if;
     if not exists (select 1 from public.profiles where id = (p ->> 'favorito')::uuid and barberia_id = me.barberia_id and role in ('owner', 'barber')) then
       raise exception 'Barbero no encontrado';
     end if;
@@ -1768,7 +2733,7 @@ begin
     raise exception 'Editar el perfil y horario de tus barberos es Premium ⭐';
   end if;
   if p ? 'horario' and p -> 'horario' <> 'null'::jsonb and not public.horario_valido(p -> 'horario') then raise exception 'Horario no válido'; end if;
-  if p ? 'horario' and p -> 'horario' <> 'null'::jsonb and not prem then raise exception 'Horario por barbero es Premium ⭐'; end if;
+  if p ? 'horario' and p -> 'horario' <> 'null'::jsonb and not public.tiene('barberia', 'horario_barbero', prem) then raise exception 'Horario por barbero es Premium ⭐'; end if;
   if not public.img_ok(p ->> 'foto', 40000) then raise exception 'Foto muy pesada'; end if;
   update public.profiles set
     activo = case when p ? 'activo' and role = 'barber' then coalesce((p ->> 'activo')::boolean, activo) else activo end,
@@ -1832,7 +2797,7 @@ begin
   if me.role <> 'owner' then raise exception 'Solo el dueño publica ofertas'; end if;
   prem := public.is_premium(me.id);
   if coalesce(trim(p ->> 'titulo'), '') = '' then raise exception 'Falta el título'; end if;
-  if coalesce((p ->> 'vip')::boolean, false) and not prem then raise exception 'Ofertas VIP son Premium ⭐'; end if;
+  if coalesce((p ->> 'vip')::boolean, false) and not public.tiene('barberia', 'ofertas_vip', prem) then raise exception 'Ofertas VIP son Premium ⭐'; end if;
   if not public.img_ok(p ->> 'imagen', 120000) then raise exception 'Imagen muy pesada'; end if;
   if oid is null then
     if (select count(*) from public.ofertas where barberia_id = me.barberia_id and activa
@@ -1846,7 +2811,7 @@ begin
     if p_avisar then
       select nombre into bname from public.barberias where id = me.barberia_id;
       for c in select id from public.profiles where barberia_id = me.barberia_id and role = 'client' and not suspended
-               and (not o.vip or public.is_premium(id)) loop
+               and (not o.vip or public.tiene('cliente', 'ofertas_vip', public.is_premium(id))) loop
         perform public.avisar(me.id, c.id, 'oferta', (case when o.vip then '⭐ Oferta VIP · ' else '🏷️ ' end) || o.titulo,
           coalesce(o.detalle, bname), 'ofertas');
       end loop;
@@ -1873,20 +2838,21 @@ end $$;
 -- ---------------------------------------------------------------------
 create or replace function public.mis_clientes() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
-declare me public.profiles;
+declare me public.profiles; cuentas jsonb; invitados jsonb;
 begin
   me := public.yo_activo();
   if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
-  return (select coalesce(jsonb_agg(jsonb_build_object(
+  select coalesce(jsonb_agg(jsonb_build_object(
       'id', c.id, 'nombre', c.nombre, 'email', case when me.role = 'owner' then c.email end, 'telefono', c.telefono,
       'avatar', c.avatar, 'foto', c.foto, 'premium', public.is_premium(c.id), 'premium_until', c.premium_until,
-      'saldo', c.saldo, 'bloqueado', c.bloqueado, 'notas', c.notas, 'cumple', c.cumple, 'clave_temporal', c.clave_temporal,
-      'created_at', c.created_at, 'last_seen', c.last_seen,
+      'saldo', case when me.role = 'owner' then c.saldo end, 'bloqueado', c.bloqueado, 'notas', c.notas, 'cumple', c.cumple, 'clave_temporal', c.clave_temporal,
+      'created_at', c.created_at, 'last_seen', c.last_seen, 'invitado', false,
+      'lista_negra', public.en_lista_negra(me.barberia_id, c.id, c.telefono), 'nota', public.nota_cliente(me.barberia_id, c.id, c.telefono),
       'visitas', (select count(*) from public.reservas r where r.cliente_id = c.id and r.estado = 'atendida'),
       'no_vino', (select count(*) from public.reservas r where r.cliente_id = c.id and r.estado = 'no_vino'),
       'ultima', (select max(r.inicio) from public.reservas r where r.cliente_id = c.id and r.estado = 'atendida'),
       'proxima', (select min(r.inicio) from public.reservas r where r.cliente_id = c.id and r.inicio > now()
-                  and r.estado in ('agendada', 'confirmada', 'por_aprobar', 'esperando_abono')),
+                  and r.estado in ('agendada', 'confirmada', 'en_revision', 'por_aprobar', 'esperando_abono')),
       'creado_por', (select public.nombre_de(x) from public.profiles x where x.id = c.created_by),
       'ultimo_barbero', (select public.nombre_de(x) from public.caja k join public.profiles x on x.id = k.barbero_id
                          where k.cliente_id = c.id order by k.fecha desc limit 1),
@@ -1895,8 +2861,24 @@ begin
                    where k.cliente_id = c.id group by x.id order by count(*) desc, max(k.fecha) desc limit 1),
       'habitual_veces', (select count(*) from public.caja k where k.cliente_id = c.id
                          group by k.barbero_id order by count(*) desc, max(k.fecha) desc limit 1))
-      order by c.nombre), '[]'::jsonb)
-    from public.profiles c where c.barberia_id = me.barberia_id and c.role = 'client');
+      order by c.nombre), '[]'::jsonb) into cuentas
+    from public.profiles c where c.barberia_id = me.barberia_id and c.role = 'client';
+  -- v2.0: clientes sin cuenta (reservaron con su WhatsApp desde el link o QR).
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'id', null, 'invitado', true, 'nombre', g.nombre, 'telefono', g.tel, 'avatar', '👤', 'visitas', g.visitas, 'no_vino', g.no_vino,
+      'ultima', g.ultima, 'proxima', g.proxima, 'created_at', g.primera,
+      'lista_negra', public.en_lista_negra(me.barberia_id, null, g.tel), 'nota', public.nota_cliente(me.barberia_id, null, g.tel))
+      order by g.nombre), '[]'::jsonb) into invitados
+    from (select r.cliente_tel as tel, (array_agg(r.cliente_nombre order by r.created_at desc))[1] as nombre,
+                 count(*) filter (where r.estado = 'atendida') as visitas, count(*) filter (where r.estado = 'no_vino') as no_vino,
+                 max(r.inicio) filter (where r.estado = 'atendida') as ultima,
+                 min(r.inicio) filter (where r.inicio > now() and r.estado in ('agendada', 'confirmada', 'en_revision', 'esperando_abono')) as proxima,
+                 min(r.created_at) as primera
+          from public.reservas r
+          where r.barberia_id = me.barberia_id and r.cliente_id is null and coalesce(r.cliente_tel, '') <> ''
+            and (r.estado <> 'anulada' or r.comprobante_at is not null)
+          group by r.cliente_tel) g;
+  return cuentas || invitados;
 end $$;
 
 create or replace function public.guardar_cliente(p_id uuid, p jsonb) returns void
@@ -1921,7 +2903,7 @@ declare me public.profiles; b public.barberias; n int;
 begin
   me := public.yo_activo();
   select * into b from public.barberias where id = me.barberia_id;
-  if not public.barberia_premium(b.id) then return null; end if;
+  if not public.tiene('barberia', 'sellos', public.barberia_premium(b.id)) then return null; end if;
   select count(*) into n from public.reservas where cliente_id = me.id and estado = 'atendida';
   return jsonb_build_object('total', n, 'meta', b.sellos_meta, 'actual', n % b.sellos_meta, 'premios', n / b.sellos_meta);
 end $$;
@@ -2102,15 +3084,15 @@ end $$;
 -- ---------------------------------------------------------------------
 create or replace function public.estadisticas(p_desde date, p_hasta date) returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
-declare me public.profiles; t0 timestamptz; t1 timestamptz; solo uuid;
+declare me public.profiles; t0 timestamptz; t1 timestamptz; solo uuid; res jsonb;
 begin
   me := public.yo_activo();
   if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
-  if not public.barberia_premium(me.barberia_id) then raise exception 'Las estadísticas son Premium ⭐'; end if;
+  if not public.tiene('barberia', 'estadisticas', public.barberia_premium(me.barberia_id)) then raise exception 'Las estadísticas son Premium ⭐'; end if;
   solo := case when me.role = 'barber' then me.id end;
   t0 := (p_desde::timestamp) at time zone public.tz();
   t1 := ((p_hasta + 1)::timestamp) at time zone public.tz();
-  return jsonb_build_object(
+  res := jsonb_build_object(
     'por_barbero', (select coalesce(jsonb_agg(x), '[]'::jsonb) from (
       select p.id, public.nombre_de(p) as nombre,
         (select count(*) from public.reservas r where r.barbero_id = p.id and r.inicio >= t0 and r.inicio < t1 and r.estado = 'atendida') as atendidas,
@@ -2139,6 +3121,15 @@ begin
       select extract(isodow from r.inicio at time zone public.tz())::int as d, count(*) as n from public.reservas r
       where r.barberia_id = me.barberia_id and r.estado in ('atendida', 'confirmada', 'agendada', 'no_vino') and r.inicio >= t0 and r.inicio < t1
         and (solo is null or r.barbero_id = solo) group by 1) x));
+  -- v2.0: el barbero ve sus cortes y "no vino", sin montos.
+  if me.role = 'barber' then
+    res := jsonb_build_object(
+      'por_barbero', (select coalesce(jsonb_agg(x - 'ventas' - 'propinas' - 'abonos'), '[]'::jsonb) from jsonb_array_elements(res -> 'por_barbero') x),
+      'servicios', (select coalesce(jsonb_agg(x - 'total'), '[]'::jsonb) from jsonb_array_elements(res -> 'servicios') x),
+      'clientes', (select coalesce(jsonb_agg(x - 'total'), '[]'::jsonb) from jsonb_array_elements(res -> 'clientes') x),
+      'horas', res -> 'horas', 'dias', res -> 'dias');
+  end if;
+  return res;
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -2157,12 +3148,84 @@ begin
     'clientes_premium', (select count(*) from public.profiles where role = 'client' and public.is_premium(id)),
     'ingresos_mes', (select coalesce(sum(precio), 0) from public.licenses where not revoked and redeemed_at >= m0),
     'ingresos_total', (select coalesce(sum(precio), 0) from public.licenses where not revoked and redeemed_at is not null),
-    'pendientes', (select count(*) from public.requests where status = 'pendiente'),
+    'pendientes', (select count(*) from public.pagos where estado = 'en_revision'),
+    'pagos_por_revisar', (select count(*) from public.pagos where estado = 'en_revision'),
+    'en_revision', (select count(*) from public.reservas where estado = 'en_revision'),
+    'invitados_mes', (select count(*) from public.reservas where created_at >= m0 and cliente_id is null and creada_por is null),
     'reportes', (select count(*) from public.reports where not resolved),
     'por_vencer', (select count(*) from public.profiles where plan = 'premium' and premium_until between now() and now() + interval '7 days'),
     'reservas_mes', (select count(*) from public.reservas where inicio >= m0 and estado <> 'anulada'),
     'dispositivos', (select count(*) from public.push_subscriptions),
-    'db_mb', round(pg_database_size(current_database()) / 1048576.0, 1));
+    'db_mb', round(pg_database_size(current_database()) / 1048576.0, 1),
+    'db_version', public.db_version());
+end $$;
+
+-- v2.0: uso del servidor por tabla (para el plan gratis de Supabase: 500 MB).
+create or replace function public.admin_uso() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  return jsonb_build_object('db_bytes', pg_database_size(current_database()), 'limite', 500 * 1048576,
+    'tablas', (select coalesce(jsonb_agg(jsonb_build_object('tabla', c.relname, 'bytes', pg_total_relation_size(c.oid), 'filas', c.reltuples::bigint)
+        order by pg_total_relation_size(c.oid) desc), '[]'::jsonb)
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r'),
+    'comprobantes', (select count(*) from public.reservas where comprobante is not null) + (select count(*) from public.pagos where comprobante is not null),
+    'fotos_chat', (select count(*) from public.messages where imagen is not null));
+end $$;
+
+-- v2.0: botones de limpieza del admin. Nunca borra lo que está en revisión. Todo DELETE con WHERE.
+create or replace function public.admin_limpiar(p_que text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare n int := 0;
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  if p_que = 'comprobantes' then
+    update public.reservas set comprobante = null where comprobante is not null and estado <> 'en_revision' and comprobante_at < now() - interval '7 days';
+    get diagnostics n = row_count;
+    update public.pagos set comprobante = null where comprobante is not null and estado <> 'en_revision';
+  elsif p_que = 'fotos_chat' then
+    update public.messages set imagen = null where imagen is not null and created_at < now() - interval '7 days';
+    get diagnostics n = row_count;
+  elsif p_que = 'avisos' then
+    delete from public.avisos where created_at < now() - interval '2 days';
+    get diagnostics n = row_count;
+  elsif p_que = 'anuladas' then
+    delete from public.reservas where estado = 'anulada' and coalesce(anulada_at, created_at) < now() - interval '7 days'
+      and coalesce(devolucion, '') <> 'pendiente' and not (abono_destino = 'saldo' and saldo_hasta > now());
+    get diagnostics n = row_count;
+  elsif p_que = 'auto' then
+    return public.limpiar();
+  else
+    raise exception 'Limpieza no válida';
+  end if;
+  perform public.auditar('Limpieza', p_que || ': ' || n);
+  return jsonb_build_object('borrados', n);
+end $$;
+
+create or replace function public.admin_auditoria() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('accion', a.accion, 'detalle', a.detalle, 'created_at', a.created_at,
+      'quien', coalesce(public.nombre_de(p), 'Sistema')) order by a.created_at desc), '[]'::jsonb)
+    from (select * from public.auditoria order by created_at desc limit 200) a left join public.profiles p on p.id = a.quien);
+end $$;
+
+create or replace function public.admin_calificaciones() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', q.id, 'autor', q.autor, 'estrellas', q.estrellas, 'motivo', q.motivo,
+      'comentario', q.comentario, 'cliente', q.cliente_nombre, 'barberia', b.nombre, 'created_at', q.created_at) order by q.created_at desc), '[]'::jsonb)
+    from (select * from public.calificaciones order by created_at desc limit 300) q join public.barberias b on b.id = q.barberia_id);
+end $$;
+
+create or replace function public.admin_borrar_calificacion(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  delete from public.calificaciones where id = p_id;
+  perform public.auditar('Calificación borrada', p_id::text);
 end $$;
 
 -- Métricas por barbería: este mes vs el anterior (para el ranking y las recomendaciones).
@@ -2175,6 +3238,8 @@ begin
   return (select coalesce(jsonb_agg(x order by x.ventas desc), '[]'::jsonb) from (
     select b.id, b.codigo, b.nombre, b.logo, b.whatsapp, b.created_at, o.id as owner_id, o.email, o.nombre as dueno,
       o.suspended, public.is_premium(o.id) as premium, o.premium_until, o.trial_used, b.horario, b.abono,
+      (b.link_pago is not null or b.datos_transferencia is not null) as cobra_abono, public.nota_barberia(b.id) as calificacion,
+      (select count(*) from public.reservas r where r.barberia_id = b.id and r.created_at >= m0 and r.cliente_id is null and r.creada_por is null) as invitados,
       (select max(p.last_seen) from public.profiles p where p.barberia_id = b.id and p.role in ('owner', 'barber')) as ultima_actividad,
       (select count(*) from public.profiles p where p.barberia_id = b.id and p.role in ('owner', 'barber')) as barberos,
       (select count(*) from public.profiles p where p.barberia_id = b.id and p.role = 'client') as clientes,
@@ -2186,7 +3251,8 @@ begin
       (select count(*) from public.reservas r where r.barberia_id = b.id and r.inicio >= m0 and r.estado = 'atendida') as atendidas,
       (select count(*) from public.reservas r where r.barberia_id = b.id and r.inicio >= m0 and r.estado = 'no_vino') as no_vino,
       (select count(*) from public.reservas r where r.barberia_id = b.id and r.inicio >= m0 and r.estado = 'anulada' and r.cliente_id is not null) as anuladas,
-      (select count(*) from public.reservas r where r.barberia_id = b.id and r.inicio >= m0 and r.consultar) as fin_de_semana,
+      (select count(*) from public.reservas r where r.barberia_id = b.id and r.inicio >= m0
+         and extract(isodow from r.inicio at time zone public.tz()) >= 6 and r.estado <> 'anulada') as fin_de_semana,
       (select coalesce(sum(k.monto + k.propina), 0) from public.caja k where k.barberia_id = b.id and k.fecha >= m0) as ventas,
       (select coalesce(sum(k.monto + k.propina), 0) from public.caja k where k.barberia_id = b.id and k.fecha >= p0 and k.fecha < m0) as ventas_ant,
       (select coalesce(sum(r.abono), 0) from public.reservas r where r.barberia_id = b.id and r.inicio >= m0 and r.pagado_con in ('link', 'transferencia')
@@ -2334,7 +3400,8 @@ begin
            where x.estado in ('agendada', 'confirmada') and not x.recordado24 and x.cliente_id is not null
              and x.inicio between now() + interval '2 hours 30 minutes' and now() + interval '24 hours'
              and x.created_at < x.inicio - interval '24 hours'
-             and (public.barberia_premium(x.barberia_id) or public.is_premium(x.cliente_id))
+             and (public.tiene('barberia', 'recordatorios', public.barberia_premium(x.barberia_id))
+                  or public.tiene('cliente', 'recordatorios', public.is_premium(x.cliente_id)))
            returning x.* loop
     perform public.avisar(null, r.cliente_id, 'reserva', '⏰ Mañana tienes hora',
       public.fecha_txt(r.inicio) || '. Si no puedes ir, anula con tiempo para no perder tu abono.', 'horas', r.id);
@@ -2344,7 +3411,8 @@ begin
            where x.estado in ('agendada', 'confirmada') and not x.recordado2 and x.cliente_id is not null
              and x.inicio between now() and now() + interval '2 hours'
              and x.created_at < x.inicio - interval '2 hours'
-             and (public.barberia_premium(x.barberia_id) or public.is_premium(x.cliente_id))
+             and (public.tiene('barberia', 'recordatorios', public.barberia_premium(x.barberia_id))
+                  or public.tiene('cliente', 'recordatorios', public.is_premium(x.cliente_id)))
            returning x.* loop
     perform public.avisar(null, r.cliente_id, 'reserva', '💈 Tu hora es en 2 horas', public.fecha_txt(r.inicio) || '. ¡Te esperamos!', 'horas', r.id);
     n := n + 1;
@@ -2352,14 +3420,32 @@ begin
   return n;
 end $$;
 
--- Limpieza: comprobantes de más de 30 días y avisos de más de 90.
-create or replace function public.limpiar() returns void
-language sql security definer set search_path = '' as $$
-  update public.reservas set comprobante = null where comprobante is not null and comprobante_at < now() - interval '30 days';
-  update public.messages set imagen = null where imagen is not null and created_at < now() - interval '30 days';
+drop function if exists public.limpiar();
+-- Limpieza diaria (días en Reglas). Las horas atendidas se guardan (sellos, estadísticas e historial).
+-- Ojo: todo DELETE lleva WHERE. Un comprobante "en revisión" nunca se borra.
+create or replace function public.limpiar() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare a int; b int; c int; d int; e int;
+begin
+  update public.reservas set comprobante = null
+  where comprobante is not null and estado <> 'en_revision' and comprobante_at < now() - make_interval(days => public.regla('dias_comprobantes'));
+  get diagnostics a = row_count;
+  update public.messages set imagen = null where imagen is not null and created_at < now() - make_interval(days => public.regla('dias_comprobantes'));
+  update public.pagos set comprobante = null
+  where comprobante is not null and estado <> 'en_revision' and created_at < now() - make_interval(days => public.regla('dias_comprobantes'));
   delete from public.avisos where created_at < now() - interval '7 days';
+  get diagnostics b = row_count;
   delete from public.lista_espera where fecha < current_date - 1;
-$$;
+  delete from public.reservas where estado = 'anulada' and coalesce(anulada_at, created_at) < now() - make_interval(days => public.regla('dias_anuladas'))
+    and coalesce(devolucion, '') <> 'pendiente' and not (abono_destino = 'saldo' and saldo_hasta > now());
+  get diagnostics c = row_count;
+  delete from public.user_invites where created_at < now() - interval '2 days';
+  delete from public.auditoria where created_at < now() - interval '365 days';
+  get diagnostics d = row_count;
+  delete from public.actualizaciones where created_at < now() - interval '2 years';
+  get diagnostics e = row_count;
+  return jsonb_build_object('comprobantes', a, 'avisos', b, 'horas_anuladas', c, 'registro', d + e);
+end $$;
 
 -- Una sola tarea por minuto que hace todo lo programado.
 create or replace function public.tick() returns void
@@ -2367,6 +3453,7 @@ language plpgsql security definer set search_path = '' as $$
 begin
   perform public.liberar_vencidas();
   perform public.recordatorios();
+  perform public.recordar_revisiones();
   if extract(minute from now())::int = 0 and extract(hour from now() at time zone public.tz())::int = 10 then
     perform public.avisar_vencimientos();
     perform public.limpiar();
@@ -2383,7 +3470,7 @@ begin
   me := public.yo_activo();
   if me.role <> 'client' then raise exception 'Para cerrar una barbería o cuenta de barbero, escribe a soporte'; end if;
   update public.reservas set estado = 'anulada', motivo = 'Cuenta eliminada', anulada_at = now()
-    where cliente_id = me.id and estado in ('esperando_abono', 'por_aprobar', 'agendada', 'confirmada') and inicio > now();
+    where cliente_id = me.id and estado in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada') and inicio > now();
   delete from auth.users where id = me.id;
 end $$;
 
@@ -2394,6 +3481,11 @@ end $$;
 revoke execute on all functions in schema public from public, anon;
 grant execute on all functions in schema public to authenticated;
 grant execute on function public.barberia_publica(text), public.ajustes_publicos(), public.config_publica() to anon;
+-- v2.0: vista libre y link personal de la reserva (sin cuenta).
+grant execute on function public.vista_publica(text), public.ocupacion_publica(text, date, date, text),
+  public.reservar_invitado(text, uuid, timestamptz, uuid[], text, text), public.reserva_ver(text),
+  public.reserva_comprobante(text, text, text), public.reserva_cancelar(text), public.reserva_reagendar(text, timestamptz),
+  public.reserva_calificar(text, int, text) to anon;
 
 do $$
 declare f text;
@@ -2405,7 +3497,11 @@ begin
     'public.avisar(uuid, uuid, text, text, text, text, uuid, uuid)', 'public.extender_premium(uuid, uuid)',
     'public.notificar_reserva(public.reservas)', 'public.avisar_espera(uuid, uuid, timestamptz)', 'public.liberar_vencidas()',
     'public.recordatorios()', 'public.limpiar()', 'public.tick()', 'public.avisar_vencimientos()',
-    'public.reserva_staff(uuid)', 'public.nuevo_codigo()', 'public.nueva_key()']
+    'public.reserva_staff(uuid)', 'public.nuevo_codigo()', 'public.nueva_key()',
+    'public.auditar(text, text)', 'public.dar_premium(uuid, int, int, text, text)', 'public.cancelar_reserva(public.reservas, uuid)',
+    'public.reagendar_reserva(public.reservas, timestamptz)', 'public.subir_comprobante(uuid, text, text)', 'public.reserva_por_token(text)',
+    'public.calificar_visita(public.reservas, int, text)', 'public.recordar_revisiones()', 'public.armar_reserva(uuid, uuid, timestamptz, uuid[], boolean)',
+    'public.nota_cliente(uuid, uuid, text)', 'public.en_lista_negra(uuid, uuid, text)', 'public.handle_new_user()']
   loop
     execute 'revoke execute on function ' || f || ' from authenticated';
   end loop;
