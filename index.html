@@ -49,7 +49,7 @@
       <button class="full grande" id="bEntrar">Entrar</button>
     </form>
     <a class="olvido" id="bOlvido" href="#" target="_blank" rel="noopener">🔑 ¿Olvidaste tu clave?</a>
-    <p class="muted chico centro" style="margin-top:16px">¿No tienes cuenta? Tu barbería te la crea y te la envía por WhatsApp.</p>
+    <p class="muted chico centro" style="margin-top:16px" id="lgSinCuenta">¿No tienes cuenta? Abre el link o QR de tu barbería para reservar sin cuenta o crearla.</p>
   </div>
 </main>
 <script src="shared/config.js"></script>
@@ -80,6 +80,8 @@
   // Barbería del enlace (?b=código) o la recordada en este celular: logo, nombre y WhatsApp.
   let local = K.barberiaLocal();
   const codigo = params.get('b');
+  // v2.0: el link o QR de la barbería abre la vista libre (reservar sin cuenta o crear la cuenta). "Entrar" trae &entrar=1.
+  if (codigo && !params.get('entrar')) { location.replace(C.raiz() + 'b/?b=' + encodeURIComponent(codigo)); return; }
   if (codigo) {
     try { const b = await K.rpc('barberia_publica', { p_codigo: codigo }); if (b) { K.recordarBarberia(b); local = b; } } catch (e) { /* sin red */ }
   }
@@ -89,6 +91,7 @@
     $('lgSub').textContent = 'Ingresa para reservar tu hora 💈';
     if (local.logo) { $('lgLogo').classList.add('img'); $('lgLogo').style.cssText = C.fondo(local.logo); $('lgLogo').textContent = ''; }
     if (local.color) C.aplicarColor(local.color);
+    $('lgSinCuenta').innerHTML = '¿No tienes cuenta? <a href="' + C.raiz() + 'b/?b=' + encodeURIComponent(local.codigo) + '">Reserva sin cuenta o créala aquí</a>';
   }
   const wsp = (local && local.whatsapp) || ajustes.whatsapp_admin;
   const textoOlvido = () => 'Hola, olvidé mi clave de la app' + (local ? ' de ' + local.nombre : '') + '. ¿Me la pueden restablecer? Mi correo es ' + ($('email').value.trim() || '…');

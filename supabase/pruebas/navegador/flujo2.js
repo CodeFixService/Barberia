@@ -1,5 +1,5 @@
-// Segundo recorrido (sobre los datos del primero): anular con saldo, reservar con saldo, fin de semana,
-// "Ya pagué" → admin aprueba, key de cliente, clave olvidada, hora interna, atendida → caja, modo oscuro.
+// Segundo recorrido (sobre los datos del primero; v2.0): anular con saldo, reservar con saldo el sábado,
+// Premium con comprobante → admin aprueba, días de regalo, clave olvidada, hora interna, atendida → caja, modo oscuro.
 const { chromium } = (() => { try { return require('playwright'); } catch (e) { return require('/opt/node22/lib/node_modules/playwright'); } })();
 const fs = require('fs');
 const BASE = 'http://localhost:8787/';
@@ -42,6 +42,8 @@ function sabado() { let i = 1; while (dowChile(diaChile(i)) !== 6) i++; return d
     const ana = await pagina(browser, 'ana');
     await entrar(ana, 'ana@cliente.cl', await clave('ana@cliente.cl'));
     await cerrar(ana);
+    // Ya pasaron los minutos de devolución: al anular con +24 h queda saldo a favor.
+    await q("update reservas set comprobante_at = now() - interval '1 hour' where cliente_id = (select id from profiles where email = 'ana@cliente.cl')");
     await ana.click('nav.tabs [data-v="horas"]');
     await ana.waitForSelector('#v-horas [data-anular]');
     await ana.click('#v-horas [data-anular]');
@@ -53,7 +55,7 @@ function sabado() { let i = 1; while (dowChile(diaChile(i)) !== 6) i++; return d
     if (saldo !== 4000) errores.push('saldo esperado 4000, hay ' + saldo);
     await foto(ana, 'anulada-saldo');
 
-    // Reservar el sábado (a consultar) usando el saldo
+    // Reservar el sábado usando el saldo (ya no hay "días a consultar")
     await ana.click('nav.tabs [data-v="agendar"]');
     await ana.waitForSelector('.serv');
     await ana.click('.serv >> nth=1');
@@ -61,8 +63,8 @@ function sabado() { let i = 1; while (dowChile(diaChile(i)) !== 6) i++; return d
     const sab = sabado();
     await ana.click('.dia[data-f="' + sab + '"]');
     await esperar(400);
-    await foto(ana, 'sabado-consultar');
-    await ana.click('.slot.consultar >> nth=0');
+    await foto(ana, 'sabado');
+    await ana.click('.slot.libre >> nth=0');
     await ana.waitForSelector('.sheet [data-ok]');
     await foto(ana, 'sabado-confirmar');
     await ana.click('.sheet [data-ok]');
@@ -70,42 +72,33 @@ function sabado() { let i = 1; while (dowChile(diaChile(i)) !== 6) i++; return d
     await foto(ana, 'sabado-solicitud');
     await cerrar(ana);
     const r = await q("select estado, pagado_con from reservas where cliente_id = (select id from profiles where email = 'ana@cliente.cl') order by created_at desc limit 1");
-    if (r[0].estado !== 'por_aprobar' || r[0].pagado_con !== 'saldo') errores.push('sábado: ' + JSON.stringify(r[0]));
+    if (r[0].estado !== 'agendada' || r[0].pagado_con !== 'saldo') errores.push('sábado: ' + JSON.stringify(r[0]));
 
-    // Ana toca "Ya pagué" (Premium)
+    // Ana paga Premium y sube el comprobante
     await ana.click('nav.tabs [data-v="perfil"]');
-    await ana.waitForSelector('[data-pague]');
-    await ana.click('[data-pague]');
-    await ana.waitForSelector('.sheet [data-v]');
-    await ana.fill('.sheet [data-v]', 'Transferencia de Ana');
-    await ana.click('.sheet [data-si]');
+    await ana.waitForSelector('[data-plan] [data-foto]');
+    const [fc2] = await Promise.all([ana.waitForEvent('filechooser'), ana.click('[data-plan] [data-foto]')]);
+    await fc2.setFiles(require('path').resolve(__dirname, 'comprobante.png'));
+    await esperar(500);
+    await ana.click('[data-plan] [data-enviar]');
     await esperar(900);
 
     // Admin aprueba el pago
     const adm = await pagina(browser, 'admin');
     await entrar(adm, 'juanjosuecastilloloyola@gmail.com', 'admin123');
+    await adm.click('nav.tabs [data-v="pagos"]');
     await adm.waitForSelector('[data-ap]');
-    await foto(adm, 'admin-ya-pague');
+    await foto(adm, 'admin-pago');
     await adm.click('[data-ap]');
     await esperar(1200);
     const prem = (await q("select public.is_premium(id) as p from profiles where email = 'ana@cliente.cl'"))[0].p;
     if (!prem) errores.push('Ana debería ser Premium');
-    // Admin genera key para un cliente y la canjea otro (Beto lo crea el dueño)
-    await adm.click('nav.tabs [data-v="keys"]');
-    await adm.click('[data-g="cliente"]');
-    await adm.fill('.sheet [data-v]', 'Beto');
-    await adm.click('.sheet [data-si]');
-    await adm.waitForSelector('.sheet code.key');
-    const key = await adm.textContent('.sheet code.key');
-    await foto(adm, 'admin-key-creada');
-    await cerrar(adm);
 
     // Dueño: crea a Beto, le restablece la clave, abre su agenda, crea hora interna y marca atendida
     const own = await pagina(browser, 'dueño');
     await entrar(own, 'dueno@bigote.cl', await clave('dueno@bigote.cl'));
     await cerrar(own);
-    await own.click('nav.tabs [data-v="mas"]');
-    await own.click('[data-s="clientes"]');
+    await own.click('nav.tabs [data-v="clientes"]');
     await own.click('#bNuevoCli');
     await own.fill('.sheet [data-n]', 'Beto');
     await own.fill('.sheet [data-e]', 'beto@cliente.cl');
@@ -145,7 +138,13 @@ function sabado() { let i = 1; while (dowChile(diaChile(i)) !== 6) i++; return d
     await own.fill('.sheet [data-prop]', '2000');
     await own.click('.sheet [data-ok]');
     await esperar(1200);
-    await own.click('nav.tabs [data-v="caja"]');
+    // v2.0: después de Atendida se ofrece calificar al cliente
+    await own.waitForSelector('.sheet [data-luego]');
+    await foto(own, 'calificar-cliente');
+    await own.click('.sheet [data-luego]');
+    await esperar(400);
+    await own.click('nav.tabs [data-v="mas"]');
+    await own.click('[data-s="caja"]');
     await esperar(1000);
     await foto(own, 'caja-con-corte');
     await own.click('#bAnotar');
@@ -153,14 +152,12 @@ function sabado() { let i = 1; while (dowChile(diaChile(i)) !== 6) i++; return d
     await own.click('.sheet [data-ok]');
     await esperar(1000);
     await foto(own, 'caja-dos-cortes');
-    // Pedro aprueba el sábado de Ana
+    // Pedro en modo oscuro (su Inicio)
     const ped = await pagina(browser, 'pedro', true);
     await entrar(ped, 'pedro@bigote.cl', await clave('pedro@bigote.cl'));
     await cerrar(ped);
-    await ped.waitForSelector('[data-conf]');
-    await foto(ped, 'barbero-oscuro-aprobar');
-    await ped.click('[data-conf]');
-    await esperar(1000);
+    await ped.waitForSelector('#chkAgenda');
+    await foto(ped, 'barbero-oscuro');
     // Estadísticas (dueño Premium desde el 1er recorrido)
     await own.click('nav.tabs [data-v="mas"]');
     await own.click('[data-s="estadisticas"]');
@@ -172,14 +169,16 @@ function sabado() { let i = 1; while (dowChile(diaChile(i)) !== 6) i++; return d
     await entrar(beto, 'beto@cliente.cl', await clave('beto@cliente.cl'));
     await cerrar(beto);
     await foto(beto, 'clave-temporal');
-    await beto.click('nav.tabs [data-v="perfil"]');
-    await beto.waitForSelector('[data-key]');
-    await beto.click('[data-key]');
-    await beto.fill('.sheet [data-v]', key);
-    await beto.click('.sheet [data-si]');
-    await esperar(2500);
+    // El admin le regala 7 días de Premium a Beto
+    await adm.click('nav.tabs [data-v="barberias"]');
+    await adm.click('[data-m="clientes"]');
+    await adm.waitForSelector('[data-u]');
+    await adm.click('[data-u]:has-text("Beto")');
+    await adm.click('.sheet [data-dias]');
+    await adm.click('.sheet [data-si]');
+    await esperar(1500);
     const pb = (await q("select public.is_premium(id) as p from profiles where email = 'beto@cliente.cl'"))[0].p;
-    if (!pb) errores.push('Beto debería ser Premium con la key');
+    if (!pb) errores.push('Beto debería ser Premium con los días de regalo');
     await beto.click('nav.tabs [data-v="perfil"]');
     await esperar(800);
     await foto(beto, 'beto-premium');
@@ -191,7 +190,7 @@ function sabado() { let i = 1; while (dowChile(diaChile(i)) !== 6) i++; return d
     // Clave olvidada en el inicio de sesión (sin sesión, con ?b=)
     const anon = await pagina(browser, 'anon');
     const cod = (await q('select codigo from barberias limit 1'))[0].codigo;
-    await anon.goto(BASE + '?b=' + cod);
+    await anon.goto(BASE + '?b=' + cod + '&entrar=1');
     await anon.waitForSelector('#cEntrar:not(.hidden)');
     await esperar(400);
     await foto(anon, 'login-con-barberia');

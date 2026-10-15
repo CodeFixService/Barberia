@@ -43,8 +43,7 @@ function proximoHabil() { let i = 3; while ([0, 6].includes(dowChile(diaChile(i)
     const ped = await pagina(browser, 'pedro');
     await entrar(ped, 'pedro@bigote.cl', await clave('pedro@bigote.cl'));
     await cerrar(ped);
-    await ped.click('nav.tabs [data-v="mas"]');
-    await ped.click('[data-s="clientes"]');
+    await ped.click('nav.tabs [data-v="clientes"]');
     await ped.waitForSelector('#bNuevoCli');
     await ped.click('#bNuevoCli');
     await ped.fill('.sheet [data-n]', 'Carla Nueva');
@@ -103,8 +102,7 @@ function proximoHabil() { let i = 3; while ([0, 6].includes(dowChile(diaChile(i)
     await own.click('.sheet [data-g]');
     await esperar(1000);
     if (!(await agenda('pedro@bigote.cl'))) errores.push('El dueño debió reabrir la agenda de Pedro');
-    await own.click('#bVolver');
-    await own.click('[data-s="clientes"]');
+    await own.click('nav.tabs [data-v="clientes"]');
     await own.waitForSelector('#lCli li');
     await foto(own, 'clientes-lista');
     await own.click('#lCli li:has-text("Carla")');
@@ -120,17 +118,15 @@ function proximoHabil() { let i = 3; while ([0, 6].includes(dowChile(diaChile(i)
     await foto(own, 'ficha-ultimo-barbero');
     await cerrar(own);
     // El dueño desactiva que los barberos creen clientes → Pedro ya no ve el botón
-    await own.click('#bVolver');
-    await own.click('[data-s="ajustes"]');
+    await own.click('nav.tabs [data-v="mas"]');
+    await own.click('[data-s="equipo"]');
     await own.waitForSelector('#chkCrean');
     await own.uncheck('#chkCrean');
-    await own.click('#bGuardarAj');
     await esperar(1000);
     await ped.reload();
     await ped.waitForSelector('nav.tabs');
     await esperar(800);
-    await ped.click('nav.tabs [data-v="mas"]');
-    await ped.click('[data-s="clientes"]');
+    await ped.click('nav.tabs [data-v="clientes"]');
     await esperar(800);
     if (await ped.$('#bNuevoCli')) errores.push('Pedro no debería ver "+ Nuevo cliente"');
     await foto(ped, 'barbero-sin-permiso');

@@ -39,7 +39,7 @@ const clave = async (email) => (await q('select pass from mock_pass where email 
     await entrar(own, 'dueno@bigote.cl', await clave('dueno@bigote.cl'));
     await cerrar(own);
     await own.click('nav.tabs [data-v="mas"]');
-    await own.click('[data-s="ajustes"]');
+    await own.click('[data-s="links"]');
     await own.waitForSelector('[data-pago="2"]');
     await own.fill('[data-pago="1"] [data-pm]', '4000');
     await own.fill('[data-pago="1"] [data-pl]', 'https://mpago.la/cuatro');
@@ -48,7 +48,7 @@ const clave = async (email) => (await q('select pass from mock_pass where email 
     await own.check('[data-pago="2"] input[type=radio]');
     await own.evaluate(() => document.querySelector('[data-pago="1"]').scrollIntoView({ block: 'center' }));
     await foto(own, 'dueno-dos-links');
-    await own.click('#bGuardarAj');
+    await own.click('#bGuardarL');
     await esperar(1200);
     const b = (await q('select abono, link_pago, pago1_link from barberias limit 1'))[0];
     if (b.abono !== 8000 || b.link_pago !== 'https://mpago.la/ocho' || b.pago1_link !== 'https://mpago.la/cuatro') errores.push('Links mal guardados: ' + JSON.stringify(b));
@@ -64,17 +64,22 @@ const clave = async (email) => (await q('select pass from mock_pass where email 
     await ana.evaluate(() => document.querySelector('#cal').scrollIntoView({ block: 'center' }));
     await foto(ana, 'cliente-abono-8000');
 
-    // Admin: edita los planes (clientes Free = 3, precio cliente $2.990, días cliente Free = 10)
+    // Admin: edita los planes (clientes Free = 3, días cliente Free = 10) y el precio cliente en Precios y links ($2.990)
     const adm = await pagina(browser, 'admin');
     await entrar(adm, 'juanjosuecastilloloyola@gmail.com', 'admin123');
     await adm.click('nav.tabs [data-v="ajustes"]');
+    await adm.click('[data-s="planes"]');
     await adm.waitForSelector('[data-pg="barberia.clientes.free"]');
     await adm.fill('[data-pg="barberia.clientes.free"]', '3');
-    await adm.fill('[data-pg="cliente.precio.premium"]', '2990');
     await adm.fill('[data-pg="cliente.dias.free"]', '10');
-    await adm.evaluate(() => document.getElementById('planesZona').scrollIntoView());
     await foto(adm, 'admin-planes');
-    await adm.click('#bGuardarPlanes');
+    await adm.click('#bGuardar');
+    await esperar(1200);
+    await adm.click('#bVolver');
+    await adm.click('[data-s="links"]');
+    await adm.waitForSelector('[data-g="cliente"] [data-n="1"] [data-m]');
+    await adm.fill('[data-g="cliente"] [data-n="1"] [data-m]', '2990');
+    await adm.click('#bGuardar');
     await esperar(1200);
     const pl = await q("select grupo, clave, free, premium from planes where (grupo, clave) in (('barberia','clientes'), ('cliente','precio'), ('cliente','dias')) order by 1, 2");
     if (pl[0].free !== 3 || pl[1].free !== 10 || pl[2].premium !== 2990) errores.push('Planes mal guardados: ' + JSON.stringify(pl));
@@ -97,11 +102,10 @@ const clave = async (email) => (await q('select pass from mock_pass where email 
     await q("update profiles set plan = 'free', premium_until = null where email = 'dueno@bigote.cl'");
     await own.reload();
     await own.waitForSelector('nav.tabs');
-    await own.click('nav.tabs [data-v="mas"]');
-    await own.click('[data-s="clientes"]');
+    await own.click('nav.tabs [data-v="clientes"]');
     await own.waitForSelector('#bNuevoCli');
     await foto(own, 'dueno-limite-clientes');
-    if (!/\/ 3 clientes/.test(await own.textContent('#secZona'))) errores.push('El dueño debería ver "x / 3 clientes"');
+    if (!/\/ 3 clientes/.test(await own.textContent('#v-clientes'))) errores.push('El dueño debería ver "x / 3 clientes"');
     await own.click('#bNuevoCli');
     await esperar(500);
     if (!(await own.$('.sheet .feat'))) errores.push('Al pasar el límite debería salir el aviso Premium');

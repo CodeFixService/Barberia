@@ -287,3 +287,39 @@ Free bueno, Premium mucho mejor. La barbería no gana por sus clientes Premium; 
 - **Abono con dos links de pago:** la barbería guarda Link 1 y Link 2 (monto + link) y elige cuál está activo. El abono que ven los clientes es el del link activo, así el monto y el link nunca se descuadran. Las reservas ya hechas conservan su abono.
 - **Planes editables por el admin** (Ajustes → Planes Free y Premium): precio mensual y días de prueba de cada plan, barberos, clientes, servicios y ofertas de la barbería; días adelante, horas activas y mensajes seguidos del cliente. Se aplica al tiro; si se baja un límite, nadie pierde lo que ya tiene.
 - **Link de pago Premium por plan** (barbería y cliente), cada uno con su precio.
+
+
+---
+
+## v2.0 · Modelo BiciTaller adaptado a barbería (acordado con Josué)
+
+**Vista libre:** cualquiera con el link o QR de la barbería ve servicios, barberos y horas, y reserva **sin cuenta** con nombre y WhatsApp.
+Puede crearse la cuenta desde ese mismo link (solo así; el resto del registro sigue cerrado). Si ya reservó sin cuenta con ese WhatsApp, sus horas y calificaciones pasan a su cuenta.
+
+**Abono:** la hora queda apartada **10 minutos** (editable). Al subir el comprobante el reloj se detiene → **En revisión** (la hora queda retenida) y llega un push al barbero.
+El barbero (de sus clientes) o el dueño (de todos) aprueba → **Agendada**. Se eliminó el paso extra de "Confirmar". Rechazar exige motivo y libera la hora.
+Sin revisión: recordatorio al barbero a los 15 min, aviso al dueño a los 30 min y 1 h antes de la hora; 24 h después de la hora → abono a favor del cliente.
+Los "días a consultar" ya no existen: cada día está abierto o cerrado según el horario.
+
+**Cancelar y reagendar:** primeros N minutos → devolución (la ve y marca el dueño); con X horas o más → saldo a favor (sin cuenta: en su link, con vencimiento);
+después → se pierde. Se puede reagendar todas las veces respetando esos plazos.
+
+**Equipo:** el barbero aprueba abonos de sus clientes, ve cantidad de cortes, **no ve precios ni montos**, no cambia links, perfil ni plan.
+
+**Calificaciones y lista negra:** una por visita, en ambos sentidos. El promedio de la barbería lo ven todos. La barbería califica al cliente con estrellas y motivo
+(predefinidos o escrito); con **2 estrellas o menos** entra a la lista negra de esa barbería (la ven todos sus barberos). Puede reservar igual, pero sale la alerta; el dueño lo puede sacar.
+
+**Premium:** sin keys. Se paga con el link del admin + **foto del comprobante**; Josué aprueba o rechaza con motivo en **Pagos**. 2 links por plan (precio, texto, link; uno activo).
+Barberías nuevas parten con **30 días de regalo** (editable) y después pagan o quedan en Free sin perder nada. Aviso antes de vencer con botón para pagar.
+
+**Planes:** nombre, descripción, beneficios, duración, límites y opciones sí/no, todo editable. **Reglas** (minutos, horas, días) y **textos** editables.
+**Admin:** uso del servidor por tabla con limpieza, filtros de barberías, pagos, calificaciones y registro de cambios.
+
+**Datos:** las horas atendidas se guardan (sellos y estadísticas); las anuladas se borran a los 30 días; los comprobantes a los 30 días (nunca si están en revisión).
+
+**Tiempos por barbero (v2.0):** cada barbero, desde su perfil (Más → Mis tiempos), define cuánto le dura cada servicio (si no, usa la duración de la barbería),
+su descanso entre citas y cada cuánto parten sus horas. Al reservar se bloquea al tiro servicio + descanso (ej. 70 + 20 = 1 h 30) y la siguiente hora libre
+parte justo cuando termina la anterior (también después de la colación o de un bloqueo), así no quedan huecos. El admin no interviene en esto.
+
+**Página de la barbería (link o QR):** arriba lo principal, la cuenta (Entrar / Crear mi cuenta; quien ya tiene sesión entra directo a su app);
+debajo, reservar sin cuenta (solo agenda y valida con el comprobante).

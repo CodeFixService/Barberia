@@ -92,8 +92,7 @@ const clave = async (email) => (await q('select pass from mock_pass where email 
     const own = await pagina(browser, 'dueño');
     await entrar(own, 'dueno@bigote.cl', await clave('dueno@bigote.cl'));
     await cerrar(own);
-    await own.click('nav.tabs [data-v="mas"]');
-    await own.click('[data-s="clientes"]');
+    await own.click('nav.tabs [data-v="clientes"]');
     await own.waitForSelector('#lCli li');
     await foto(own, 'clientes-conexion');
     const txt = await own.textContent('#lCli');

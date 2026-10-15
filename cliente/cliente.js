@@ -13,7 +13,7 @@
   let datosRango = '';
   const carro = new Set();
   let barberoSel = null, fechaSel = C.hoy(), vista = 'dia', mesSel = C.hoy().slice(0, 7);
-  const ACTIVA = ['esperando_abono', 'por_aprobar', 'agendada', 'confirmada'];
+  const ACTIVA = ['esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada'];
 
   Avisos.montar({ sub: yo.is_premium ? '⭐ Cliente Premium' : 'Reserva tu hora' });
   Avisos.alCambiar((r, antes) => { if (antes.cargado && r.avisos > antes.avisos) { cargarHoras().then(() => { if (vistaActual === 'inicio') inicio(); if (vistaActual === 'horas') pintarHoras(); }); } });
@@ -76,6 +76,7 @@
     if (yo.clave_temporal) html += '<div class="banner alerta"><div class="grow"><b>🔑 Cambia tu clave temporal</b><br>Ve a 👤 Perfil y pon una que recuerdes.</div><a class="btn small" href="#perfil">Cambiar</a></div>';
     html += '<div class="card ' + (prem() ? 'oro-marco' : '') + '"><div class="hola">' + C.avatar(yo, 'lg' + (prem() ? ' premium' : '')) +
       '<div class="grow"><h2>Hola, ' + esc(yo.nombre.split(' ')[0]) + ' 👋</h2><div class="muted">' + esc(b.bienvenida || '¿Listo para tu próximo corte?') + '</div>' +
+      (B.calificacion && B.calificacion.total ? '<div class="chico">' + esc(b.nombre) + ' <span class="nota">' + B.calificacion.promedio + '</span> <span class="muted">(' + B.calificacion.total + ')</span></div>' : '') +
       (prem() ? '<span class="pill oro" style="margin-top:6px">⭐ Premium</span>' : '<a href="#plan" class="pill" style="margin-top:6px;text-decoration:none">💎 Hazte Premium</a>') + '</div></div>' +
       '<div class="btns"><button class="grande full" id="bAgendar">📅 Agendar hora</button>' +
       (ultima ? '<button class="alt full" id="bRepetir">⭐ Repetir mi último corte<br><small style="font-weight:500">' + esc(ultima.servicios.map((s) => s.nombre).join(' + ')) + ' con ' + esc(ultima.barbero) + '</small></button>' : '') + '</div></div>';
@@ -134,22 +135,27 @@
     const futura = new Date(h.fin) > new Date();
     const activa = ACTIVA.includes(h.estado) && futura;
     let extra = '';
-    if (h.estado === 'esperando_abono') extra = '<div class="banner alerta" style="margin:10px 0 0"><div class="grow">⏳ Abona en <b data-reloj="' + h.expira_at + '">--:--</b> o la hora se libera.</div><button class="small" data-abonar="' + h.id + '">Abonar</button></div>';
-    if (h.estado === 'por_aprobar') extra = '<p class="muted chico" style="margin:8px 0 0">🟡 Esperando que ' + esc(h.barbero) + ' apruebe la hora' + (h.consultar ? ' (día a consultar)' : '') + '.</p>';
-    if (h.estado === 'agendada') extra = '<p class="muted chico" style="margin:8px 0 0">' + (h.visto_barbero ? '<span class="ticks visto">✓✓</span> ' + esc(h.barbero) + ' vio tu reserva a las ' + C.horaDe(h.visto_barbero) + '. Falta que la confirme.' : '✓ Enviada a ' + esc(h.barbero) + '. Te avisamos cuando la confirme.') + '</p>';
-    if (h.estado === 'confirmada') extra = '<p class="chico" style="margin:8px 0 0;color:var(--ok)">✅ Confirmada' + (h.confirmada_at ? ' el ' + C.cuando(h.confirmada_at) : '') + '. ¡Te esperamos!</p>';
-    if (h.estado === 'anulada') extra = '<p class="muted chico" style="margin:8px 0 0">' + esc(h.motivo || 'Anulada') + (h.abono_destino === 'saldo' ? ' · abono a favor' : h.abono_destino === 'perdido' ? ' · abono perdido' : '') + '</p>';
+    if (h.estado === 'esperando_abono') extra = '<div class="banner alerta" style="margin:10px 0 0"><div class="grow">⏳ Sube el comprobante en <b data-reloj="' + h.expira_at + '">--:--</b> o la hora se libera.</div><button class="small" data-abonar="' + h.id + '">Abonar</button></div>';
+    if (h.estado === 'en_revision' || h.estado === 'por_aprobar') extra = '<p class="muted chico" style="margin:8px 0 0">🧾 ' + (h.visto_barbero ? '<span class="ticks visto">✓✓</span> ' + esc(h.barbero) + ' vio tu comprobante. ' : '') +
+      'Tu barbero está verificando el abono: apenas lo apruebe, tu hora queda agendada. Tu hora ya está guardada.</p>';
+    if (h.estado === 'agendada' || h.estado === 'confirmada') extra = '<p class="chico" style="margin:8px 0 0;color:var(--ok)">✅ Agendada' + (h.confirmada_at ? ' el ' + C.cuando(h.confirmada_at) : '') + '. ¡Te esperamos!</p>';
+    if (h.estado === 'anulada') extra = '<p class="muted chico" style="margin:8px 0 0">' + esc(h.motivo || 'Anulada') + (h.abono_destino === 'saldo' ? ' · abono a favor' : h.abono_destino === 'perdido' ? ' · abono perdido' :
+      h.abono_destino === 'devolucion' ? ' · ' + (h.devolucion === 'devuelta' ? 'abono devuelto ✅' : 'te devolverán el abono') : '') + '</p>';
+    if (h.estado === 'atendida' && !h.calificada && futura === false) extra = '<div class="btns"><button class="small alt" data-calificar="' + h.id + '">⭐ Calificar a la barbería</button></div>';
     return '<div class="card' + (compacta ? ' proxima' : '') + '"><div class="hora-card"><div class="fecha"><small>' + C.DIAS[C.dow(f) - 1] + '</small><b>' + (+f.slice(8)) + '</b><i>' + C.horaDe(h.inicio) + '</i></div>' +
       '<div class="grow"><b>' + esc(h.servicios.map((s) => s.nombre).join(' + ')) + '</b><div class="sub muted">con ' + esc(h.barbero) + ' · ' + C.plata(h.total) +
       (h.pagado_con === 'saldo' ? ' · abono con saldo' : h.abono && ['agendada', 'confirmada', 'por_aprobar', 'atendida'].includes(h.estado) ? ' · abonado ' + C.plata(h.abono) : '') + '</div>' +
       '<div style="margin-top:4px">' + A.estadoPill(h.estado) + (activa && compacta ? ' <span class="cuenta-reg" data-falta="' + h.inicio + '"></span>' : '') + '</div></div></div>' + extra +
       (activa ? '<div class="btns"><button class="small gris" data-escribir="' + h.id + '">💬 Escribir</button><button class="small gris" data-cal="' + h.id + '">📆 A mi calendario</button>' +
-        '<button class="small danger" data-anular="' + h.id + '">Anular</button></div>' : '') + '</div>';
+        (h.reagendable ? '<button class="small alt" data-reagendar="' + h.id + '">🔁 Reagendar</button>' : '') +
+        (h.politica ? '<button class="small danger" data-anular="' + h.id + '">Anular</button>' : '') + '</div>' : '') + '</div>';
   }
   function activarTarjetas(el) {
     el.querySelectorAll('[data-abonar]').forEach((x) => x.onclick = () => abonar(horasMias.find((h) => h.id === x.dataset.abonar)));
     el.querySelectorAll('[data-anular]').forEach((x) => x.onclick = () => anular(horasMias.find((h) => h.id === x.dataset.anular)));
     el.querySelectorAll('[data-cal]').forEach((x) => x.onclick = () => alCalendario(horasMias.find((h) => h.id === x.dataset.cal)));
+    el.querySelectorAll('[data-reagendar]').forEach((x) => x.onclick = () => reagendar(horasMias.find((h) => h.id === x.dataset.reagendar)));
+    el.querySelectorAll('[data-calificar]').forEach((x) => x.onclick = () => calificar(horasMias.find((h) => h.id === x.dataset.calificar)));
     el.querySelectorAll('[data-escribir]').forEach((x) => x.onclick = () => {
       const h = horasMias.find((y) => y.id === x.dataset.escribir);
       mostrar('chat');
@@ -211,7 +217,7 @@
     html += '</div>';
     html += '<div class="paso"><span class="n">3</span><b class="grow">Elige día y hora</b></div>' +
       '<div class="seg" style="margin-bottom:10px"><button data-vista="dia">Día</button><button data-vista="semana">Semana</button><button data-vista="mes">Mes</button></div>' +
-      '<div id="cal"></div><div class="leyenda"><span class="l">Libre</span><span class="o">Ocupado</span><span class="m">Mía</span><span class="c">A consultar</span></div>' +
+      '<div id="cal"></div><div class="leyenda"><span class="l">Libre</span><span class="o">Ocupado</span><span class="m">Mía</span></div>' +
       '<p class="muted chico">Abono para reservar: <b>' + C.plata(b.abono) + '</b> (se descuenta del total). Reservas hasta ' + diasMax() + ' días adelante' + (prem() ? '' : ' · <a href="#plan">Premium: ' + K.limite('dias', true) + '</a>') + '.</p>';
     el.innerHTML = html;
     el.querySelectorAll('.serv').forEach((x) => x.onclick = () => {
@@ -243,16 +249,18 @@
   }
 
   // Horas de un día: combina los barberos si eligió "el que esté libre".
+  // Minutos que bloquea el carrito con un barbero (sus tiempos + su descanso).
+  const durCon = (x) => (carro.size ? A.duracion(x, carroItems()) : 0) || Math.min(...B.servicios.map((s) => s.duracion), 30) + (+x.descanso || 0);
   function horasDe(f) {
-    const dur = carroDur() || Math.min(...B.servicios.map((s) => s.duracion), 30);
     const ids = barberoSel === '*' ? reservables().map((x) => x.id) : [barberoSel];
     const porMin = new Map();
     ids.forEach((id) => {
       const x = barbero(id);
       if (!x) return;
-      A.horas({ f, barbero: id, dur, datos, horario: x.horario }).forEach((s) => {
+      if (![...carro].every((sid) => { const s = servicio(sid); return !s || !s.barberos || !s.barberos.length || s.barberos.includes(id); })) return;
+      A.horas({ f, barbero: id, dur: durCon(x), datos, horario: x.horario, paso: x.paso }).forEach((s) => {
         const prev = porMin.get(s.min);
-        const rank = { mia: 4, libre: 3, consultar: 2, ocupado: 1 };
+        const rank = { mia: 4, libre: 3, ocupado: 1 };
         if (!prev || rank[s.estado] > rank[prev.estado]) porMin.set(s.min, Object.assign({ barbero: id }, s));
       });
     });
@@ -277,11 +285,10 @@
       $('tira').querySelectorAll('.dia').forEach((d) => { if (d.dataset.f > lim) P.bloquear(d, 'Reservar hasta ' + K.limite('dias', true) + ' días adelante'); });
       const s = horasDe(fechaSel);
       const dh = A.diaHorario(barberoSel === '*' ? (reservables()[0] || {}).horario : barbero(barberoSel).horario, fechaSel);
-      let h = '<h2>' + C.fechaLarga(fechaSel) + (dh.e === 'c' ? ' <span class="pill warn">🟡 A consultar</span>' : '') + '</h2>';
-      if (dh.e === 'c') h += '<p class="muted chico" style="margin-top:-4px">Este día se atiende si el barbero está disponible: tu hora quedará "por aprobar" hasta que confirme.</p>';
+      let h = '<h2>' + C.fechaLarga(fechaSel) + '</h2>';
       if (!s.length) h += '<div class="empty"><span class="ico">' + (dh.e === 'x' ? '🚪' : '😕') + '</span>' + (dh.e === 'x' ? 'Ese día no se atiende.' : 'No quedan horas este día.') + '</div>';
       else h += '<div class="slots">' + s.map((x) => '<button class="slot ' + x.estado + '" data-m="' + x.min + '"' + (x.estado === 'ocupado' ? ' disabled' : '') + '>' + x.hhmm + '</button>').join('') + '</div>';
-      const libres = s.filter((x) => x.estado === 'libre' || x.estado === 'consultar').length;
+      const libres = s.filter((x) => x.estado === 'libre').length;
       if (s.length && !libres) h += '<div class="btns"><button class="alt full" id="bEspera">🔔 Avísame si se libera una hora</button></div>';
       $('slots').innerHTML = h;
       $('slots').querySelectorAll('.slot:not([disabled])').forEach((b) => b.onclick = () => {
@@ -290,7 +297,7 @@
         confirmar(x, fechaSel);
       });
       if ($('bEspera')) {
-        if (!prem()) P.bloquear($('bEspera'), 'Lista de espera');
+        if (!K.clienteTiene('lista_espera')) P.bloquear($('bEspera'), 'Lista de espera');
         else $('bEspera').onclick = (ev) => C.accion(ev.target, () => K.rpc('unirse_espera', { p_fecha: fechaSel, p_barbero: barberoSel === '*' ? null : barberoSel }), '🔔 Te avisaremos si se libera una hora');
       }
     } else if (vista === 'semana') {
@@ -306,8 +313,8 @@
       A.timeline($('tl'), { cols, datos, horarios: horarios(), ancho: 74,
         alBloque: () => { location.hash = 'horas'; },
         alLibre: (c, m) => {
-          const s = horasDe(c.f).find((x) => x.min >= m && x.min < m + 30 && (x.estado === 'libre' || x.estado === 'consultar'));
-          if (!s) return C.toast('Esa hora no está disponible para ' + (carroDur() || 30) + ' min');
+          const s = horasDe(c.f).find((x) => x.min >= m && x.min < m + 30 && x.estado === 'libre');
+          if (!s) return C.toast('Esa hora no está disponible para tu cita');
           if (c.f > lim) return P.upsell('Reservar hasta ' + K.limite('dias', true) + ' días adelante');
           confirmar(s, c.f);
         } });
@@ -334,16 +341,14 @@
     const x = barbero(slot.barbero || barberoSel);
     const items = carroItems();
     const usaSaldo = b.abono === 0 || yo.saldo >= b.abono;
-    const consulta = slot.estado === 'consultar';
     const h = C.hoja('<h2>📅 Confirma tu hora</h2><div class="hora-card" style="margin-bottom:12px"><div class="fecha"><small>' + C.DIAS[C.dow(f) - 1] + '</small><b>' + (+f.slice(8)) + '</b><i>' + slot.hhmm + '</i></div>' +
-      '<div class="grow"><b>' + C.fechaLarga(f) + ', ' + slot.hhmm + '</b><div class="muted">con ' + esc(x.nombre) + ' · ' + carroDur() + ' min</div></div></div>' +
+      '<div class="grow"><b>' + C.fechaLarga(f) + ', ' + slot.hhmm + '</b><div class="muted">con ' + esc(x.nombre) + ' · hasta las ' + C.horaDe(new Date(slot.t.getTime() + durCon(x) * 60000)) + '</div></div></div>' +
       '<div class="resumen-carro">' + items.map((s) => '<div><span>' + esc(s.nombre) + '</span><span>' + C.plata(s.precio) + '</span></div>').join('') +
       '<div style="border-top:1px solid var(--line);padding-top:6px"><b>Total</b><b>' + C.plata(carroTotal()) + '</b></div>' +
       '<div><span>Abono ahora ' + (usaSaldo ? '(con tu saldo a favor)' : '') + '</span><b>' + C.plata(b.abono) + '</b></div>' +
       '<div class="muted"><span>Pagas en la barbería</span><span>' + C.plata(Math.max(0, carroTotal() - b.abono)) + '</span></div></div>' +
-      (consulta ? '<div class="banner alerta" style="margin-top:12px"><div class="grow chico">🟡 Este día es <b>a consultar</b>: tu hora queda por aprobar hasta que el barbero confirme. Si no puede, tu abono queda a favor.</div></div>' : '') +
-      '<p class="muted chico">' + (usaSaldo ? 'Usaremos tu saldo a favor como abono.' : 'Tendrás <b>15 minutos</b> para abonar ' + C.plata(b.abono) + ' (link de pago o transferencia) y subir el comprobante. Si no, la hora se libera.') +
-      ' Si no puedes ir, anula con 24 h de anticipación (o 1 h si reservas para hoy) y tu abono queda a favor; si no, se pierde.</p>' +
+      '<p class="muted chico">' + (usaSaldo ? 'Usaremos tu saldo a favor como abono.' : esc(K.texto('reserva_pago'))) + '</p>' +
+      '<p class="muted chico">' + esc(K.texto('reserva_politica')) + '</p>' +
       '<div class="btns"><button class="grande full" data-ok>' + (usaSaldo ? '✅ Reservar' : '✅ Reservar y abonar') + '</button></div>');
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
       const r = await K.rpc('reservar', { p_barbero: x.id, p_inicio: slot.t.toISOString(), p_servicios: [...carro] });
@@ -362,17 +367,17 @@
     if (!hr) return;
     const b = bar();
     let comprobante = null, medio = b.link_pago ? 'link' : 'transferencia';
-    const h = C.hoja('<h2>💳 Abona para asegurar tu hora</h2><div class="reloj" data-reloj="' + hr.expira_at + '">15:00</div>' +
+    const h = C.hoja('<h2>💳 Abona para asegurar tu hora</h2><div class="reloj" data-reloj="' + hr.expira_at + '">--:--</div>' +
       '<p class="muted centro chico" style="margin-top:0">tienes este tiempo para abonar ' + C.plata(hr.abono || b.abono) + '</p>' +
-      '<div class="card" style="box-shadow:none"><b>1. Paga ' + C.plata(hr.abono || b.abono) + '</b><div class="btns" style="flex-direction:column">' +
+      '<div class="card" style="box-shadow:none"><b>1. Paga ' + C.plata(hr.abono || b.abono) + '</b>' + (b.abono_texto ? '<div class="muted chico">' + esc(b.abono_texto) + '</div>' : '') + '<div class="btns" style="flex-direction:column">' +
       (b.link_pago ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(b.link_pago) + '" data-link>💳 Pagar con link de pago</a>' : '') +
       (b.datos_transferencia ? '<button class="gris full" data-tr>🏦 Transferencia: ver datos</button><div class="hidden muted" data-trd style="white-space:pre-line;padding:10px;background:var(--field);border-radius:12px">' + esc(b.datos_transferencia) +
         '<br><button class="small alt" data-copiar style="margin-top:8px">📋 Copiar datos</button></div>' : '') +
       (!b.link_pago && !b.datos_transferencia ? '<p class="err">La barbería aún no configura cómo recibir abonos. Escríbele por el chat.</p>' : '') + '</div></div>' +
-      '<div class="card" style="box-shadow:none"><b>2. Sube la foto del comprobante</b><p class="muted chico" style="margin:4px 0 0">Le llega directo a tu barbero por el chat.</p>' +
+      '<div class="card" style="box-shadow:none"><b>2. Sube la foto del comprobante</b><p class="muted chico" style="margin:4px 0 0">Al subirla el reloj se detiene y tu hora queda guardada mientras tu barbero verifica el pago.</p>' +
       '<div class="btns"><button class="alt" data-foto>📷 Subir comprobante</button></div><img class="comprobante-prev hidden" data-prev alt="Comprobante"></div>' +
       '<div class="btns"><button class="grande full ok" data-listo disabled>✅ Ya aboné</button></div>' +
-      '<p class="muted chico centro">Si cambiaste de idea, cierra esta ventana: la hora se libera sola a los 15 min.</p>');
+      '<p class="muted chico centro">Si cambiaste de idea, cierra esta ventana: la hora se libera sola.</p>');
     relojes();
     if (h.q('[data-link]')) h.q('[data-link]').onclick = () => { medio = 'link'; };
     if (h.q('[data-tr]')) h.q('[data-tr]').onclick = () => { medio = 'transferencia'; h.q('[data-trd]').classList.toggle('hidden'); };
@@ -399,10 +404,11 @@
     const b = bar();
     const f = C.fechaDe(hr.inicio);
     const titulo = '💈 ' + hr.servicios.map((s) => s.nombre).join(' + ') + ' · ' + (b.nombre || 'Barbería');
-    const h = C.hoja('<div class="centro"><div style="font-size:56px">' + (hr.estado === 'por_aprobar' ? '🟡' : '✅') + '</div><h2 style="justify-content:center">' +
-      (hr.estado === 'por_aprobar' ? '¡Solicitud enviada!' : '¡Tu hora quedó agendada!') + '</h2>' +
+    const rev = hr.estado === 'en_revision' || hr.estado === 'por_aprobar';
+    const h = C.hoja('<div class="centro"><div style="font-size:56px">' + (rev ? '🧾' : '✅') + '</div><h2 style="justify-content:center">' +
+      (rev ? '¡Comprobante enviado!' : '¡Tu hora quedó agendada!') + '</h2>' +
       '<p><b>' + C.fechaLarga(f) + ', ' + C.horaDe(hr.inicio) + '</b><br>con ' + esc(hr.barbero) + '</p>' +
-      '<p class="muted">' + (hr.estado === 'por_aprobar' ? 'Tu barbero debe aprobarla. Te llegará un aviso 🔔.' : 'Tu barbero ya recibió el aviso. Cuando la confirme, te llega una notificación 🔔.') + '</p></div>' +
+      '<p class="muted">' + (rev ? esc(K.texto('reserva_revision')) + ' Te llega un aviso 🔔.' : 'Tu barbero ya recibió el aviso. ¡Te esperamos!') + '</p></div>' +
       '<div class="btns" style="flex-direction:column"><a class="btn gris full" target="_blank" rel="noopener" data-g>📆 Agregar a Google Calendar</a>' +
       '<button class="gris full" data-ics>📲 Agregar al calendario del celular</button>' +
       (b.whatsapp ? '<a class="btn wsp full" target="_blank" rel="noopener" data-w>💬 Avisar por WhatsApp</a>' : '') +
@@ -423,23 +429,58 @@
   }
 
   async function anular(hr) {
-    const ini = new Date(hr.inicio);
-    const mismoDia = new Date(hr.created_at) > new Date(ini - 24 * 3600e3);
-    const limite = new Date(ini - (mismoDia ? 3600e3 : 24 * 3600e3));
-    const pagado = hr.estado !== 'esperando_abono' && hr.abono > 0 && ['link', 'transferencia', 'saldo'].includes(hr.pagado_con);
-    let msg;
-    if (!pagado) msg = 'Tu hora del ' + C.cuando(hr.inicio) + ' quedará libre.';
-    else if (Date.now() <= limite) msg = 'Estás a tiempo ✅ Tu abono de ' + C.plata(hr.abono) + ' quedará como saldo a favor para tu próxima reserva.';
-    else msg = '⚠️ Ya pasó el plazo (' + (mismoDia ? '1 hora' : '24 horas') + ' antes). Si anulas, pierdes el abono de ' + C.plata(hr.abono) + '.';
+    const msg = {
+      libre: 'Tu hora del ' + C.cuando(hr.inicio) + ' quedará libre.',
+      devolucion: 'Estás dentro de los primeros ' + K.regla('minutos_devolucion') + ' minutos ✅ La barbería te devolverá el abono de ' + C.plata(hr.abono) + '.',
+      saldo: 'Estás a tiempo ✅ Tu abono de ' + C.plata(hr.abono) + ' quedará como saldo a favor para tu próxima reserva.',
+      pierde: '⚠️ Faltan menos de ' + K.regla('horas_cancelacion') + ' horas. Si anulas, pierdes el abono de ' + C.plata(hr.abono) + '.'
+    }[hr.politica] || 'Anular tu hora del ' + C.cuando(hr.inicio) + '.';
     if (!await C.confirmar(msg, { titulo: 'Anular hora', si: 'Anular hora', no: 'Mantener', peligro: true })) return;
     try {
       const r = await K.rpc('anular_mia', { p_reserva: hr.id });
       K.despertarEnvios();
-      C.toast(r.abono_destino === 'saldo' ? '💰 Hora anulada. Tu abono quedó a favor' : 'Hora anulada');
+      C.toast(r.abono_destino === 'saldo' ? '💰 Hora anulada. Tu abono quedó a favor' : r.abono_destino === 'devolucion' ? '💸 Hora anulada. Te devolverán el abono' : 'Hora anulada');
       await Promise.all([cargarHoras(), K.refrescar().then((a) => { if (a) yo = a; })]);
       datosRango = '';
       VISTAS[vistaActual]();
     } catch (e) { C.toast('⚠️ ' + e.message, 4000); }
+  }
+
+  // Reagendar con el mismo barbero (con X horas de anticipación, según las reglas).
+  async function reagendar(hr) {
+    const dur = Math.round((new Date(hr.fin) - new Date(hr.inicio)) / 60000);
+    const x = barbero(hr.barbero_id) || { horario: null };
+    let f = C.fechaDe(hr.inicio);
+    const h = C.hoja('<h2>🔁 Reagendar</h2><p class="muted" style="margin-top:-6px">Con ' + esc(hr.barbero) + ' · ' + dur + ' min. Elige el nuevo día y hora.</p><div class="dias" data-tira></div><div data-slots></div>');
+    try { await cargarDatos(true); } catch (e) { h.q('[data-slots]').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    const pintarH = () => {
+      A.tiraDias(h.q('[data-tira]'), { cuantos: diasMax() + 1, sel: f, info: (d) => A.llenado([hr.barbero_id], d, datos, horarios()), alElegir: (d) => { f = d; pintarH(); } });
+      const s = A.horas({ f, barbero: hr.barbero_id, dur, datos, horario: x.horario, paso: x.paso });
+      h.q('[data-slots]').innerHTML = '<h3>' + C.fechaLarga(f) + '</h3>' + (s.length ? '<div class="slots">' + s.map((y) => '<button class="slot ' + y.estado + '" data-m="' + y.min + '"' +
+        (y.estado !== 'libre' ? ' disabled' : '') + '>' + y.hhmm + '</button>').join('') + '</div>' : '<div class="empty"><span class="ico">😕</span>No hay horas este día.</div>');
+      h.qa('.slot:not([disabled])').forEach((b) => b.onclick = async () => {
+        const y = s.find((z) => z.min === +b.dataset.m);
+        if (!await C.confirmar('Cambiar tu hora al ' + C.fechaLarga(f) + ' a las ' + y.hhmm + '.', { titulo: '🔁 Reagendar', si: 'Sí, cambiar' })) return;
+        try {
+          await K.rpc('reagendar_mia', { p_reserva: hr.id, p_inicio: y.t.toISOString() });
+          h.cerrar(); K.despertarEnvios(); C.toast('🔁 ¡Listo! Tu hora cambió');
+          await cargarHoras(); datosRango = ''; VISTAS[vistaActual]();
+        } catch (e) { C.toast('⚠️ ' + e.message, 4500); }
+      });
+    };
+    pintarH();
+  }
+
+  function calificar(hr) {
+    let n = 0;
+    const h = C.hoja('<h2>⭐ ¿Cómo te atendieron?</h2><p class="muted" style="margin-top:-6px">' + esc(hr.servicios.map((s) => s.nombre).join(' + ')) + ' con ' + esc(hr.barbero) + ' · ' + C.cuando(hr.inicio) + '</p>' +
+      '<div class="centro"><div class="estrellas grande">' + [1, 2, 3, 4, 5].map((i) => '<button type="button" data-n="' + i + '">★</button>').join('') + '</div></div>' +
+      '<textarea data-c maxlength="300" placeholder="Comentario (opcional, solo lo ve la barbería)"></textarea><div class="btns"><button class="full" data-ok disabled>Enviar</button></div>');
+    h.qa('[data-n]').forEach((b) => b.onclick = () => { n = +b.dataset.n; h.qa('[data-n]').forEach((x) => x.classList.toggle('on', +x.dataset.n <= n)); h.q('[data-ok]').disabled = false; });
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      await K.rpc('calificar_barberia', { p_reserva: hr.id, p_estrellas: n, p_comentario: h.q('[data-c]').value });
+      h.cerrar(); await cargarHoras(); VISTAS[vistaActual]();
+    }, '⭐ ¡Gracias por calificar!');
   }
 
   /* ---------- Mis horas ---------- */
@@ -468,7 +509,7 @@
     setTimeout(() => {
       const sel = $('selFav');
       if (!sel) return;
-      if (!prem()) { sel.disabled = true; P.bloquear($('favWrap'), 'Barbero favorito'); return; }
+      if (!K.clienteTiene('favorito')) { sel.disabled = true; P.bloquear($('favWrap'), 'Barbero favorito'); return; }
       sel.onchange = () => K.rpc('guardar_perfil', { p: { favorito: sel.value } }).then(() => { yo.favorito = sel.value || null; C.toast('❤️ Guardado'); }).catch((e) => C.toast('⚠️ ' + e.message));
     }, 50);
   }
@@ -476,7 +517,7 @@
   const PASOS = [
     ['✂️', 'Elige tu corte', 'Agrega uno o más servicios al carrito. Verás el precio y cuánto dura.'],
     ['📅', 'Elige tu hora', 'Escoge tu barbero y una hora libre. Lo ocupado sale tachado, sin nombres: nadie ve tus datos.'],
-    ['💳', 'Abona y listo', 'Abona ' + C.plata(bar().abono) + ' con el link o por transferencia y sube el comprobante. Tu barbero confirma y te llega un aviso 🔔.']
+    ['💳', 'Abona y listo', 'Abona ' + C.plata(bar().abono) + ' con el link o por transferencia y sube el comprobante. Tu hora queda guardada mientras tu barbero lo revisa; al aprobarlo te llega un aviso 🔔.']
   ];
 
   // Arranque

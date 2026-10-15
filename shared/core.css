@@ -163,8 +163,8 @@ button.grande { padding: 16px 20px; font-size: 17px; border-radius: 16px; }
 .est { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; padding: 4px 9px; border-radius: 99px; white-space: nowrap; }
 .est::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .est.esperando_abono { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
-.est.por_aprobar { color: var(--consultar); background: color-mix(in srgb, var(--consultar) 14%, transparent); }
-.est.agendada { color: var(--info); background: color-mix(in srgb, var(--info) 13%, transparent); }
+.est.por_aprobar, .est.en_revision { color: var(--consultar); background: color-mix(in srgb, var(--consultar) 14%, transparent); }
+.est.agendada { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
 .est.confirmada { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
 .est.atendida { color: var(--muted); background: var(--field); }
 .est.no_vino { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
@@ -325,8 +325,8 @@ ul.feat li::before { content: '⭐'; margin-right: 8px; }
 }
 .tl .bloque b { display: block; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl .bloque.esperando_abono { background: #f59e0b; color: #3b2300; }
-.tl .bloque.por_aprobar { background: var(--consultar); }
-.tl .bloque.agendada { background: var(--info); }
+.tl .bloque.por_aprobar, .tl .bloque.en_revision { background: var(--consultar); }
+.tl .bloque.agendada { background: var(--ok); }
 .tl .bloque.confirmada { background: var(--ok); }
 .tl .bloque.atendida { background: #a1a1aa; }
 .tl .bloque.no_vino { background: var(--bad); }
@@ -431,3 +431,35 @@ ul.feat li::before { content: '⭐'; margin-right: 8px; }
 .det-fila { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 15px; }
 .det-fila:last-child { border-bottom: 0; }
 .det-fila b { text-align: right; }
+
+/* ---------- v2.0: estrellas, lista negra, pendientes, menú de ajustes ---------- */
+.estrellas { display: inline-flex; gap: 2px; color: var(--oro); letter-spacing: 0; font-size: 15px; white-space: nowrap; }
+.estrellas.grande { font-size: 34px; gap: 6px; }
+.estrellas button { background: none; border: 0; box-shadow: none; padding: 0 2px; font-size: inherit; color: var(--line); min-height: 0; cursor: pointer; }
+.estrellas button.on { color: var(--oro); }
+.nota { display: inline-flex; align-items: center; gap: 4px; font-weight: 750; font-size: 14px; }
+.nota::before { content: '★'; color: var(--oro); }
+.negra { border-left: 4px solid var(--bad) !important; }
+.alerta-negra { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; font-size: 14px; margin: 8px 0;
+  background: color-mix(in srgb, var(--bad) 12%, transparent); color: var(--bad); font-weight: 650; }
+.urgente { border-left: 4px solid var(--consultar); }
+.checklist li { display: flex; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px dashed var(--line); }
+.checklist li:last-child { border-bottom: 0; }
+.checklist li .ok { color: var(--ok); font-weight: 800; }
+.checklist li.hecho span.t { color: var(--muted); text-decoration: line-through; }
+.menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.menu-grid button { flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px; border-radius: 18px; background: var(--card); color: var(--text);
+  border: 1px solid var(--line); box-shadow: var(--shadow); text-align: left; font-weight: 700; min-height: 96px; position: relative; }
+.menu-grid button span { font-size: 26px; }
+.menu-grid button small { font-weight: 500; color: var(--muted); font-size: 12.5px; }
+.menu-grid button .num { position: absolute; top: 10px; right: 10px; }
+.comp-img { width: 100%; max-height: 70vh; object-fit: contain; border-radius: 12px; background: var(--field); }
+.reloj-grande { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: center; letter-spacing: -.02em; }
+.pasos-reserva { display: grid; gap: 6px; margin: 10px 0; }
+.pasos-reserva div { display: flex; gap: 10px; align-items: center; font-size: 14px; color: var(--muted); }
+.pasos-reserva div.on { color: var(--text); font-weight: 700; }
+.pasos-reserva div.hecho { color: var(--ok); }
+.pasos-reserva i { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 12px; font-weight: 800;
+  background: var(--field); flex: none; }
+.pasos-reserva .on i { background: var(--brand); color: var(--brand-ink); }
+.pasos-reserva .hecho i { background: var(--ok); color: #fff; }

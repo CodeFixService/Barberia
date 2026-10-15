@@ -3,7 +3,7 @@
   'use strict';
   const C = global.Core;
   const esc = C.esc;
-  const ACTIVAS = ['esperando_abono', 'por_aprobar', 'agendada', 'confirmada', 'ocupado'];
+  const ACTIVAS = ['esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada', 'ocupado'];
   const PASO = 15;
 
   const diaHorario = (horario, f) => (horario && horario[C.dow(f) - 1]) || { e: 'x' };
@@ -31,7 +31,16 @@
     return out;
   }
 
-  // Horas para reservar (cada 15 min) de un barbero en un día, para un carrito de "dur" minutos.
+  // Minutos que bloquea una cita con un barbero: lo que a él le dura cada servicio + su descanso entre citas.
+  function duracion(barbero, servicios) {
+    const d = (barbero && barbero.duraciones) || {};
+    const base = (servicios || []).reduce((t, s) => t + (+d[s.id] > 0 ? +d[s.id] : s.duracion), 0);
+    return base ? base + (+(barbero && barbero.descanso) || 0) : 0;
+  }
+
+  // Horas para reservar de un barbero en un día, para una cita de "dur" minutos.
+  // Parten desde que abre, cada "paso" minutos (lo elige cada barbero), y además justo cuando termina otra cita,
+  // la colación o un bloqueo: así no quedan huecos raros (si alguien toma 10:00 por 1 h 30, la siguiente es 11:30).
   function horas(o) {
     const d = diaHorario(o.horario, o.f);
     if (d.e === 'x') return [];
@@ -39,11 +48,17 @@
     const ci = d.ci ? C.aMin(d.ci) : null, cf = d.cf ? C.aMin(d.cf) : null;
     const occ = ocupados(o.barbero, o.f, o.datos);
     const ahora = Date.now() + (o.anticipacion === undefined ? 60 : o.anticipacion) * 60000;
+    const paso = Math.max(5, +o.paso || PASO);
+    const cand = new Set();
+    for (let m = ini; m + o.dur <= fin; m += paso) cand.add(m);
+    const sumar = (m) => { m = Math.ceil(m / 5) * 5; if (m >= ini && m + o.dur <= fin) cand.add(m); };
+    occ.forEach((x) => sumar(x.b));
+    if (cf !== null) sumar(cf);
     const out = [];
-    for (let m = ini; m + o.dur <= fin; m += PASO) {
+    for (const m of [...cand].sort((a, b) => a - b)) {
       if (ci !== null && m < cf && m + o.dur > ci) continue;
       const t = C.instante(o.f, C.aHHMM(m));
-      let estado = d.e === 'c' ? 'consultar' : 'libre';
+      let estado = 'libre';
       const choque = occ.find((x) => m < x.b && m + o.dur > x.a);
       if (choque) estado = choque.r && choque.r.mia && choque.a === m ? 'mia' : 'ocupado';
       else if (t.getTime() < ahora) estado = 'pasado';
@@ -59,7 +74,6 @@
     barberos.forEach((b) => {
       const d = diaHorario(horarios[b], f);
       if (d.e === 'x') return;
-      if (d.e === 'c') consultar = true;
       let mins = C.aMin(d.f) - C.aMin(d.i);
       if (d.ci && d.cf) mins -= C.aMin(d.cf) - C.aMin(d.ci);
       abiertos += Math.max(0, mins);
@@ -218,14 +232,14 @@
   // Texto de horario de un día: "10:00–20:00 (colación 14:00–15:00)".
   function horarioTxt(d) {
     if (!d || d.e === 'x') return 'Cerrado';
-    return d.i + '–' + d.f + (d.ci ? ' · colación ' + d.ci + '–' + d.cf : '') + (d.e === 'c' ? ' · a consultar' : '');
+    return d.i + '–' + d.f + (d.ci ? ' · colación ' + d.ci + '–' + d.cf : '');
   }
 
   const ESTADOS = {
-    esperando_abono: 'Esperando abono', por_aprobar: 'Por aprobar', agendada: 'Agendada', confirmada: 'Confirmada',
+    esperando_abono: 'Esperando abono', en_revision: 'En revisión', por_aprobar: 'En revisión', agendada: 'Agendada', confirmada: 'Agendada',
     atendida: 'Atendida', no_vino: 'No vino', anulada: 'Anulada'
   };
   const estadoPill = (e) => '<span class="est ' + e + '">' + (ESTADOS[e] || e) + '</span>';
 
-  global.Agenda = { horas, ocupados, llenado, nivel, tiraDias, timeline, mes, anio, horarioTxt, diaHorario, estadoPill, ESTADOS, ACTIVAS };
+  global.Agenda = { horas, duracion, ocupados, llenado, nivel, tiraDias, timeline, mes, anio, horarioTxt, diaHorario, estadoPill, ESTADOS, ACTIVAS };
 })(window);
