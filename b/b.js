@@ -27,8 +27,12 @@
       '<p class="muted">Revisa que el link esté completo.</p></div>');
     return;
   }
-  // ¿Ya tiene sesión en este celular?
+  // ¿Ya tiene sesión en este celular? Si es cliente de esta barbería, va directo a su app.
   try { yo = await K.refrescar(); } catch (e) { yo = null; }
+  if (yo && yo.role === 'client' && yo.barberia && yo.barberia.codigo === V.codigo && location.hash !== '#reservar') {
+    location.replace('../cliente/');
+    return;
+  }
   K.recordarBarberia({ codigo: V.codigo, nombre: V.nombre, logo: V.logo, whatsapp: V.whatsapp, color: V.color });
   if (V.color) C.aplicarColor(V.color);
   document.title = V.nombre + ' · Reserva tu hora';
@@ -63,12 +67,21 @@
     let html = '';
     if (V.portada) html += '<div class="portada" style="' + C.fondo(V.portada) + '"></div>';
     html += '<div class="card hero"><div class="logo-grande' + (V.logo ? ' img' : '') + '" style="' + C.fondo(V.logo) + '">' + (V.logo ? '' : '💈') + '</div>' +
-      '<h1>' + esc(V.nombre) + '</h1>' + (V.calificacion && V.calificacion.total ? '<div>' + nota(V.calificacion) + '</div>' : '') +
-      '<p class="muted" style="margin:6px 0 0">' + esc(V.bienvenida || K.texto('vista_bienvenida', 'Elige tu corte, tu barbero y tu hora.')) + '</p>' +
-      '<div class="btns" style="justify-content:center"><button class="grande" id="bIrReservar">📅 Reservar hora</button>' +
-      (yo && yo.role === 'client' ? '<a class="btn gris" href="../cliente/">Abrir mi app</a>' :
-        (V.registro ? '<button class="alt" id="bCuenta">👤 Crear mi cuenta</button>' : '')) + '</div>' +
-      (!yo ? '<p class="muted chico" style="margin-bottom:0">No necesitas cuenta para reservar. Con cuenta ves tu historial, te llegan avisos y reservas más rápido.</p>' : '') + '</div>';
+      '<h1>' + esc(V.nombre) + '</h1>' + (V.calificacion && V.calificacion.total ? '<div>' + nota(V.calificacion) + ' <span class="muted chico">promedio de sus clientes</span></div>' : '') +
+      '<p class="muted" style="margin:6px 0 0">' + esc(V.bienvenida || K.texto('vista_bienvenida', 'Elige tu corte, tu barbero y tu hora.')) + '</p>';
+    // 1) Lo principal: la cuenta (entrar o crearla). Con cuenta perteneces a esta barbería.
+    if (yo) {
+      html += '<div class="btns" style="justify-content:center"><a class="btn grande" href="../' + K.paginaDe(yo.role) + '">📲 Abrir mi app</a></div>' +
+        '<p class="muted chico" style="margin-bottom:0">Entraste como ' + esc(yo.nombre || yo.email) + '.</p>';
+    } else {
+      html += '<div class="btns" style="flex-direction:column"><a class="btn grande full" id="bEntrar" href="../?b=' + esc(V.codigo) + '&entrar=1">👤 Entrar con mi cuenta</a>' +
+        (V.registro ? '<button class="alt full" id="bCuenta">✨ Crear mi cuenta</button>' : '') + '</div>' +
+        '<p class="muted chico" style="margin-bottom:0">Con cuenta ves tu historial, te llegan avisos al celular y reservas más rápido.</p>';
+    }
+    html += '</div>';
+    // 2) O reservar sin cuenta (se valida con el comprobante del abono).
+    if (!yo) html += '<div class="card centro" style="padding:14px"><b>¿Sin cuenta? También puedes reservar 👇</b><div class="muted chico">Con tu nombre y WhatsApp. Tu hora se confirma con el comprobante del abono.</div>' +
+      '<div class="btns" style="justify-content:center"><button class="gris" id="bIrReservar">📅 Reservar sin cuenta</button></div></div>';
     if (V.suspendida) html += '<div class="card err">Esta barbería no está recibiendo reservas por ahora.</div>';
     const mios = misTokens().filter((x) => new Date(x.fin || x.inicio) > Date.now() - 86400e3);
     if (mios.length) {
@@ -92,7 +105,7 @@
     html += '<p class="muted chico centro">' + esc(K.texto('terminos', '')) + ' <a href="../legal.html">Términos</a></p>';
     mostrarApp(html);
     C.marca(true);
-    $('bIrReservar').onclick = () => $('reservar').scrollIntoView({ behavior: 'smooth' });
+    if ($('bIrReservar')) $('bIrReservar').onclick = () => $('reservar').scrollIntoView({ behavior: 'smooth' });
     if ($('bCuenta')) $('bCuenta').onclick = crearCuenta;
     app.querySelectorAll('[data-t]').forEach((li) => li.onclick = () => { location.href = '../r/?t=' + li.dataset.t; });
     pintarReservar();
@@ -144,8 +157,9 @@
     $('bVaciar').onclick = () => { carro.clear(); pintarReservar(); };
   }
 
+  // Minutos que bloquea el carrito con un barbero (sus tiempos + su descanso).
+  const durCon = (x) => (carro.size ? A.duracion(x, carroItems()) : 0) || Math.min(...V.servicios.map((s) => s.duracion), 30) + (+x.descanso || 0);
   function horasDe(f) {
-    const dur = carroDur() || Math.min(...V.servicios.map((s) => s.duracion), 30);
     const ids = barberoSel === '*' ? reservables().map((x) => x.id) : [barberoSel];
     const porMin = new Map();
     ids.forEach((id) => {
@@ -153,7 +167,7 @@
       if (!x) return;
       const servOk = [...carro].every((sid) => { const s = servicio(sid); return !s.barberos || !s.barberos.length || s.barberos.includes(id); });
       if (!servOk) return;
-      A.horas({ f, barbero: id, dur, datos, horario: x.horario }).forEach((s) => {
+      A.horas({ f, barbero: id, dur: durCon(x), datos, horario: x.horario, paso: x.paso }).forEach((s) => {
         const prev = porMin.get(s.min);
         const rank = { libre: 3, ocupado: 1, mia: 1 };
         if (!prev || rank[s.estado] > rank[prev.estado]) porMin.set(s.min, Object.assign({ barbero: id }, s));
@@ -186,7 +200,7 @@
     const yoInv = C.leer('invitado', {}) || {};
     const items = carroItems();
     const h = C.hoja('<h2>📅 Confirma tu hora</h2><div class="hora-card" style="margin-bottom:12px"><div class="fecha"><small>' + C.DIAS[C.dow(f) - 1] + '</small><b>' + (+f.slice(8)) + '</b><i>' + slot.hhmm + '</i></div>' +
-      '<div class="grow"><b>' + C.fechaLarga(f) + ', ' + slot.hhmm + '</b><div class="muted">con ' + esc(x.nombre) + ' · ' + carroDur() + ' min</div></div></div>' +
+      '<div class="grow"><b>' + C.fechaLarga(f) + ', ' + slot.hhmm + '</b><div class="muted">con ' + esc(x.nombre) + ' · hasta las ' + C.horaDe(new Date(slot.t.getTime() + durCon(x) * 60000)) + '</div></div></div>' +
       '<div class="resumen-carro">' + items.map((s) => '<div><span>' + esc(s.nombre) + '</span><span>' + C.plata(s.precio) + '</span></div>').join('') +
       '<div style="border-top:1px solid var(--line);padding-top:6px"><b>Total</b><b>' + C.plata(carroTotal()) + '</b></div>' +
       (V.abono ? '<div><span>Abono ahora</span><b>' + C.plata(V.abono) + '</b></div><div class="muted"><span>Pagas en la barbería</span><span>' + C.plata(Math.max(0, carroTotal() - V.abono)) + '</span></div>' : '') + '</div>' +
@@ -202,7 +216,7 @@
       C.guardar('invitado', { nombre, telefono });
       const r = await K.rpc('reservar_invitado', { p_codigo: V.codigo, p_barbero: x.id, p_inicio: slot.t.toISOString(), p_servicios: [...carro], p_nombre: nombre, p_telefono: telefono });
       const lista = (C.leer('tokens', []) || []).filter((y) => y.token !== r.token);
-      lista.unshift({ token: r.token, codigo: V.codigo, inicio: slot.t.toISOString(), fin: new Date(slot.t.getTime() + carroDur() * 60000).toISOString(),
+      lista.unshift({ token: r.token, codigo: V.codigo, inicio: slot.t.toISOString(), fin: new Date(slot.t.getTime() + durCon(x) * 60000).toISOString(),
         texto: items.map((s) => s.nombre).join(' + ') + ' con ' + x.nombre });
       C.guardar('tokens', lista.slice(0, 20));
       location.href = '../r/?t=' + r.token + '&nueva=1';

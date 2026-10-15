@@ -55,7 +55,7 @@
     if (v === 'agenda' && q.get('r')) { mostrar('agenda'); abrirReserva(q.get('r'), true); return; }
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
-    if (['plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace'].includes(v)) {
+    if (['plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos'].includes(v)) {
       mostrar('mas'); abrirSeccion(v === 'ajustes' ? 'negocio' : v); return;
     }
     mostrar(VISTAS[v] ? v : 'hoy');
@@ -407,7 +407,8 @@
     h.qa('[data-s]').forEach((b) => b.onclick = () => {
       if (carro.has(b.dataset.s)) carro.delete(b.dataset.s); else carro.add(b.dataset.s);
       b.classList.toggle('on', carro.has(b.dataset.s));
-      h.q('[data-min]').value = [...carro].reduce((t, id) => t + (servicio(id) || {}).duracion, 0) || '';
+      const bb = barbero(h.q('[data-b]') ? h.q('[data-b]').value : yo.id) || {};
+      h.q('[data-min]').value = A.duracion(bb, [...carro].map(servicio).filter(Boolean)) || '';
     });
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
       if (!h.q('[data-h]').value) throw new Error('Elige la hora');
@@ -552,6 +553,7 @@
     const items = dueno() ? [
       ['negocio', '🏪', 'Perfil de la barbería', 'Logo, datos, colores'],
       ['horario', '🕐', 'Horario', 'Lunes a domingo y bloqueos'],
+      ['tiempos', '⏱️', 'Mis tiempos', 'Cuánto dura cada corte y tu descanso'],
       ['servicios', '✂️', 'Servicios y precios', 'Tu catálogo'],
       ['links', '💳', 'Links de pago', 'Abono: 2 links y transferencia'],
       ['ofertas', '🏷️', 'Ofertas', 'Promos para tus clientes'],
@@ -564,6 +566,7 @@
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbele a Josué']
     ] : [
+      ['tiempos', '⏱️', 'Mis tiempos', 'Cuánto dura cada corte y tu descanso'],
       ['caja', '💵', 'Mi caja', 'Tus cortes'],
       ['estadisticas', '📊', 'Mis estadísticas', 'Tus cortes y clientes'],
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
@@ -589,7 +592,7 @@
     if (!dueno() && soloDueno.includes(s)) { mas(); return; }
     if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); }
     const F = { equipo: secEquipo, servicios: secServicios, ofertas: secOfertas, estadisticas: secEstadisticas, negocio: secNegocio, horario: secHorario, links: secLinks,
-      caja, calificaciones: secCalificaciones, enlace: enlaceClientes, plan: () => P.plan(seccion('💎 Mi plan')),
+      caja, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, plan: () => P.plan(seccion('💎 Mi plan')),
       perfil: () => P.perfil(seccion('👤 Mi cuenta'), { tour: (f) => P.tour(pasos(), f), alGuardar: () => { yo = K.cuenta; } }) };
     if (F[s]) F[s]();
   }
@@ -996,6 +999,47 @@
     } catch (e) { if ($('lBloq')) $('lBloq').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
   }
 
+  /* ----- Mis tiempos (cada barbero los suyos): cuánto le dura cada servicio, su descanso y cada cuánto parten sus horas ----- */
+  async function secTiempos() {
+    const z = seccion('⏱️ Mis tiempos');
+    yo = await K.refrescar() || yo;
+    await cargarBarberia();
+    const dur = yo.duraciones || {};
+    const opc = (vals, sel, txt) => vals.map((v) => '<option value="' + v + '"' + (+sel === v ? ' selected' : '') + '>' + txt(v) + '</option>').join('');
+    const hm = (m) => (m >= 60 ? Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) : '') : m + ' min');
+    z.innerHTML = '<div class="card"><p class="muted chico" style="margin-top:0">Cuando un cliente reserva contigo, se bloquea al tiro lo que te dura el servicio <b>más tu descanso</b>. ' +
+      'La siguiente hora libre parte justo cuando terminas: así no quedan huecos.</p>' +
+      '<div class="row"><div><label>Descanso entre citas</label><select id="tDesc">' + opc([0, 5, 10, 15, 20, 25, 30, 45, 60], yo.descanso_min || 0, (v) => v ? v + ' min' : 'Sin descanso') + '</select></div>' +
+      '<div><label>Mis horas parten cada</label><select id="tPaso">' + opc([10, 15, 20, 30, 45, 60, 75, 90, 120], yo.paso_min || 15, hm) + '</select></div></div></div>' +
+      '<div class="card"><h2>✂️ Cuánto me dura cada servicio</h2><p class="muted chico" style="margin-top:-6px">Déjalo vacío para usar la duración de la barbería.</p>' +
+      (B.servicios.length ? B.servicios.map((sv) => '<div class="det-fila" style="align-items:center"><span>' + esc(sv.nombre) + ' <span class="muted chico">(barbería: ' + sv.duracion + ' min)</span></span>' +
+        '<input data-sv="' + sv.id + '" type="number" inputmode="numeric" min="5" max="480" step="5" placeholder="' + sv.duracion + '" value="' + (dur[sv.id] || '') + '" style="width:96px;padding:8px"></div>').join('')
+        : '<p class="muted">La barbería aún no tiene servicios.</p>') + '</div>' +
+      '<div class="card" id="tPrev"></div><div class="btns"><button class="grande full" id="bGuardarT">Guardar mis tiempos</button></div>';
+    const leer = () => {
+      const d = {};
+      z.querySelectorAll('[data-sv]').forEach((i) => { if (i.value) d[i.dataset.sv] = +i.value; });
+      return { descanso_min: +$('tDesc').value, paso_min: +$('tPaso').value, duraciones: d };
+    };
+    const vista = () => {
+      const t = leer();
+      const yoT = { duraciones: t.duraciones, descanso: t.descanso_min };
+      const sv = B.servicios[0];
+      if (!sv) { $('tPrev').innerHTML = ''; return; }
+      const total = A.duracion(yoT, [sv]);
+      let h = 10 * 60, horas = [];
+      for (let i = 0; i < 4; i++) { horas.push(C.aHHMM(h)); h += total; }
+      $('tPrev').innerHTML = '<b>👀 Así queda</b><p class="muted" style="margin:6px 0 0">Un <b>' + esc(sv.nombre) + '</b> te bloquea <b>' + hm(total) + '</b> (' + (t.duraciones[sv.id] || sv.duracion) + ' min + ' + t.descanso_min + ' de descanso). ' +
+        'Si te reservan seguido: ' + horas.join(' · ') + '…</p>';
+    };
+    z.querySelectorAll('select, input').forEach((i) => { i.oninput = vista; i.onchange = vista; });
+    vista();
+    $('bGuardarT').onclick = (ev) => C.accion(ev.target, async () => {
+      yo = await K.rpc('guardar_tiempos', { p: leer() });
+      await cargarBarberia();
+    }, '✅ Tiempos guardados');
+  }
+
   /* ----- Links de pago del abono (solo el dueño los ve) ----- */
   async function secLinks() {
     const z = seccion('💳 Links de pago');
@@ -1064,6 +1108,7 @@
     ['🧾', 'Aprueba los abonos', 'Cuando alguien sube su comprobante, te llega un aviso: revisa que llegó la transferencia y toca Aprobar. La hora queda agendada.']
   ] : [
     ['💈', '¡Bienvenido!', 'Aquí ves tu agenda, apruebas los abonos de tus clientes y anotas tus cortes.'],
+    ['⏱️', 'Tus tiempos', 'En Más → Mis tiempos pones cuánto te dura cada corte y tu descanso: al reservar contigo se bloquea ese tiempo al tiro.'],
     ['🧾', 'Aprueba los abonos', 'Cuando un cliente sube su comprobante te llega un aviso. Revisa que llegó la transferencia y toca Aprobar.'],
     ['⭐', 'Califica a tus clientes', 'Después de atenderlos (o si no vinieron) los calificas. Los de pocas estrellas quedan en la lista negra.']
   ];

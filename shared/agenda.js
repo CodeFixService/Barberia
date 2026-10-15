@@ -31,7 +31,16 @@
     return out;
   }
 
-  // Horas para reservar (cada 15 min) de un barbero en un día, para un carrito de "dur" minutos.
+  // Minutos que bloquea una cita con un barbero: lo que a él le dura cada servicio + su descanso entre citas.
+  function duracion(barbero, servicios) {
+    const d = (barbero && barbero.duraciones) || {};
+    const base = (servicios || []).reduce((t, s) => t + (+d[s.id] > 0 ? +d[s.id] : s.duracion), 0);
+    return base ? base + (+(barbero && barbero.descanso) || 0) : 0;
+  }
+
+  // Horas para reservar de un barbero en un día, para una cita de "dur" minutos.
+  // Parten desde que abre, cada "paso" minutos (lo elige cada barbero), y además justo cuando termina otra cita,
+  // la colación o un bloqueo: así no quedan huecos raros (si alguien toma 10:00 por 1 h 30, la siguiente es 11:30).
   function horas(o) {
     const d = diaHorario(o.horario, o.f);
     if (d.e === 'x') return [];
@@ -39,8 +48,14 @@
     const ci = d.ci ? C.aMin(d.ci) : null, cf = d.cf ? C.aMin(d.cf) : null;
     const occ = ocupados(o.barbero, o.f, o.datos);
     const ahora = Date.now() + (o.anticipacion === undefined ? 60 : o.anticipacion) * 60000;
+    const paso = Math.max(5, +o.paso || PASO);
+    const cand = new Set();
+    for (let m = ini; m + o.dur <= fin; m += paso) cand.add(m);
+    const sumar = (m) => { m = Math.ceil(m / 5) * 5; if (m >= ini && m + o.dur <= fin) cand.add(m); };
+    occ.forEach((x) => sumar(x.b));
+    if (cf !== null) sumar(cf);
     const out = [];
-    for (let m = ini; m + o.dur <= fin; m += PASO) {
+    for (const m of [...cand].sort((a, b) => a - b)) {
       if (ci !== null && m < cf && m + o.dur > ci) continue;
       const t = C.instante(o.f, C.aHHMM(m));
       let estado = 'libre';
@@ -226,5 +241,5 @@
   };
   const estadoPill = (e) => '<span class="est ' + e + '">' + (ESTADOS[e] || e) + '</span>';
 
-  global.Agenda = { horas, ocupados, llenado, nivel, tiraDias, timeline, mes, anio, horarioTxt, diaHorario, estadoPill, ESTADOS, ACTIVAS };
+  global.Agenda = { horas, duracion, ocupados, llenado, nivel, tiraDias, timeline, mes, anio, horarioTxt, diaHorario, estadoPill, ESTADOS, ACTIVAS };
 })(window);

@@ -194,7 +194,7 @@
     const pintarH = () => {
       const hor = { [R.barbero.id]: R.barbero.horario };
       A.tiraDias(h.q('[data-tira]'), { cuantos: diasMax + 1, sel: f, info: (x) => A.llenado([R.barbero.id], x, datos, hor), alElegir: (x) => { f = x; pintarH(); } });
-      const s = A.horas({ f, barbero: R.barbero.id, dur, datos, horario: R.barbero.horario });
+      const s = A.horas({ f, barbero: R.barbero.id, dur, datos, horario: R.barbero.horario, paso: R.barbero.paso });
       h.q('[data-slots]').innerHTML = '<h3>' + C.fechaLarga(f) + '</h3>' + (s.length ? '<div class="slots">' + s.map((x) => '<button class="slot ' + x.estado + '" data-m="' + x.min + '"' +
         (x.estado !== 'libre' ? ' disabled' : '') + '>' + x.hhmm + '</button>').join('') + '</div>' : '<div class="empty"><span class="ico">😕</span>No hay horas este día.</div>');
       h.qa('.slot:not([disabled])').forEach((b) => b.onclick = async () => {

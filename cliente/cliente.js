@@ -249,14 +249,16 @@
   }
 
   // Horas de un día: combina los barberos si eligió "el que esté libre".
+  // Minutos que bloquea el carrito con un barbero (sus tiempos + su descanso).
+  const durCon = (x) => (carro.size ? A.duracion(x, carroItems()) : 0) || Math.min(...B.servicios.map((s) => s.duracion), 30) + (+x.descanso || 0);
   function horasDe(f) {
-    const dur = carroDur() || Math.min(...B.servicios.map((s) => s.duracion), 30);
     const ids = barberoSel === '*' ? reservables().map((x) => x.id) : [barberoSel];
     const porMin = new Map();
     ids.forEach((id) => {
       const x = barbero(id);
       if (!x) return;
-      A.horas({ f, barbero: id, dur, datos, horario: x.horario }).forEach((s) => {
+      if (![...carro].every((sid) => { const s = servicio(sid); return !s || !s.barberos || !s.barberos.length || s.barberos.includes(id); })) return;
+      A.horas({ f, barbero: id, dur: durCon(x), datos, horario: x.horario, paso: x.paso }).forEach((s) => {
         const prev = porMin.get(s.min);
         const rank = { mia: 4, libre: 3, ocupado: 1 };
         if (!prev || rank[s.estado] > rank[prev.estado]) porMin.set(s.min, Object.assign({ barbero: id }, s));
@@ -312,7 +314,7 @@
         alBloque: () => { location.hash = 'horas'; },
         alLibre: (c, m) => {
           const s = horasDe(c.f).find((x) => x.min >= m && x.min < m + 30 && x.estado === 'libre');
-          if (!s) return C.toast('Esa hora no está disponible para ' + (carroDur() || 30) + ' min');
+          if (!s) return C.toast('Esa hora no está disponible para tu cita');
           if (c.f > lim) return P.upsell('Reservar hasta ' + K.limite('dias', true) + ' días adelante');
           confirmar(s, c.f);
         } });
@@ -340,7 +342,7 @@
     const items = carroItems();
     const usaSaldo = b.abono === 0 || yo.saldo >= b.abono;
     const h = C.hoja('<h2>📅 Confirma tu hora</h2><div class="hora-card" style="margin-bottom:12px"><div class="fecha"><small>' + C.DIAS[C.dow(f) - 1] + '</small><b>' + (+f.slice(8)) + '</b><i>' + slot.hhmm + '</i></div>' +
-      '<div class="grow"><b>' + C.fechaLarga(f) + ', ' + slot.hhmm + '</b><div class="muted">con ' + esc(x.nombre) + ' · ' + carroDur() + ' min</div></div></div>' +
+      '<div class="grow"><b>' + C.fechaLarga(f) + ', ' + slot.hhmm + '</b><div class="muted">con ' + esc(x.nombre) + ' · hasta las ' + C.horaDe(new Date(slot.t.getTime() + durCon(x) * 60000)) + '</div></div></div>' +
       '<div class="resumen-carro">' + items.map((s) => '<div><span>' + esc(s.nombre) + '</span><span>' + C.plata(s.precio) + '</span></div>').join('') +
       '<div style="border-top:1px solid var(--line);padding-top:6px"><b>Total</b><b>' + C.plata(carroTotal()) + '</b></div>' +
       '<div><span>Abono ahora ' + (usaSaldo ? '(con tu saldo a favor)' : '') + '</span><b>' + C.plata(b.abono) + '</b></div>' +
@@ -453,7 +455,7 @@
     try { await cargarDatos(true); } catch (e) { h.q('[data-slots]').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     const pintarH = () => {
       A.tiraDias(h.q('[data-tira]'), { cuantos: diasMax() + 1, sel: f, info: (d) => A.llenado([hr.barbero_id], d, datos, horarios()), alElegir: (d) => { f = d; pintarH(); } });
-      const s = A.horas({ f, barbero: hr.barbero_id, dur, datos, horario: x.horario });
+      const s = A.horas({ f, barbero: hr.barbero_id, dur, datos, horario: x.horario, paso: x.paso });
       h.q('[data-slots]').innerHTML = '<h3>' + C.fechaLarga(f) + '</h3>' + (s.length ? '<div class="slots">' + s.map((y) => '<button class="slot ' + y.estado + '" data-m="' + y.min + '"' +
         (y.estado !== 'libre' ? ' disabled' : '') + '>' + y.hhmm + '</button>').join('') + '</div>' : '<div class="empty"><span class="ico">😕</span>No hay horas este día.</div>');
       h.qa('.slot:not([disabled])').forEach((b) => b.onclick = async () => {

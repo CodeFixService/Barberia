@@ -79,7 +79,8 @@ Su **Inicio** le muestra lo que le falta configurar:
 2. **Más → Links de pago**: dos links del abono (monto, link y texto; uno activo) y datos de transferencia. **Sin esto no recibe reservas sin cuenta.**
 3. **Más → Horario** y **Más → Perfil de la barbería** (logo, dirección, WhatsApp).
 4. **Más → Mi equipo**: sus barberos (no ven precios ni links de pago).
-5. **Inicio → Tu link para clientes** (o Más → Enlace y QR): con ese link o QR los clientes **reservan sin cuenta** (nombre + WhatsApp), pagan el abono,
+5. **Más → Mis tiempos** (cada barbero, y el dueño para sí): cuánto le dura cada servicio, su descanso entre citas y cada cuánto parten sus horas.
+6. **Inicio → Tu link para clientes** (o Más → Enlace y QR): con ese link o QR los clientes **reservan sin cuenta** (nombre + WhatsApp), pagan el abono,
    suben el comprobante y siguen su hora en su link personal; o se crean su cuenta.
 
 ## Revisar que todo esté activo

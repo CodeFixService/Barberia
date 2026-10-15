@@ -281,6 +281,26 @@ select pg_temp.ok(prueba.si($q$(select count(*) = 2 from public.calificaciones w
 select pg_temp.debe_fallar($$insert into auth.users (email, raw_user_meta_data) values ('malo@test.cl', '{"rol":"cliente","barberia":"noexiste","nombre":"X","telefono":"912345678"}')$$, 'no está recibiendo');
 select pg_temp.debe_fallar($$insert into auth.users (email) values ('nadie@test.cl')$$, 'registro está cerrado');
 
+-- 8c. Tiempos de cada barbero: lo que le dura cada servicio + su descanso entre citas (lo ajusta él en su perfil)
+select pg_temp.como('b2@test.cl');
+select pg_temp.debe_fallar($$select public.guardar_tiempos('{"descanso_min": 500}')$$, 'descanso');
+select pg_temp.debe_fallar($$select public.guardar_tiempos('{"paso_min": 7}')$$, 'cada cuánto');
+select public.guardar_tiempos(jsonb_build_object('descanso_min', 20, 'paso_min', 30, 'duraciones', jsonb_build_object(prueba.serv('Corte')::text, 70)));
+select pg_temp.ok((public.mi_cuenta() ->> 'descanso_min')::int = 20 and (public.mi_cuenta() ->> 'paso_min')::int = 30, 'el barbero guardó su descanso y cada cuánto parten sus horas');
+reset role;
+set role anon;
+create temp table g3 as select public.reservar_invitado(prueba.cod(), prueba.id('b2@test.cl'),
+  ((now() at time zone 'America/Santiago')::date + 4)::timestamp at time zone 'America/Santiago' + interval '10 hours', array[prueba.serv('Corte')], 'Tiempo Test', '911112222') as r;
+grant select on g3 to authenticated;
+reset role;
+select pg_temp.ok(prueba.si($q$(select fin - inicio = interval '90 minutes' from public.reservas where token = (select r ->> 'token' from g3))$q$),
+  'un corte de 70 min + 20 de descanso bloquea 1 h 30 al tiro');
+set role anon;
+select pg_temp.debe_fallar($$select public.reservar_invitado(prueba.cod(), prueba.id('b2@test.cl'),
+  ((now() at time zone 'America/Santiago')::date + 4)::timestamp at time zone 'America/Santiago' + interval '11 hours', array[prueba.serv('Corte')], 'Otro', '933334444')$$, 'acaba de ocupar');
+select pg_temp.ok((public.vista_publica(prueba.cod()) -> 'barberos' -> 0) ? 'paso', 'la vista libre conoce los tiempos de cada barbero');
+reset role;
+
 -- 9. Chat: 3 seguidos hasta que respondan; el barbero sin límite
 select pg_temp.como('ana@test.cl');
 select public.enviar_mensaje(prueba.id('pedro@test.cl'), 'hola 1');

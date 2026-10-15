@@ -22,7 +22,7 @@ language sql immutable as $$ select '2.0'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'Reserva sin cuenta con el link o QR de tu barbería, abono en revisión, calificaciones y pagos con comprobante.'::text $$;
+language sql immutable as $$ select 'Reserva sin cuenta con el link o QR de tu barbería, abono en revisión, tiempos de cada barbero, calificaciones y pagos con comprobante.'::text $$;
 
 -- Planes Free / Premium (v1.4): el admin los edita desde su panel. Estos son los valores de partida.
 create table if not exists public.planes (
@@ -142,6 +142,15 @@ create table if not exists public.profiles (
   created_at      timestamptz not null default now()
 );
 create index if not exists profiles_barberia_idx on public.profiles (barberia_id, role);
+-- v2.0: tiempos de cada barbero (los ajusta él mismo en su perfil): descanso entre citas, cada cuánto parten sus horas
+-- y cuánto le dura cada servicio ({ "<id del servicio>": minutos }; si no lo pone, usa la duración del servicio).
+alter table public.profiles add column if not exists descanso_min int not null default 0;
+alter table public.profiles add column if not exists paso_min int not null default 15;
+alter table public.profiles add column if not exists duraciones jsonb not null default '{}'::jsonb;
+alter table public.profiles drop constraint if exists profiles_descanso_check;
+alter table public.profiles add constraint profiles_descanso_check check (descanso_min between 0 and 180);
+alter table public.profiles drop constraint if exists profiles_paso_check;
+alter table public.profiles add constraint profiles_paso_check check (paso_min in (5, 10, 15, 20, 30, 45, 60, 75, 90, 120));
 alter table public.profiles enable row level security;
 
 create table if not exists public.barberias (
@@ -405,6 +414,7 @@ begin
     'telefono', me.telefono, 'avatar', me.avatar, 'foto', me.foto, 'color', me.color, 'cumple', me.cumple,
     'descripcion', me.descripcion, 'saldo', me.saldo, 'bloqueado', me.bloqueado, 'favorito', me.favorito,
     'clave_temporal', me.clave_temporal, 'tour_visto', me.tour_visto, 'agenda_abierta', me.agenda_abierta,
+    'descanso_min', me.descanso_min, 'paso_min', me.paso_min, 'duraciones', me.duraciones,
     'is_admin', public.is_admin(),
     'barberia', case when b.id is null then null else jsonb_build_object(
       'id', b.id, 'codigo', b.codigo, 'nombre', b.nombre, 'logo', b.logo, 'color', b.color, 'portada', b.portada,
@@ -1660,7 +1670,8 @@ begin
         'id', p.id, 'nombre', public.nombre_de(p), 'avatar', p.avatar, 'foto', p.foto, 'descripcion', p.descripcion,
         'es_dueno', p.role = 'owner', 'reservable', public.reservable(p), 'activo', p.activo, 'agenda_abierta', p.agenda_abierta,
         'last_seen', case when staff then p.last_seen end,
-        'horario', public.horario_de(p.id), 'telefono', case when staff then p.telefono end)
+        'horario', public.horario_de(p.id), 'telefono', case when staff then p.telefono end,
+        'descanso', p.descanso_min, 'paso', p.paso_min, 'duraciones', p.duraciones)
         order by (p.role = 'owner') desc, p.nombre), '[]'::jsonb)
       from public.profiles p where p.barberia_id = me.barberia_id and p.role in ('owner', 'barber')
         and (staff or p.activo)),
@@ -1741,6 +1752,37 @@ end $$;
 -- ---------------------------------------------------------------------
 -- Reservar
 -- ---------------------------------------------------------------------
+-- Lo que le dura un servicio a un barbero (su tiempo propio o la duración del servicio).
+create or replace function public.duracion_con(b public.profiles, s public.servicios) returns int
+language sql immutable as $$
+  select coalesce(case when (b.duraciones ->> s.id::text) ~ '^\d+$' then (b.duraciones ->> s.id::text)::int end, s.duracion)
+$$;
+
+-- El barbero (o el dueño, para sí mismo) ajusta sus tiempos desde su perfil.
+create or replace function public.guardar_tiempos(p jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; d jsonb := '{}'::jsonb; k text; v int;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  if p ? 'descanso_min' and coalesce((p ->> 'descanso_min')::int, -1) not between 0 and 180 then raise exception 'El descanso va de 0 a 180 minutos'; end if;
+  if p ? 'paso_min' and coalesce((p ->> 'paso_min')::int, 0) not in (5, 10, 15, 20, 30, 45, 60, 75, 90, 120) then raise exception 'Elige cada cuánto parten tus horas'; end if;
+  if jsonb_typeof(p -> 'duraciones') = 'object' then
+    for k in select jsonb_object_keys(p -> 'duraciones') loop
+      if nullif(p -> 'duraciones' ->> k, '') is null then continue; end if;
+      v := (p -> 'duraciones' ->> k)::int;
+      if v not between 5 and 480 then raise exception 'Cada servicio debe durar entre 5 y 480 minutos'; end if;
+      if exists (select 1 from public.servicios where id = k::uuid and barberia_id = me.barberia_id) then d := d || jsonb_build_object(k, v); end if;
+    end loop;
+  end if;
+  update public.profiles set
+    descanso_min = case when p ? 'descanso_min' then (p ->> 'descanso_min')::int else descanso_min end,
+    paso_min = case when p ? 'paso_min' then (p ->> 'paso_min')::int else paso_min end,
+    duraciones = case when p ? 'duraciones' then d else duraciones end
+  where id = me.id;
+  return public.mi_cuenta();
+end $$;
+
 -- Valida barbero, servicios y hora; devuelve duración, total y los servicios elegidos.
 create or replace function public.armar_reserva(p_barberia uuid, p_barbero uuid, p_inicio timestamptz, p_servicios uuid[], p_premium boolean)
 returns jsonb language plpgsql stable security definer set search_path = '' as $$
@@ -1753,15 +1795,17 @@ begin
   end if;
   if coalesce(cardinality(p_servicios), 0) = 0 then raise exception 'Agrega al menos un servicio'; end if;
   if cardinality(p_servicios) > 10 then raise exception 'Máximo 10 servicios'; end if;
-  select coalesce(sum(s.duracion), 0), coalesce(sum(s.precio), 0),
-         coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'nombre', s.nombre, 'precio', s.precio, 'duracion', s.duracion)), '[]'::jsonb)
+  -- Cada barbero tiene sus tiempos: lo que le dura cada servicio (o la duración del servicio) + su descanso entre citas.
+  select coalesce(sum(public.duracion_con(bar, s)), 0), coalesce(sum(s.precio), 0),
+         coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'nombre', s.nombre, 'precio', s.precio, 'duracion', public.duracion_con(bar, s))), '[]'::jsonb)
     into dur, tot, items
   from unnest(p_servicios) as u(id) join public.servicios s on s.id = u.id
   where s.barberia_id = p_barberia and s.visible and (s.barberos is null or p_barbero = any(s.barberos));
   if jsonb_array_length(items) <> cardinality(p_servicios) then
     raise exception 'Algún servicio no está disponible con este barbero';
   end if;
-  if extract(epoch from p_inicio)::bigint % 900 <> 0 then raise exception 'Elige una hora del calendario'; end if;
+  dur := dur + coalesce(bar.descanso_min, 0);
+  if extract(epoch from p_inicio)::bigint % 300 <> 0 then raise exception 'Elige una hora del calendario'; end if;
   if p_inicio < now() + interval '1 hour' then raise exception 'Reserva con al menos 1 hora de anticipación'; end if;
   if p_inicio > now() + make_interval(days => public.limite('dias', p_premium)) then
     raise exception 'Puedes reservar hasta % días adelante%', public.limite('dias', p_premium),
@@ -1995,7 +2039,7 @@ begin
   select * into bar from public.profiles where id = r.barbero_id;
   if not public.reservable(bar) then raise exception '% no tiene la agenda abierta. Escríbele para coordinar.', public.nombre_de(bar); end if;
   prem := r.cliente_id is not null and public.is_premium(r.cliente_id);
-  if extract(epoch from p_inicio)::bigint % 900 <> 0 then raise exception 'Elige una hora del calendario'; end if;
+  if extract(epoch from p_inicio)::bigint % 300 <> 0 then raise exception 'Elige una hora del calendario'; end if;
   if p_inicio < now() + interval '1 hour' then raise exception 'Reserva con al menos 1 hora de anticipación'; end if;
   if p_inicio > now() + make_interval(days => public.limite('dias', prem)) then
     raise exception 'Puedes reservar hasta % días adelante', public.limite('dias', prem);
@@ -2071,7 +2115,7 @@ begin
     'politica', public.politica(r), 'reagendable', public.reagendable(r) and r.cliente_id is null,
     'calificada', exists (select 1 from public.calificaciones q where q.reserva_id = r.id and q.autor = 'cliente'),
     'barbero', jsonb_build_object('id', bar.id, 'nombre', public.nombre_de(bar), 'avatar', bar.avatar, 'foto', bar.foto,
-      'horario', public.horario_de(bar.id), 'reservable', public.reservable(bar)),
+      'horario', public.horario_de(bar.id), 'reservable', public.reservable(bar), 'paso', bar.paso_min),
     'barberia', jsonb_build_object('codigo', b.codigo, 'nombre', b.nombre, 'logo', b.logo, 'color', case when public.barberia_premium(b.id) then b.color end,
       'direccion', b.direccion, 'whatsapp', b.whatsapp,
       'link_pago', case when r.estado = 'esperando_abono' then b.link_pago end,
@@ -2164,7 +2208,8 @@ begin
     'registro', not susp and (select count(*) from public.profiles where barberia_id = b.id and role = 'client') < public.limite('clientes', prem),
     'dias_max', public.limite('dias', false),
     'barberos', (select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'nombre', public.nombre_de(p), 'avatar', p.avatar, 'foto', p.foto,
-        'descripcion', p.descripcion, 'reservable', public.reservable(p), 'horario', public.horario_de(p.id))
+        'descripcion', p.descripcion, 'reservable', public.reservable(p), 'horario', public.horario_de(p.id),
+        'descanso', p.descanso_min, 'paso', p.paso_min, 'duraciones', p.duraciones)
         order by (p.role = 'owner') desc, p.nombre), '[]'::jsonb)
       from public.profiles p where p.barberia_id = b.id and p.role in ('owner', 'barber') and p.activo and not p.suspended),
     'servicios', (select coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'nombre', s.nombre, 'precio', s.precio, 'duracion', s.duracion,
@@ -2332,11 +2377,11 @@ begin
     if c.id is null then raise exception 'Cliente no encontrado'; end if;
   elsif coalesce(trim(p_nombre), '') = '' then raise exception 'Elige un cliente o escribe un nombre';
   end if;
-  select coalesce(sum(s.duracion), 0), coalesce(sum(s.precio), 0),
-         coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'nombre', s.nombre, 'precio', s.precio, 'duracion', s.duracion)), '[]'::jsonb)
+  select coalesce(sum(public.duracion_con(bar, s)), 0), coalesce(sum(s.precio), 0),
+         coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'nombre', s.nombre, 'precio', s.precio, 'duracion', public.duracion_con(bar, s))), '[]'::jsonb)
     into dur, tot, items
   from unnest(coalesce(p_servicios, '{}')) as u(id) join public.servicios s on s.id = u.id where s.barberia_id = me.barberia_id;
-  dur := coalesce(nullif(p_minutos, 0), nullif(dur, 0), 30);
+  dur := coalesce(nullif(p_minutos, 0), nullif(dur, 0) + coalesce(bar.descanso_min, 0), 30);
   if dur not between 5 and 480 then raise exception 'Duración no válida'; end if;
   begin
     insert into public.reservas (barberia_id, barbero_id, cliente_id, cliente_nombre, cliente_tel, inicio, fin, servicios, total, abono,

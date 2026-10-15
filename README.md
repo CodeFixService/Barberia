@@ -19,6 +19,8 @@ reserva con abono y comprobante, mensajes con vistos, caja de cortes y planes Fr
 
 ## Reserva y abono (v2.0)
 1. Elige servicios, barbero y hora. La hora queda **apartada 10 minutos** (Reglas).
+   Cada barbero pone en **Más → Mis tiempos** cuánto le dura cada servicio, su **descanso entre citas** y cada cuánto parten sus horas:
+   al reservar se bloquea al tiro servicio + descanso (ej. corte 70 + 20 = 1 h 30) y la siguiente hora libre parte justo al terminar, sin huecos.
 2. Paga con el link de la barbería (o transferencia) y **sube la foto del comprobante**: el reloj se detiene y la hora queda **🟡 En revisión** (retenida). Al barbero le llega un push.
 3. El barbero revisa que llegó la transferencia y **aprueba** → **✅ Agendada** (un solo paso). Si rechaza, con motivo, la hora se libera.
 4. Si no sube el comprobante a tiempo, la hora se libera sola. Si nadie revisa, se le recuerda al barbero y al dueño; 24 h después de la hora, el abono queda a favor del cliente.

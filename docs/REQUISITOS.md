@@ -316,3 +316,10 @@ Barberías nuevas parten con **30 días de regalo** (editable) y después pagan 
 **Admin:** uso del servidor por tabla con limpieza, filtros de barberías, pagos, calificaciones y registro de cambios.
 
 **Datos:** las horas atendidas se guardan (sellos y estadísticas); las anuladas se borran a los 30 días; los comprobantes a los 30 días (nunca si están en revisión).
+
+**Tiempos por barbero (v2.0):** cada barbero, desde su perfil (Más → Mis tiempos), define cuánto le dura cada servicio (si no, usa la duración de la barbería),
+su descanso entre citas y cada cuánto parten sus horas. Al reservar se bloquea al tiro servicio + descanso (ej. 70 + 20 = 1 h 30) y la siguiente hora libre
+parte justo cuando termina la anterior (también después de la colación o de un bloqueo), así no quedan huecos. El admin no interviene en esto.
+
+**Página de la barbería (link o QR):** arriba lo principal, la cuenta (Entrar / Crear mi cuenta; quien ya tiene sesión entra directo a su app);
+debajo, reservar sin cuenta (solo agenda y valida con el comprobante).

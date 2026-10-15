@@ -241,6 +241,49 @@ async function texto(p) { return p.evaluate(() => document.body.innerText); }
     ok(!/\$\s?\d/.test(tPed), 'el barbero no ve montos en su caja');
     ok(!(await ped.$('[data-s="links"]')), 'el barbero no tiene Links de pago');
 
+    // 10b) Pedro ajusta sus tiempos: Corte 70 min + 20 de descanso, horas cada 30 → una reserva bloquea 1 h 30 y la siguiente parte justo al terminar
+    await ped.click('#bVolver');
+    await ped.click('[data-s="tiempos"]');
+    await ped.waitForSelector('#tDesc');
+    await ped.selectOption('#tDesc', '20');
+    await ped.selectOption('#tPaso', '30');
+    await ped.fill('[data-sv]', '70');
+    await ped.dispatchEvent('[data-sv]', 'input');
+    ok((await ped.textContent('#tPrev')).includes('1 h 30'), 'la vista previa muestra que un corte le bloquea 1 h 30');
+    await foto(ped, 'barbero-mis-tiempos');
+    await ped.click('#bGuardarT');
+    await esperar(900);
+    const tp = (await q("select descanso_min, paso_min from profiles where email = 'pedro@bigote.cl'"))[0];
+    ok(tp.descanso_min === 20 && tp.paso_min === 30, 'se guardaron los tiempos de Pedro');
+    const inv2 = await nuevaPagina(browser, 'invitado2');
+    await inv2.goto(BASE + 'b/?b=' + link.split('?b=')[1]);
+    await inv2.waitForSelector('#reservar .serv');
+    ok((await texto(inv2)).indexOf('Entrar con mi cuenta') < (await texto(inv2)).indexOf('Elige tus servicios'), 'la cuenta (entrar / crear) va arriba y reservar sin cuenta abajo');
+    await inv2.click('#reservar .serv');
+    await inv2.click('.barb:has-text("Pedro")');
+    await esperar(300);
+    let diaIdx = 1;
+    for (; diaIdx < 10; diaIdx++) { await inv2.click('#tira .dia >> nth=' + diaIdx); await esperar(300); if (await inv2.$('#slots .slot:not([disabled])')) break; }
+    const libres1 = await inv2.$$eval('#slots .slot:not([disabled])', (x) => x.map((b) => b.textContent));
+    await inv2.click('#slots .slot:not([disabled]) >> nth=0');
+    await inv2.fill('.sheet [data-n]', 'Rosa Tiempos');
+    await inv2.fill('.sheet [data-t]', '+56 9 1111 2222');
+    await inv2.click('.sheet [data-ok]');
+    await inv2.waitForURL(/\/r\/\?t=/, { timeout: 15000 });
+    const t2 = new URL(inv2.url()).searchParams.get('t');
+    const r2 = (await q("select extract(epoch from fin - inicio)::int / 60 as min, to_char(fin at time zone 'America/Santiago', 'HH24:MI') as fin from reservas where token = $1", [t2]))[0];
+    ok(r2.min === 90, 'la reserva bloquea 90 min (70 de corte + 20 de descanso)');
+    await inv2.goto(BASE + 'b/?b=' + link.split('?b=')[1] + '#reservar');
+    await inv2.waitForSelector('#reservar .serv');
+    await inv2.click('#reservar .serv');
+    await inv2.click('.barb:has-text("Pedro")');
+    await esperar(300);
+    await inv2.click('#tira .dia >> nth=' + diaIdx);
+    await esperar(300);
+    const libres2 = await inv2.$$eval('#slots .slot:not([disabled])', (x) => x.map((b) => b.textContent));
+    await foto(inv2, 'invitado-horas-con-tiempos');
+    ok(libres2.includes(r2.fin) && libres2[0] === r2.fin, 'la siguiente hora libre parte justo cuando termina la anterior (' + r2.fin + '), sin huecos raros · antes: ' + libres1.slice(0, 3).join(', '));
+
     // 11) Admin: servidor, filtros, planes, reglas y textos
     await adm.click('nav.tabs [data-v="resumen"]');
     await adm.waitForSelector('text=Servidor');
