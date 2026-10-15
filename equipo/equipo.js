@@ -20,7 +20,11 @@
   const barbero = (id) => B.barberos.find((b) => b.id === id);
   const horarios = () => Object.fromEntries(B.barberos.map((b) => [b.id, b.horario]));
   const servicio = (id) => B.servicios.find((s) => s.id === id);
-  const ACTIVA = ['esperando_abono', 'por_aprobar', 'agendada', 'confirmada'];
+  const ACTIVA = ['esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada'];
+  const REVISION = ['en_revision', 'por_aprobar'];
+  const tiene = (k) => K.barberiaTiene(k);
+  const estrellas = (n) => n && n.total ? '<span class="nota">' + n.promedio + '</span>' : '';
+  const alertaNegra = (ln) => ln ? '<div class="alerta-negra">⚠️ <span>Lista negra' + (ln.motivo ? ': ' + esc(ln.motivo) : '') + '</span></div>' : '';
 
   async function cargarBarberia() { B = await K.rpc('ver_barberia'); }
   async function cargarDatos(desde, hasta, forzar) {
@@ -34,7 +38,7 @@
 
   /* ---------- Navegación ---------- */
   let vistaActual = 'hoy';
-  const VISTAS = { hoy, agenda, caja, chat: () => Chat.montar($('v-chat')), mas };
+  const VISTAS = { hoy, agenda, clientes: pintarClientes, chat: () => Chat.montar($('v-chat')), mas };
   function mostrar(v) {
     vistaActual = v;
     document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-' + v));
@@ -42,7 +46,7 @@
     scrollTo(0, 0);
     VISTAS[v]();
   }
-  const refrescarVista = () => { if (vistaActual === 'hoy') hoy(); else if (vistaActual === 'agenda') pintarAgenda(true); };
+  const refrescarVista = () => { if (vistaActual === 'hoy') hoy(); else if (vistaActual === 'agenda') pintarAgenda(true); else if (vistaActual === 'clientes') pintarClientes(); };
   document.querySelectorAll('nav.tabs button').forEach((b) => b.onclick = () => { history.replaceState(null, '', '#' + b.dataset.v); mostrar(b.dataset.v); });
   function ruta() {
     const h = decodeURIComponent(location.hash.slice(1));
@@ -51,73 +55,130 @@
     if (v === 'agenda' && q.get('r')) { mostrar('agenda'); abrirReserva(q.get('r')); return; }
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
-    if (v === 'plan' || v === 'clientes' || v === 'perfil' || v === 'equipo' || v === 'servicios' || v === 'ajustes' || v === 'estadisticas' || v === 'ofertas') {
-      mostrar('mas'); abrirSeccion(v); return;
+    if (['plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace'].includes(v)) {
+      mostrar('mas'); abrirSeccion(v === 'ajustes' ? 'negocio' : v); return;
     }
     mostrar(VISTAS[v] ? v : 'hoy');
   }
   addEventListener('hashchange', ruta);
 
-  /* ---------- Hoy ---------- */
+  /* ---------- Inicio: lo urgente, lo que falta configurar, link y plan ---------- */
   async function hoy() {
     const el = $('v-hoy');
     const f = C.hoy();
-    let d;
-    try { d = await cargarDatos(C.sumarDias(f, -1), C.sumarDias(f, 30), true); } catch (e) { el.innerHTML = '<div class="card err">' + esc(e.message) + '</div>'; return; }
+    let d, P2 = { revision: [], devoluciones: [] };
+    try {
+      [d, P2] = await Promise.all([cargarDatos(C.sumarDias(f, -1), C.sumarDias(f, 30), true), K.rpc('mis_pendientes')]);
+    } catch (e) { el.innerHTML = '<div class="card err">' + esc(e.message) + '</div>'; return; }
     const mias = (r) => dueno() || r.barbero_id === yo.id;
-    const pend = d.reservas.filter((r) => r.detalle && mias(r) && (r.estado === 'agendada' || r.estado === 'por_aprobar') && new Date(r.fin) > new Date())
-      .sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
     const deHoy = d.reservas.filter((r) => r.detalle && mias(r) && C.fechaDe(r.inicio) === f && r.estado !== 'anulada').sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
     const esperando = d.reservas.filter((r) => r.detalle && mias(r) && r.estado === 'esperando_abono');
     let caja = [];
-    try { caja = await K.rpc('ver_caja', { p_desde: f, p_hasta: f, p_barbero: dueno() && premium() ? null : yo.id }); } catch (e) { /* nada */ }
-    const totalCaja = caja.reduce((t, k) => t + k.monto + k.propina, 0);
+    try { caja = await K.rpc('ver_caja', { p_desde: f, p_hasta: f, p_barbero: dueno() && tiene('caja_reportes') ? null : yo.id }); } catch (e) { /* nada */ }
+    const b = bar();
     let html = '';
-    if (yo.clave_temporal) html += '<div class="banner alerta"><div class="grow"><b>🔑 Cambia tu clave temporal</b> en Más → Mi perfil.</div></div>';
+    if (yo.clave_temporal) html += '<div class="banner alerta"><div class="grow"><b>🔑 Cambia tu clave temporal</b> en Más → Mi cuenta.</div></div>';
     html += '<div class="card"><div class="flex">' + C.avatar(yo, 'lg') + '<div class="grow"><h2 style="margin:0">Hola, ' + esc(yo.nombre.split(' ')[0]) + ' 💈</h2>' +
-      '<div class="muted">' + C.fechaLarga(f) + '</div></div></div>' +
+      '<div class="muted">' + C.fechaLarga(f) + (dueno() && b.calificacion && b.calificacion.total ? ' · ' + estrellas(b.calificacion) + ' <span class="chico">(' + b.calificacion.total + ')</span>' : '') + '</div></div></div>' +
       '<label class="check" style="margin-top:14px"><input type="checkbox" id="chkAgenda"' + (yo.agenda_abierta ? ' checked' : '') + '> <span><b>Mi agenda abierta a clientes</b><br><span class="muted chico">' +
-        'Desmárcala cuando estés lleno: los clientes te verán con "agenda llena" y podrán reservar con otro barbero o escribirte por el chat.</span></span></label></div>';
+        'Desmárcala cuando estés lleno: los clientes te verán con "agenda llena" y podrán reservar con otro barbero.</span></span></label></div>';
     html += '<div class="stats"><div class="card"><small>Horas hoy</small><b>' + deHoy.length + '</b></div>' +
-      '<div class="card"><small>Por confirmar</small><b style="color:var(--consultar)">' + pend.length + '</b></div>' +
+      '<div class="card"><small>Abonos por revisar</small><b style="color:var(--consultar)">' + P2.revision.length + '</b></div>' +
       '<div class="card"><small>Atendidas hoy</small><b>' + deHoy.filter((r) => r.estado === 'atendida').length + '</b></div>' +
-      '<div class="card"><small>Caja de hoy</small><b>' + C.plata(totalCaja) + '</b></div></div>';
-    if (pend.length) {
-      html += '<div class="sec-tit">🔔 Por confirmar (' + pend.length + ')</div>' + pend.map((r) =>
-        '<div class="card pend"><div class="flex"><div class="grow"><b>' + esc(r.cliente) + (r.cliente_premium ? ' <span class="pill oro">⭐</span>' : '') + '</b>' +
+      (dueno() ? '<div class="card"><small>Caja de hoy</small><b>' + C.plata(caja.reduce((t, k) => t + (k.monto || 0) + (k.propina || 0), 0)) + '</b></div>'
+        : '<div class="card"><small>Mis cortes hoy</small><b>' + caja.length + '</b></div>') + '</div>';
+    // 1. Abonos por revisar (lo más urgente)
+    if (P2.revision.length) {
+      html += '<div class="sec-tit">🧾 Abonos por revisar (' + P2.revision.length + ')</div>' + P2.revision.map((r) =>
+        '<div class="card urgente' + (r.lista_negra ? ' negra' : '') + '"><div class="flex"><div class="grow"><b>' + esc(r.cliente) + (r.invitado ? ' <span class="pill">sin cuenta</span>' : '') +
+        (r.cliente_premium ? ' <span class="pill oro">⭐</span>' : '') + ' ' + estrellas(r.nota_cliente) + '</b>' +
         '<div class="sub muted">' + C.cuando(r.inicio) + ' · ' + esc(r.servicios.map((s) => s.nombre).join(' + ')) + (dueno() ? ' · ' + esc((barbero(r.barbero_id) || {}).nombre || '') : '') + '</div>' +
-        '<div style="margin-top:4px">' + A.estadoPill(r.estado) + (r.tiene_comprobante ? ' <span class="pill info">🧾 comprobante</span>' : r.pagado_con === 'saldo' ? ' <span class="pill ok">saldo a favor</span>' : '') + '</div></div></div>' +
-        '<div class="btns"><button class="ok small" data-conf="' + r.id + '">✅ ' + (r.estado === 'por_aprobar' ? 'Aprobar' : 'Confirmar') + '</button>' +
-        (r.tiene_comprobante ? '<button class="small gris" data-comp="' + r.id + '">🧾 Ver comprobante</button>' : '') +
-        '<button class="small gris" data-ver="' + r.id + '">Ver</button></div></div>').join('');
+        '<div class="sub muted">Comprobante enviado ' + (r.comprobante_at ? C.hace(r.comprobante_at) : '') + (r.abono ? ' · abono ' + C.plata(r.abono) : '') + ' · ' + (r.pagado_con === 'link' ? 'link de pago' : 'transferencia') + '</div></div></div>' +
+        alertaNegra(r.lista_negra) +
+        '<div class="btns">' + (r.tiene_comprobante ? '<button class="small gris" data-comp="' + r.id + '">🧾 Ver comprobante</button>' : '') +
+        '<button class="ok small" data-aprobar="' + r.id + '">✅ Aprobar</button><button class="small danger" data-rechazar="' + r.id + '">Rechazar</button>' +
+        (r.cliente_tel ? '<a class="btn small wsp" target="_blank" rel="noopener" href="' + C.wa(r.cliente_tel, 'Hola ' + r.cliente.split(' ')[0] + ', te escribo de ' + b.nombre + ' por tu abono del ' + C.cuando(r.inicio)) + '">WhatsApp</a>' : '') +
+        '</div></div>').join('') + '<p class="muted chico">Revisa que la transferencia llegó a tu cuenta y toca Aprobar: la hora queda agendada y el cliente lo ve al tiro.</p>';
     }
-    if (esperando.length) html += '<p class="muted chico">⏳ ' + esperando.length + ' hora(s) apartada(s) esperando que el cliente abone (se liberan solas a los 15 min).</p>';
+    // 2. Devoluciones pendientes (dueño)
+    if (P2.devoluciones.length) {
+      html += '<div class="sec-tit">💸 Devoluciones pendientes (' + P2.devoluciones.length + ')</div>' + P2.devoluciones.map((r) =>
+        '<div class="card urgente"><div class="flex"><div class="grow"><b>' + esc(r.cliente) + ' · ' + C.plata(r.abono) + '</b><div class="sub muted">Anuló ' + (r.anulada_at ? C.hace(r.anulada_at) : '') +
+        ' su hora del ' + C.cuando(r.inicio) + ' dentro del plazo de devolución.</div></div></div>' +
+        '<div class="btns">' + (r.tiene_comprobante ? '<button class="small gris" data-comp="' + r.id + '">🧾 Comprobante</button>' : '') +
+        (r.cliente_tel ? '<a class="btn small wsp" target="_blank" rel="noopener" href="' + C.wa(r.cliente_tel, 'Hola ' + r.cliente.split(' ')[0] + ', te devolvemos tu abono de ' + C.plata(r.abono) + '. ¿A qué cuenta te lo transferimos?') + '">WhatsApp</a>' : '') +
+        '<button class="ok small" data-devuelto="' + r.id + '">✓ Ya lo devolví</button></div></div>').join('');
+    }
+    if (esperando.length) html += '<p class="muted chico">⏳ ' + esperando.length + ' hora(s) apartada(s) esperando que el cliente pague y suba el comprobante (se liberan solas a los ' + K.regla('minutos_pago') + ' min).</p>';
+    // 3. Lo que falta configurar (dueño)
+    if (dueno()) {
+      const falta = [
+        [!!b.logo, '📷 Sube tu logo', 'negocio'],
+        [B.servicios.length > 0, '✂️ Agrega tus servicios con precio', 'servicios'],
+        [!!((b.pagos && (b.pagos.p1.link || (b.pagos.p2 && b.pagos.p2.link))) || b.datos_transferencia), '💳 Pon tu link de pago o datos de transferencia del abono', 'links'],
+        [!!b.whatsapp, '💬 Pon el WhatsApp de la barbería', 'negocio'],
+        [!!b.direccion, '📍 Pon tu dirección', 'negocio']
+      ];
+      const pend = falta.filter((x) => !x[0]).length;
+      if (pend) html += '<div class="card"><h2>🧩 Lo que te falta configurar <span class="grow"></span><span class="pill warn">' + pend + '</span></h2>' +
+        '<p class="muted chico" style="margin-top:-6px">' + esc(K.texto('bienvenida_barberia', '')) + '</p><ul class="list checklist">' + falta.map((x) =>
+        '<li class="' + (x[0] ? 'hecho' : 'tap') + '"' + (x[0] ? '' : ' data-ir="' + x[2] + '"') + '><span class="ok">' + (x[0] ? '✓' : '○') + '</span><span class="t grow">' + x[1] + '</span>' + (x[0] ? '' : '<span>›</span>') + '</li>').join('') + '</ul></div>';
+    }
+    // 4. Hoy
     html += '<div class="sec-tit">📅 Hoy</div>';
     html += deHoy.length ? '<div class="card"><ul class="list">' + deHoy.map((r) =>
       '<li class="tap" data-ver="' + r.id + '"><div style="width:52px;font-weight:800;font-variant-numeric:tabular-nums">' + C.horaDe(r.inicio) + '</div>' +
-      '<div class="grow"><b>' + esc(r.cliente) + '</b><div class="sub">' + esc(r.servicios.map((s) => s.nombre).join(' + ') || r.nota || '') +
+      '<div class="grow"><b>' + esc(r.cliente) + (r.lista_negra ? ' ⚠️' : '') + '</b><div class="sub">' + esc(r.servicios.map((s) => s.nombre).join(' + ') || r.nota || '') +
       (dueno() && B.barberos.length > 1 ? ' · ' + esc((barbero(r.barbero_id) || {}).nombre || '') : '') + '</div></div>' + A.estadoPill(r.estado) + '</li>').join('') + '</ul></div>'
       : '<div class="card empty"><span class="ico">☕</span>No hay horas para hoy.</div>';
-    html += '<div class="btns"><button class="alt" id="bHoraHoy">+ Agendar una hora</button>' + (dueno() ? '<button class="gris" id="bLink">🔗 Enlace para clientes</button>' : '') + '</div>';
+    html += '<div class="btns"><button class="alt" id="bHoraHoy">+ Agendar una hora</button></div>';
+    // 5. Link, QR y plan (dueño)
+    if (dueno()) {
+      html += '<div class="card"><h2>🔗 Tu link para clientes</h2><p class="muted chico" style="margin-top:-6px">Con este link o el QR tus clientes reservan sin cuenta o se crean la cuenta.</p>' +
+        '<input readonly value="' + esc(linkClientes()) + '"><div class="btns"><button class="small" id="bCopiarLink">📋 Copiar</button><button class="small gris" id="bQR">🔳 Ver QR</button>' +
+        '<a class="btn small wsp" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent('💈 Reserva tu hora en ' + b.nombre + ': ' + linkClientes()) + '">💬 Compartir</a></div></div>';
+      html += '<div class="card ' + (premium() ? 'oro-marco' : '') + ' tap" id="cPlan"><div class="flex"><span style="font-size:28px">' + (premium() ? '⭐' : '💎') + '</span><div class="grow"><b>' +
+        (premium() ? 'Premium hasta el ' + P.fechaCorta(b.premium_until) : 'Plan Free') + '</b><div class="sub muted">' + (premium() ? 'Toca para renovar' : 'Toca para ver Premium') + '</div></div><span>›</span></div></div>';
+    }
     el.innerHTML = html;
-    el.querySelectorAll('[data-conf]').forEach((x) => x.onclick = (ev) => C.accion(ev.target, async () => {
-      await K.rpc('confirmar_hora', { p_reserva: x.dataset.conf }); K.despertarEnvios(); Avisos.actualizar(); hoy();
-    }, '✅ Confirmada. Le avisamos al cliente'));
+    el.querySelectorAll('[data-aprobar]').forEach((x) => x.onclick = (ev) => C.accion(ev.target, async () => {
+      await K.rpc('confirmar_hora', { p_reserva: x.dataset.aprobar }); K.despertarEnvios(); Avisos.actualizar(); hoy();
+    }, '✅ Aprobada: la hora quedó agendada'));
+    el.querySelectorAll('[data-rechazar]').forEach((x) => x.onclick = () => rechazar(x.dataset.rechazar, true, () => { Avisos.actualizar(); hoy(); }));
+    el.querySelectorAll('[data-devuelto]').forEach((x) => x.onclick = (ev) => C.accion(ev.target, async () => {
+      await K.rpc('marcar_devuelto', { p_reserva: x.dataset.devuelto }); Avisos.actualizar(); hoy();
+    }, '💸 Marcado como devuelto'));
     el.querySelectorAll('[data-comp]').forEach((x) => x.onclick = () => verComprobante(x.dataset.comp));
     el.querySelectorAll('[data-ver]').forEach((x) => x.onclick = () => abrirReserva(x.dataset.ver));
+    el.querySelectorAll('[data-ir]').forEach((x) => x.onclick = () => { mostrar('mas'); abrirSeccion(x.dataset.ir); });
     if ($('chkAgenda')) $('chkAgenda').onchange = async (e) => {
       try { await K.rpc('set_agenda_abierta', { p_abierta: e.target.checked }); yo.agenda_abierta = e.target.checked; await cargarBarberia(); C.toast(e.target.checked ? '🟢 Agenda abierta' : '🔴 Agenda llena: no te pueden reservar'); }
       catch (err) { C.toast('⚠️ ' + err.message); e.target.checked = !e.target.checked; }
     };
-    $('bHoraHoy').onclick = () => nuevaHora(dueno() && !yo.agenda_abierta && B.barberos.length > 1 ? yo.id : yo.id, f, null);
-    if ($('bLink')) $('bLink').onclick = enlaceClientes;
+    $('bHoraHoy').onclick = () => nuevaHora(yo.id, f, null);
+    if ($('bCopiarLink')) $('bCopiarLink').onclick = () => C.copiar(linkClientes());
+    if ($('bQR')) $('bQR').onclick = enlaceClientes;
+    if ($('cPlan')) $('cPlan').onclick = () => { mostrar('mas'); abrirSeccion('plan'); };
     Avisos.invitarPush(el);
   }
+
+  // Rechazar el comprobante (con motivo: la hora se libera) o anular una hora agendada (el abono queda a favor).
+  async function rechazar(id, revision, despues) {
+    const motivo = await C.pedir(revision ? '❌ Rechazar comprobante' : 'Anular hora', {
+      texto: revision ? 'La hora se libera y el cliente ve el motivo. ¿Por qué lo rechazas?' : 'El cliente recibirá un aviso y su abono quedará a favor. Motivo (opcional):',
+      placeholder: revision ? 'Ej: No llegó la transferencia' : 'Ej: Ese día no trabajo' });
+    if (motivo === null) return;
+    if (revision && !motivo) return C.toast('Escribe el motivo del rechazo');
+    try { await K.rpc('rechazar_hora', { p_reserva: id, p_motivo: motivo }); K.despertarEnvios(); rango = ''; C.toast(revision ? 'Comprobante rechazado: la hora quedó libre' : 'Hora anulada'); despues && despues(); }
+    catch (e) { C.toast('⚠️ ' + e.message, 4000); }
+  }
+
+  const linkClientes = () => C.raiz() + '?b=' + bar().codigo;
 
   /* ---------- Agenda ---------- */
   let vista = 'dia', fechaSel = C.hoy(), quien = null, verAnuladas = false;
   function agenda() {
-    if (!quien) quien = dueno() && premium() && B.barberos.length > 1 ? '*' : yo.id;
+    if (!quien) quien = dueno() && tiene('vista_todos') && B.barberos.length > 1 ? '*' : yo.id;
     pintarAgenda();
   }
   async function pintarAgenda(forzar) {
@@ -131,7 +192,7 @@
       '<div class="btns" style="margin-top:0"><button class="small" id="cNueva">+ Hora</button><button class="small gris" id="cBloq">⛔ Bloquear</button>' +
       '<label class="check" style="margin:0 0 0 auto;font-size:13.5px"><input type="checkbox" id="cAnul"' + (verAnuladas ? ' checked' : '') + '> anuladas</label></div></div><div id="calZona"></div>';
     el.innerHTML = html;
-    if (!premium() && dueno()) {
+    if (!tiene('vista_todos') && dueno()) {
       const t = el.querySelector('[data-q="*"]'); if (t) P.bloquear(t, 'Vista "Todos" en columnas');
       P.bloquear(el.querySelector('[data-vi="anio"]'), 'Vista Año');
     } else if (!dueno()) {
@@ -205,25 +266,33 @@
     const b = barbero(r.barbero_id) || {};
     const puede = dueno() || r.barbero_id === yo.id;
     const activa = ACTIVA.includes(r.estado);
-    const cli = r.cliente_id ? { nombre: r.cliente, avatar: r.cliente_avatar } : { nombre: r.cliente, avatar: '🚶' };
-    const h = C.hoja('<h2>' + C.avatar(cli, 'sm' + (r.cliente_premium ? ' premium' : '')) + ' ' + esc(r.cliente) + (r.cliente_premium ? ' <span class="pill oro">⭐ Premium</span>' : '') + '</h2>' +
-      '<div style="margin-bottom:10px">' + A.estadoPill(r.estado) + (r.consultar ? ' <span class="pill warn">día a consultar</span>' : '') + '</div>' +
+    const revision = REVISION.includes(r.estado);
+    const plata = dueno();
+    const cli = r.cliente_id ? { nombre: r.cliente, avatar: r.cliente_avatar } : { nombre: r.cliente, avatar: r.invitado ? '👤' : '🚶' };
+    const h = C.hoja('<h2>' + C.avatar(cli, 'sm' + (r.cliente_premium ? ' premium' : '')) + ' ' + esc(r.cliente) + (r.cliente_premium ? ' <span class="pill oro">⭐ Premium</span>' : '') +
+      (r.invitado ? ' <span class="pill">sin cuenta</span>' : '') + '</h2>' +
+      '<div style="margin-bottom:10px">' + A.estadoPill(r.estado) + (r.nota_cliente ? ' ' + estrellas(r.nota_cliente) + ' <span class="muted chico">(' + r.nota_cliente.total + ')</span>' : '') + '</div>' +
+      alertaNegra(r.lista_negra) +
       '<div class="det-fila"><span>📅 Cuándo</span><b>' + C.cuando(r.inicio) + '–' + C.horaDe(r.fin) + '</b></div>' +
       '<div class="det-fila"><span>💈 Barbero</span><b>' + esc(b.nombre || '') + '</b></div>' +
       '<div class="det-fila"><span>✂️ Servicios</span><b style="text-align:right">' + esc(r.servicios.map((s) => s.nombre).join(' + ') || '—') + '</b></div>' +
-      '<div class="det-fila"><span>💵 Total</span><b>' + C.plata(r.total) + '</b></div>' +
-      '<div class="det-fila"><span>💳 Abono</span><b>' + (r.pagado_con === 'interno' ? 'Agendada por la barbería' : r.estado === 'esperando_abono' ? 'Esperando (' + C.plata(r.abono) + ')' :
-        C.plata(r.abono) + ' · ' + ({ link: 'link de pago', transferencia: 'transferencia', saldo: 'saldo a favor' }[r.pagado_con] || '—')) + '</b></div>' +
-      (r.pagado_con !== 'interno' && r.abono ? '<div class="det-fila"><span>Cobrar en el local</span><b>' + C.plata(Math.max(0, r.total - (r.estado === 'esperando_abono' ? 0 : r.abono))) + '</b></div>' : '') +
+      (r.cliente_tel ? '<div class="det-fila"><span>📱 WhatsApp</span><b>' + esc(r.cliente_tel) + '</b></div>' : '') +
+      (plata ? '<div class="det-fila"><span>💵 Total</span><b>' + C.plata(r.total) + '</b></div>' : '') +
+      '<div class="det-fila"><span>💳 Abono</span><b>' + (r.pagado_con === 'interno' ? 'Agendada por la barbería' : r.estado === 'esperando_abono' ? 'Esperando que pague' :
+        (plata ? C.plata(r.abono) + ' · ' : '') + ({ link: 'link de pago', transferencia: 'transferencia', saldo: 'saldo a favor' }[r.pagado_con] || '—') + (revision ? ' · en revisión' : '')) + '</b></div>' +
+      (plata && r.pagado_con !== 'interno' && r.abono ? '<div class="det-fila"><span>Cobrar en el local</span><b>' + C.plata(Math.max(0, r.total - (r.estado === 'esperando_abono' ? 0 : r.abono))) + '</b></div>' : '') +
+      (r.reagendada ? '<div class="det-fila"><span>🔁 Reagendada</span><b>' + r.reagendada + ' vez/veces</b></div>' : '') +
       (r.nota ? '<div class="det-fila"><span>📝 Nota</span><b>' + esc(r.nota) + '</b></div>' : '') +
-      (r.motivo ? '<div class="det-fila"><span>Motivo</span><b>' + esc(r.motivo) + (r.abono_destino ? ' · abono ' + (r.abono_destino === 'saldo' ? 'a favor' : 'perdido') : '') + '</b></div>' : '') +
+      (r.motivo ? '<div class="det-fila"><span>Motivo</span><b>' + esc(r.motivo) + (r.abono_destino ? ' · abono ' + ({ saldo: 'a favor', perdido: 'perdido', devolucion: r.devolucion === 'devuelta' ? 'devuelto' : 'por devolver' }[r.abono_destino]) : '') + '</b></div>' : '') +
       '<div data-avisos class="muted chico" style="margin-top:8px"></div>' +
       '<div class="btns">' +
-      (puede && (r.estado === 'agendada' || r.estado === 'por_aprobar') ? '<button class="ok" data-a="conf">✅ ' + (r.estado === 'por_aprobar' ? 'Aprobar' : 'Confirmar') + '</button>' : '') +
       (r.tiene_comprobante ? '<button class="gris" data-a="comp">🧾 Comprobante</button>' : '') +
-      (puede && ['agendada', 'confirmada', 'por_aprobar', 'atendida', 'no_vino'].includes(r.estado) && new Date(r.inicio) < Date.now() + 30 * 60000 ?
+      (puede && revision ? '<button class="ok" data-a="aprobar">✅ Aprobar</button><button class="danger" data-a="rechazar">Rechazar</button>' : '') +
+      (dueno() && r.devolucion === 'pendiente' ? '<button class="ok" data-a="devuelto">💸 Ya lo devolví</button>' : '') +
+      (puede && ['agendada', 'confirmada', 'en_revision', 'por_aprobar', 'atendida', 'no_vino'].includes(r.estado) && new Date(r.inicio) < Date.now() + 30 * 60000 ?
         '<button data-a="aten">✔️ Atendida</button><button class="gris" data-a="novino">🚫 No vino</button>' : '') +
-      (puede && activa ? '<button class="gris" data-a="mover">🔁 Mover</button><button class="danger" data-a="anular">' + (r.estado === 'por_aprobar' ? 'Rechazar' : 'Anular') + '</button>' : '') +
+      (puede && ['atendida', 'no_vino'].includes(r.estado) && !r.calificado && (r.cliente_id || r.cliente_tel) ? '<button class="alt" data-a="calificar">⭐ Calificar al cliente</button>' : '') +
+      (puede && activa ? '<button class="gris" data-a="mover">🔁 Mover</button>' + (!revision ? '<button class="danger" data-a="anular">Anular</button>' : '') : '') +
       (r.cliente_id ? '<button class="gris" data-a="chat">💬 Escribir</button>' : '') +
       (r.cliente_tel ? '<a class="btn wsp" target="_blank" rel="noopener" href="' + C.wa(r.cliente_tel, 'Hola ' + r.cliente.split(' ')[0] + ', te escribo de ' + bar().nombre + ' por tu hora del ' + C.cuando(r.inicio)) + '">WhatsApp</a>' : '') +
       '</div>');
@@ -236,33 +305,59 @@
     h.qa('[data-a]').forEach((btn) => btn.onclick = async () => {
       const a = btn.dataset.a;
       try {
-        if (a === 'conf') { await C.accion(btn, () => K.rpc('confirmar_hora', { p_reserva: r.id })); fin('✅ Confirmada. Le avisamos al cliente'); }
+        if (a === 'aprobar') { await C.accion(btn, () => K.rpc('confirmar_hora', { p_reserva: r.id })); fin('✅ Aprobada: la hora quedó agendada'); }
+        if (a === 'rechazar') { h.cerrar(); rechazar(r.id, true, () => { Avisos.actualizar(); refrescarVista(); }); }
+        if (a === 'anular') { h.cerrar(); rechazar(r.id, false, () => { Avisos.actualizar(); refrescarVista(); }); }
+        if (a === 'devuelto') { await K.rpc('marcar_devuelto', { p_reserva: r.id }); fin('💸 Marcado como devuelto'); }
         if (a === 'comp') verComprobante(r.id);
         if (a === 'chat') { h.cerrar(); mostrar('chat'); Chat.abrir(r.cliente_id, { nombre: r.cliente, avatar: r.cliente_avatar, rol: 'client' }, r.id); }
-        if (a === 'novino') { if (await C.confirmar('Marcar que ' + r.cliente + ' no vino. Su abono se pierde.', { si: 'No vino' })) { await K.rpc('marcar_hora', { p_reserva: r.id, p_estado: 'no_vino' }); fin('Marcado como "No vino"'); } }
-        if (a === 'aten') atendida(r, fin);
-        if (a === 'anular') {
-          const motivo = await C.pedir(r.estado === 'por_aprobar' ? 'Rechazar solicitud' : 'Anular hora', { texto: 'El cliente recibirá un aviso' + (r.pagado_con !== 'interno' && r.estado !== 'esperando_abono' ? ' y su abono quedará a favor' : '') + '. Motivo (opcional):', placeholder: 'Ej: Ese día no trabajo' });
-          if (motivo === null) return;
-          await K.rpc('rechazar_hora', { p_reserva: r.id, p_motivo: motivo }); fin('Hora anulada');
+        if (a === 'novino') {
+          if (await C.confirmar('Marcar que ' + r.cliente + ' no vino. Su abono se pierde.', { si: 'No vino' })) {
+            await K.rpc('marcar_hora', { p_reserva: r.id, p_estado: 'no_vino' }); fin('Marcado como "No vino"');
+            if (!r.calificado && (r.cliente_id || r.cliente_tel)) calificarCliente(r, 'No vino');
+          }
         }
+        if (a === 'aten') atendida(r, fin);
+        if (a === 'calificar') { h.cerrar(); calificarCliente(r); }
         if (a === 'mover') moverHora(r, fin);
       } catch (e) { C.toast('⚠️ ' + e.message, 4000); }
     });
   }
 
   function atendida(r, fin) {
+    const plata = dueno();
     const resto = Math.max(0, r.total - (['link', 'transferencia', 'saldo'].includes(r.pagado_con) ? r.abono : 0));
-    const h = C.hoja('<h2>✔️ Atendida</h2><p>Queda anotada en tu caja: <b>' + C.plata(r.total) + '</b>' + (resto !== r.total ? ' (abono ' + C.plata(r.abono) + ' ya recibido; cobras ' + C.plata(resto) + ')' : '') + '.</p>' +
+    const h = C.hoja('<h2>✔️ Atendida</h2>' + (plata ? '<p>Queda anotada en la caja: <b>' + C.plata(r.total) + '</b>' + (resto !== r.total ? ' (abono ' + C.plata(r.abono) + ' ya recibido; cobras ' + C.plata(resto) + ')' : '') + '.</p>'
+      : '<p>Queda anotada en tu caja.</p>') +
       '<label>¿Cómo pagó el resto?</label><div class="seg" data-medio><button class="on" data-m="efectivo">💵 Efectivo</button><button data-m="transferencia">🏦 Transferencia</button></div>' +
-      '<label>Propina <span class="opc">(opcional)</span></label><input type="number" inputmode="numeric" min="0" data-prop placeholder="0">' +
+      (plata ? '<label>Propina <span class="opc">(opcional)</span></label><input type="number" inputmode="numeric" min="0" data-prop placeholder="0">' : '') +
       '<div class="btns"><button class="full" data-ok>Guardar</button></div>');
     let medio = 'efectivo';
     h.qa('[data-m]').forEach((b) => b.onclick = () => { medio = b.dataset.m; h.qa('[data-m]').forEach((x) => x.classList.toggle('on', x === b)); });
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
-      await K.rpc('marcar_hora', { p_reserva: r.id, p_estado: 'atendida', p_medio: medio, p_propina: +h.q('[data-prop]').value || 0 });
+      await K.rpc('marcar_hora', { p_reserva: r.id, p_estado: 'atendida', p_medio: medio, p_propina: h.q('[data-prop]') ? (+h.q('[data-prop]').value || 0) : 0 });
       h.cerrar(); fin('✔️ Atendida y anotada en la caja');
+      if (!r.calificado && (r.cliente_id || r.cliente_tel)) calificarCliente(r);
     });
+  }
+
+  // Calificar al cliente (una vez por visita). Con pocas estrellas queda en la lista negra de la barbería.
+  const MOTIVOS = ['Excelente cliente', 'Puntual', 'Llegó tarde', 'No vino', 'Canceló a última hora', 'Mala actitud'];
+  function calificarCliente(r, motivo) {
+    let n = motivo === 'No vino' ? 1 : 0, mot = motivo || '';
+    const lim = K.regla('estrellas_lista_negra');
+    const h = C.hoja('<h2>⭐ Califica a ' + esc(r.cliente.split(' ')[0]) + '</h2><p class="muted" style="margin-top:-6px">Solo lo ve tu barbería. Con ' + lim + ' estrella' + (lim === 1 ? '' : 's') + ' o menos queda en la lista negra.</p>' +
+      '<div class="centro"><div class="estrellas grande">' + [1, 2, 3, 4, 5].map((i) => '<button type="button" data-n="' + i + '" class="' + (i <= n ? 'on' : '') + '">★</button>').join('') + '</div></div>' +
+      '<div class="chips" style="flex-wrap:wrap;margin-top:8px">' + MOTIVOS.map((m) => '<button type="button" class="chip' + (m === mot ? ' on' : '') + '" data-mot="' + esc(m) + '">' + esc(m) + '</button>').join('') + '</div>' +
+      '<input data-c maxlength="300" placeholder="Comentario (opcional)" style="margin-top:10px">' +
+      '<div class="btns"><button class="full" data-ok' + (n ? '' : ' disabled') + '>Guardar</button><button class="gris" data-luego>Ahora no</button></div>');
+    h.qa('[data-n]').forEach((b) => b.onclick = () => { n = +b.dataset.n; h.qa('[data-n]').forEach((x) => x.classList.toggle('on', +x.dataset.n <= n)); h.q('[data-ok]').disabled = false; });
+    h.qa('[data-mot]').forEach((b) => b.onclick = () => { mot = mot === b.dataset.mot ? '' : b.dataset.mot; h.qa('[data-mot]').forEach((x) => x.classList.toggle('on', x.dataset.mot === mot)); });
+    h.q('[data-luego]').onclick = () => h.cerrar();
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      await K.rpc('calificar_cliente', { p_reserva: r.id, p_estrellas: n, p_motivo: mot, p_comentario: h.q('[data-c]').value });
+      h.cerrar(); rango = ''; clientes = null; refrescarVista();
+    }, n <= lim ? '⚠️ Calificado: quedó en la lista negra' : '⭐ Calificado');
   }
 
   function moverHora(r, fin) {
@@ -281,8 +376,9 @@
   async function verComprobante(id) {
     try {
       const img = await K.rpc('ver_comprobante', { p_reserva: id });
-      if (!img) return C.toast('El comprobante ya no está (se borran a los 30 días)');
-      const h = C.hoja('<h2>🧾 Comprobante</h2><img src="' + img + '" alt="Comprobante" style="width:100%;border-radius:12px">');
+      if (!img) return C.toast('El comprobante ya no está (se borran a los ' + K.regla('dias_comprobantes') + ' días)');
+      const h = C.hoja('<h2>🧾 Comprobante</h2><img src="' + img + '" alt="Comprobante" class="comp-img">' +
+        '<div class="btns"><a class="btn gris" download="comprobante.jpg" href="' + img + '">⬇️ Descargar</a></div>');
       h.q('.panel').style.maxWidth = '720px';
     } catch (e) { C.toast('⚠️ ' + e.message); }
   }

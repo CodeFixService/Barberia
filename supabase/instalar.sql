@@ -2403,6 +2403,31 @@ begin
       from (select * from public.calificaciones where barberia_id = me.barberia_id and autor = 'cliente' order by created_at desc limit 50) q));
 end $$;
 
+-- Lo urgente para el Inicio de la barbería: abonos por revisar y devoluciones pendientes (dueño).
+create or replace function public.mis_pendientes() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  return jsonb_build_object(
+    'revision', (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'inicio', r.inicio, 'fin', r.fin, 'barbero_id', r.barbero_id,
+        'cliente', coalesce(c.nombre, r.cliente_nombre, 'Cliente'), 'cliente_id', r.cliente_id, 'cliente_tel', coalesce(c.telefono, r.cliente_tel),
+        'invitado', r.cliente_id is null, 'cliente_premium', public.is_premium(c.id),
+        'servicios', (select coalesce(jsonb_agg(x - 'precio'), '[]'::jsonb) from jsonb_array_elements(r.servicios) x),
+        'abono', case when me.role = 'owner' then r.abono end, 'pagado_con', r.pagado_con, 'comprobante_at', r.comprobante_at,
+        'tiene_comprobante', r.comprobante is not null,
+        'lista_negra', public.en_lista_negra(r.barberia_id, r.cliente_id, coalesce(c.telefono, r.cliente_tel)),
+        'nota_cliente', public.nota_cliente(r.barberia_id, r.cliente_id, coalesce(c.telefono, r.cliente_tel))) order by r.inicio), '[]'::jsonb)
+      from public.reservas r left join public.profiles c on c.id = r.cliente_id
+      where r.barberia_id = me.barberia_id and r.estado in ('en_revision', 'por_aprobar') and (me.role = 'owner' or r.barbero_id = me.id)),
+    'devoluciones', case when me.role = 'owner' then (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'inicio', r.inicio,
+        'cliente', coalesce(c.nombre, r.cliente_nombre, 'Cliente'), 'cliente_tel', coalesce(c.telefono, r.cliente_tel), 'abono', r.abono,
+        'anulada_at', r.anulada_at, 'pagado_con', r.pagado_con, 'tiene_comprobante', r.comprobante is not null) order by r.anulada_at), '[]'::jsonb)
+      from public.reservas r left join public.profiles c on c.id = r.cliente_id
+      where r.barberia_id = me.barberia_id and r.devolucion = 'pendiente') else '[]'::jsonb end);
+end $$;
+
 -- Recordar al barbero (y luego al dueño) los comprobantes que esperan revisión.
 create or replace function public.recordar_revisiones() returns int
 language plpgsql security definer set search_path = '' as $$

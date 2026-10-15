@@ -7,7 +7,8 @@ const FILES = [
   'shared/agenda.js', 'shared/perfil.js', 'shared/vendor/supabase.js', 'shared/vendor/qrcode.js',
   'cliente/', 'cliente/index.html', 'cliente/cliente.js',
   'equipo/', 'equipo/index.html', 'equipo/equipo.js',
-  'admin/', 'admin/index.html', 'admin/admin.js'
+  'admin/', 'admin/index.html', 'admin/admin.js',
+  'b/', 'b/index.html', 'b/b.js', 'r/', 'r/index.html', 'r/r.js'
 ];
 
 const META = 'meta';

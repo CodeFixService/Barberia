@@ -3,7 +3,7 @@
   'use strict';
   const C = global.Core;
   const esc = C.esc;
-  const ACTIVAS = ['esperando_abono', 'por_aprobar', 'agendada', 'confirmada', 'ocupado'];
+  const ACTIVAS = ['esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada', 'ocupado'];
   const PASO = 15;
 
   const diaHorario = (horario, f) => (horario && horario[C.dow(f) - 1]) || { e: 'x' };
@@ -43,7 +43,7 @@
     for (let m = ini; m + o.dur <= fin; m += PASO) {
       if (ci !== null && m < cf && m + o.dur > ci) continue;
       const t = C.instante(o.f, C.aHHMM(m));
-      let estado = d.e === 'c' ? 'consultar' : 'libre';
+      let estado = 'libre';
       const choque = occ.find((x) => m < x.b && m + o.dur > x.a);
       if (choque) estado = choque.r && choque.r.mia && choque.a === m ? 'mia' : 'ocupado';
       else if (t.getTime() < ahora) estado = 'pasado';
@@ -59,7 +59,6 @@
     barberos.forEach((b) => {
       const d = diaHorario(horarios[b], f);
       if (d.e === 'x') return;
-      if (d.e === 'c') consultar = true;
       let mins = C.aMin(d.f) - C.aMin(d.i);
       if (d.ci && d.cf) mins -= C.aMin(d.cf) - C.aMin(d.ci);
       abiertos += Math.max(0, mins);
@@ -218,11 +217,11 @@
   // Texto de horario de un día: "10:00–20:00 (colación 14:00–15:00)".
   function horarioTxt(d) {
     if (!d || d.e === 'x') return 'Cerrado';
-    return d.i + '–' + d.f + (d.ci ? ' · colación ' + d.ci + '–' + d.cf : '') + (d.e === 'c' ? ' · a consultar' : '');
+    return d.i + '–' + d.f + (d.ci ? ' · colación ' + d.ci + '–' + d.cf : '');
   }
 
   const ESTADOS = {
-    esperando_abono: 'Esperando abono', por_aprobar: 'Por aprobar', agendada: 'Agendada', confirmada: 'Confirmada',
+    esperando_abono: 'Esperando abono', en_revision: 'En revisión', por_aprobar: 'En revisión', agendada: 'Agendada', confirmada: 'Agendada',
     atendida: 'Atendida', no_vino: 'No vino', anulada: 'Anulada'
   };
   const estadoPill = (e) => '<span class="est ' + e + '">' + (ESTADOS[e] || e) + '</span>';

@@ -1,4 +1,4 @@
-/* Mi perfil, Mi plan (Premium con keys mensuales), avisos de "es Premium" y recorrido inicial. */
+/* Mi perfil, Mi plan (Premium con pago y comprobante), avisos de "es Premium" y recorrido inicial. */
 (function (global) {
   'use strict';
   const C = global.Core, K = global.Cuenta;
@@ -6,6 +6,9 @@
 
   // Beneficios Premium con los números que el admin dejó en los planes.
   function beneficios(rol) {
+    // Si el admin escribió los beneficios del plan, se usan esos.
+    const propios = (K.planInfo(rol === 'owner' ? 'barberia' : 'cliente', 'premium').beneficios || []).filter(Boolean);
+    if (propios.length) return propios;
     const L = (q, prem) => K.limite(q, prem);
     const ilim = (n, tope) => (n >= tope ? 'ilimitados' : 'hasta ' + n);
     if (rol === 'owner') {
@@ -38,7 +41,7 @@
     const b = h.q('[data-ir]');
     if (b) b.onclick = () => { h.cerrar(); K.irA('plan'); };
   }
-  const precio = () => K.plan(K.grupoDe((K.cuenta || {}).role), 'precio', true);
+  const precio = () => K.linkPremium(K.grupoDe((K.cuenta || {}).role)).monto;
   // Marca un elemento como Premium bloqueado (plateado con candado).
   function bloquear(el, que) {
     if (!el) return;
@@ -46,56 +49,71 @@
     el.addEventListener('click', (e) => { e.preventDefault(); e.stopImmediatePropagation(); upsell(que); }, true);
   }
 
-  /* ---------- Mi plan ---------- */
+  /* ---------- Mi plan: pagar con el link y subir el comprobante (lo aprueba CodeFix) ---------- */
   async function plan(el) {
     const a = await K.refrescar() || K.cuenta;
     const s = await K.ajustes();
     const grupo = K.grupoDe(a.role);
-    const p = K.plan(grupo, 'precio', true);
-    const link = s['link_pago_' + grupo] || s.link_pago;
-    const prueba = K.plan(grupo, 'prueba_dias', true);
+    const lk = K.linkPremium(grupo);
+    const info = K.planInfo(grupo, 'premium');
+    const dur = info.duracion_dias || 30;
+    const prueba = grupo === 'cliente' ? K.plan('cliente', 'prueba_dias', true) : 0;
     const esDueno = a.role === 'owner';
     const prem = a.is_premium;
-    let html = '<div class="card ' + (prem ? 'oro-marco' : 'upsell') + '"><h2>' + (prem ? '⭐ Eres Premium' : '💎 Hazte Premium') + '</h2>';
+    let pago = null;
+    try { pago = await K.rpc('mi_pago'); } catch (e) { /* sin red */ }
+    const nombre = info.nombre || 'Premium';
+    let html = '<div class="card ' + (prem ? 'oro-marco' : 'upsell') + '"><h2>' + (prem ? '⭐ Eres ' + esc(nombre) : '💎 Hazte ' + esc(nombre)) + '</h2>';
     if (prem && a.premium_until) {
       const q = diasQuedan(a.premium_until);
-      html += '<p style="margin:0">Tu Premium dura hasta el <b>' + fechaCorta(a.premium_until) + '</b><br><span class="' + (q <= 3 ? 'pill warn' : 'muted') + '">' +
+      html += '<p style="margin:0">Tu ' + esc(nombre) + ' dura hasta el <b>' + fechaCorta(a.premium_until) + '</b><br><span class="' + (q <= K.regla('dias_aviso') ? 'pill warn' : 'muted') + '">' +
         (q === 0 ? 'Vence hoy' : 'Quedan ' + q + ' día' + (q === 1 ? '' : 's')) + '</span></p>';
     } else if (!prem) {
-      html += '<div class="precio">' + C.plata(p) + ' <small>/ mes</small></div><p class="muted" style="margin:2px 0 0">' +
-        (esDueno ? 'Para tu barbería y todo tu equipo.' : 'Pago mensual, sin contratos.') + '</p>';
+      html += '<div class="precio">' + C.plata(lk.monto) + ' <small>/ ' + (dur === 30 ? 'mes' : dur + ' días') + '</small></div>' +
+        '<p class="muted" style="margin:2px 0 0">' + esc(info.descripcion || K.texto(esDueno ? 'premium_barberia_texto' : 'premium_cliente_texto')) + '</p>';
     }
     html += '<ul class="feat">' + beneficios(esDueno ? 'owner' : 'client').map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul>';
-    html += '<h3>' + (prem ? 'Renovar (se suma desde tu fecha de término)' : '¿Cómo lo activo?') + '</h3><ol class="muted" style="padding-left:20px;margin:0">' +
-      '<li>Paga ' + C.plata(p) + (link ? ' con el link de pago' : '') + (s.datos_transferencia ? ' o por transferencia' : '') + '.</li>' +
-      '<li>Toca <b>"Ya pagué"</b>: le avisamos a CodeFix.</li><li>Te activan el mes al tiro o te envían una <b>key</b> por WhatsApp.</li></ol>' +
-      '<div class="btns" style="flex-direction:column">' +
-      (link ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(link) + '">💳 Pagar ' + C.plata(p) + '</a>' : '') +
-      (s.datos_transferencia ? '<button class="gris full" data-transf>🏦 Ver datos de transferencia</button>' : '') +
-      '<button class="full" data-pague>✅ Ya pagué</button>' +
-      '<button class="alt full" data-key>🔑 Tengo una key</button>' +
+    if (pago && pago.estado === 'en_revision') {
+      html += '<div class="banner alerta" style="margin-top:12px"><div class="grow"><b>🧾 Tu comprobante está en revisión</b><br><span class="chico">Lo enviaste ' + C.hace(pago.created_at) +
+        '. Te llega un aviso 🔔 apenas CodeFix lo apruebe.</span></div></div>';
+    } else {
+      if (pago && pago.estado === 'rechazado' && Date.now() - new Date(pago.resuelto_at) < 14 * 864e5) {
+        html += '<div class="banner alerta" style="margin-top:12px"><div class="grow"><b>❌ Tu último pago fue rechazado</b><br><span class="chico">' + esc(pago.motivo || '') + '</span></div></div>';
+      }
+      html += '<h3>' + (prem ? 'Renovar (se suma desde tu fecha de término)' : '¿Cómo lo activo?') + '</h3>' +
+        '<p class="muted chico" style="margin-top:0">' + esc(K.texto('pago_instrucciones')) + '</p>' +
+        '<div class="pasos-reserva"><div class="on"><i>1</i>Paga ' + C.plata(lk.monto) + (lk.texto ? ' · ' + esc(lk.texto) : '') + '</div><div class="on"><i>2</i>Sube la foto del comprobante</div><div><i>3</i>Te avisamos cuando se apruebe</div></div>' +
+        '<div class="btns" style="flex-direction:column">' +
+        (lk.url ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(lk.url) + '">💳 Pagar ' + C.plata(lk.monto) + '</a>' : '') +
+        (s.datos_transferencia ? '<button class="gris full" data-transf>🏦 Ver datos de transferencia</button>' : '') +
+        '<button class="alt full" data-foto>📷 Subir comprobante</button><img class="comp-img hidden" data-prev alt="Comprobante">' +
+        '<button class="full ok hidden" data-enviar>✅ Enviar comprobante</button></div>';
+    }
+    html += '<div class="btns" style="flex-direction:column">' +
       (!a.trial_used && !prem && prueba > 0 ? '<button class="ok full" data-prueba>🎁 Probar ' + prueba + ' días gratis</button>' : '') +
-      (s.whatsapp_admin ? '<a class="btn wsp full" target="_blank" rel="noopener" href="' + C.wa(s.whatsapp_admin, 'Hola, quiero Premium para ' + (esDueno ? 'mi barbería ' + ((a.barberia || {}).nombre || '') : 'mi cuenta (' + a.email + ')')) + '">💬 Escribir a CodeFix</a>' : '') +
+      (s.whatsapp_admin ? '<a class="btn wsp full" target="_blank" rel="noopener" href="' + C.wa(s.whatsapp_admin, 'Hola, quiero ' + nombre + ' para ' + (esDueno ? 'mi barbería ' + ((a.barberia || {}).nombre || '') : 'mi cuenta (' + a.email + ')')) + '">💬 Escribir a CodeFix</a>' : '') +
       '</div></div>';
     el.innerHTML = html;
     const q = (x) => el.querySelector(x);
     if (q('[data-transf]')) q('[data-transf]').onclick = () => {
-      const h = C.hoja('<h2>🏦 Transferencia</h2><p style="white-space:pre-line">' + esc(s.datos_transferencia) + '</p><p class="muted">Monto: <b>' + C.plata(p) + '</b></p>' +
+      const h = C.hoja('<h2>🏦 Transferencia</h2><p style="white-space:pre-line">' + esc(s.datos_transferencia) + '</p><p class="muted">Monto: <b>' + C.plata(lk.monto) + '</b></p>' +
         '<div class="btns"><button data-c class="full">📋 Copiar datos</button></div>');
-      h.q('[data-c]').onclick = () => C.copiar(s.datos_transferencia);
+      h.q('[data-c]').onclick = () => C.copiar(s.datos_transferencia + '\nMonto: ' + C.plata(lk.monto));
     };
-    q('[data-pague]').onclick = async (ev) => {
-      const nota = await C.pedir('✅ Ya pagué', { texto: 'Opcional: ¿cómo pagaste? (ej. "Transferencia de Juan Pérez")', placeholder: 'Nota para CodeFix' });
-      if (nota === null) return;
-      await C.accion(ev.target, () => K.rpc('ya_pague', { p_nota: nota }), '✅ Listo. Te avisaremos cuando esté activo');
+    let foto = null;
+    if (q('[data-foto]')) q('[data-foto]').onclick = async () => {
+      const img = await C.elegirImagen(1000, 0.6);
+      if (!img) return;
+      foto = img;
+      q('[data-prev]').src = img; q('[data-prev]').classList.remove('hidden');
+      q('[data-enviar]').classList.remove('hidden');
+      q('[data-foto]').textContent = '📷 Cambiar foto';
+    };
+    if (q('[data-enviar]')) q('[data-enviar]').onclick = (ev) => C.accion(ev.target, async () => {
+      await K.rpc('premium_pagar', { p_imagen: foto, p_nota: null });
       K.despertarEnvios();
-    };
-    q('[data-key]').onclick = async () => {
-      const k = await C.pedir('🔑 Activar key', { texto: 'Pega la key que te enviaron (ej. BARB-XXXX-XXXX-XXXX).', placeholder: 'BARB-…' });
-      if (!k) return;
-      try { await K.rpc('canjear_key', { p_key: k }); C.toast('⭐ ¡Premium activado!'); setTimeout(() => location.reload(), 900); }
-      catch (e) { C.toast('⚠️ ' + e.message, 4000); }
-    };
+      plan(el);
+    }, '🧾 Comprobante enviado. Te avisamos al aprobarlo');
     if (q('[data-prueba]')) q('[data-prueba]').onclick = (ev) => C.accion(ev.target, async () => {
       await K.rpc('probar_premium');
       C.toast('🎁 ¡' + prueba + ' días de Premium activados!');
@@ -108,7 +126,7 @@
     opts = opts || {};
     const a = K.cuenta;
     const esCliente = a.role === 'client';
-    const prem = esCliente ? a.is_premium : true;
+    const prem = esCliente ? K.clienteTiene('colores') : true;
     const ROL = { admin: 'Administrador', owner: 'Dueño', barber: 'Barbero', client: 'Cliente' };
     let tema = 'auto';
     try { tema = localStorage.getItem('barb:tema') || 'auto'; } catch (e) { /* sin acceso */ }
