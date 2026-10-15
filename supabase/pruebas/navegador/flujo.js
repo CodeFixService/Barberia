@@ -74,15 +74,20 @@ function proximoHabil() { let i = 2; while ([0, 6].includes(dowChile(diaChile(i)
     }
     await foto(own, 'dueno-servicios');
     await own.click('#bVolver');
-    await own.click('[data-s="ajustes"]');
+    await own.click('[data-s="links"]');
+    await own.waitForSelector('#bGuardarL');
+    await own.fill('#tTransf', 'Juan Dueño · RUT 11.111.111-1 · BancoEstado · Cuenta RUT 11111111 · juan@bigote.cl');
+    await own.click('#bGuardarL');
+    await esperar(800);
+    await own.click('#bVolver');
+    await own.click('[data-s="negocio"]');
     await own.waitForSelector('#bGuardarAj');
-    await own.fill('[data-k="datos_transferencia"]', 'Juan Dueño · RUT 11.111.111-1 · BancoEstado · Cuenta RUT 11111111 · juan@bigote.cl');
     await own.fill('[data-k="direccion"]', 'Av. Siempre Viva 742, Santiago');
     await own.click('#bGuardarAj');
     await esperar(800);
     await foto(own, 'dueno-ajustes');
     await own.click('#bVolver');
-    await own.click('[data-s="clientes"]');
+    await own.click('nav.tabs [data-v="clientes"]');
     await own.click('#bNuevoCli');
     await own.fill('.sheet [data-n]', 'Ana Cliente');
     await own.fill('.sheet [data-t]', '+56933334444');
@@ -91,7 +96,7 @@ function proximoHabil() { let i = 2; while ([0, 6].includes(dowChile(diaChile(i)
     await own.waitForSelector('.sheet textarea');
     const claveAna = await claveDeHoja(own);
     await cerrarHojas(own);
-    await own.click('#bVolver');
+    await own.click('nav.tabs [data-v="mas"]');
     await own.click('[data-s="equipo"]');
     await own.click('#bNuevoBar');
     await own.fill('.sheet [data-n]', 'Pedro Barbero');
@@ -140,13 +145,13 @@ function proximoHabil() { let i = 2; while ([0, 6].includes(dowChile(diaChile(i)
     const ped = await nuevaPagina(browser, 'pedro');
     await entrar(ped, 'pedro@bigote.cl', clavePedro);
     await cerrarHojas(ped);
-    await ped.waitForSelector('[data-conf]');
+    await ped.waitForSelector('[data-aprobar]');
     await foto(ped, 'barbero-hoy');
     await ped.click('[data-comp]');
     await ped.waitForSelector('.sheet img');
     await foto(ped, 'barbero-comprobante');
     await cerrarHojas(ped);
-    await ped.click('[data-conf]');
+    await ped.click('[data-aprobar]');
     await esperar(1000);
     await ped.click('nav.tabs [data-v="agenda"]');
     await esperar(400);
@@ -193,7 +198,8 @@ function proximoHabil() { let i = 2; while ([0, 6].includes(dowChile(diaChile(i)
     await own.click('nav.tabs [data-v="agenda"]');
     await esperar(900);
     await foto(own, 'dueno-agenda');
-    await own.click('nav.tabs [data-v="caja"]');
+    await own.click('nav.tabs [data-v="mas"]');
+    await own.click('[data-s="caja"]');
     await esperar(900);
     await foto(own, 'dueno-caja');
 
@@ -207,9 +213,9 @@ function proximoHabil() { let i = 2; while ([0, 6].includes(dowChile(diaChile(i)
     await adm.waitForSelector('.sheet [data-act]');
     await adm.click('.sheet [data-act]');
     await esperar(1000);
-    await adm.click('nav.tabs [data-v="keys"]');
+    await adm.click('nav.tabs [data-v="pagos"]');
     await esperar(800);
-    await foto(adm, 'admin-keys');
+    await foto(adm, 'admin-pagos');
     await own.reload();
     await own.waitForSelector('nav.tabs');
     await esperar(800);

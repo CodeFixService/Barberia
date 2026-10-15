@@ -23,16 +23,17 @@ end $$;
 Si todavía no uniste la rama, pega el contenido completo de `instalar.sql`).
 
 Si aparece un aviso de operación destructiva, toca **Run this query** (es normal).
-Al final debe decir **"Barbería instalada ✅ versión 1.4"**. Se puede volver a correr cuando haya una versión nueva: no borra datos.
+Al final debe decir **"Barbería instalada ✅ versión 2.0"**. Se puede volver a correr cuando haya una versión nueva: no borra datos.
 
 > **Para actualizar a una versión nueva** basta con correr este mismo paso 1 otra vez (también puedes copiar la consulta en
 > la app: **Administración → Ajustes → Versión → Copiar consulta**). Al terminar, la versión se **libera sola** y a todos les
 > llega un **push "💈 Nueva versión"**: al tocarlo, la app se actualiza. Si la corres sin versión nueva, no pasa nada.
 
 Esto también deja programadas las tareas automáticas (cada minuto):
-- liberar las horas apartadas sin abono (15 min) y las "por aprobar" sin respuesta,
-- recordatorios 24 h y 2 h antes (Premium),
-- aviso 3 días antes de que venza un Premium y limpieza de comprobantes de más de 30 días,
+- liberar las horas apartadas sin comprobante (10 min, editable en Ajustes → Reglas); las que están **en revisión** no se liberan solas,
+- recordarle al barbero (y luego al dueño) los abonos sin revisar; si pasan 24 h desde la hora sin revisión, el abono queda a favor del cliente,
+- recordatorios 24 h y 2 h antes (según el plan),
+- aviso antes de que venza un Premium (con botón para pagar) y limpieza diaria (comprobantes, avisos y horas anuladas antiguas),
 - envío de notificaciones push.
 
 ## 2. Tu cuenta de administrador
@@ -40,8 +41,11 @@ Esto también deja programadas las tareas automáticas (cada minuto):
    - Email: `juanjosuecastilloloyola@gmail.com`
    - Una clave nueva solo tuya
    - Marca **Auto Confirm User** → **Create user**
-2. (Recomendado) **Authentication → Sign In / Providers → Email** → apaga **Allow new users to sign up** → Save.
-   El registro igual está cerrado por la base de datos; esto suma una capa más.
+2. **Authentication → Sign In / Providers → Email**:
+   - **Allow new users to sign up**: **activado** (desde la v2.0). Los clientes se crean la cuenta desde el link o QR de su barbería.
+     Nadie más puede registrarse: la base de datos rechaza cualquier cuenta que no venga del link de una barbería o que no hayas creado tú (barberías) o la barbería (equipo y clientes).
+   - **Confirm email**: recomendado **desactivado**, así el cliente entra al tiro. Si lo dejas activado, tendrá que confirmar su correo antes de entrar.
+   - **Save**.
 
 ## 3. El enviador de notificaciones (Edge Function)
 1. **Edge Functions → Deploy a new function → Via Editor**.
@@ -62,22 +66,27 @@ Esta función envía los push, crea las cuentas y restablece las claves.
 3. **⚙️ Ajustes**:
    - **Generar claves push** (una sola vez) → **Enviarme un aviso de prueba**.
    - **Probar servidor**: debe decir "Función enviar v1.0 funcionando".
-   - **Planes Free y Premium**: precios, días de prueba y límites de cada plan → **Guardar planes**.
-   - **Venta de Premium**: tu **link de Mercado Pago** para barberías y para clientes, datos de transferencia (opcional) y tu WhatsApp → **Guardar**.
-4. **💈 Barberías → + Barbería**: nombre, dueño, correo y WhatsApp → **Enviar por WhatsApp** (le llega el enlace y su clave).
+   - **Precios y links**: para el Premium de barberías y el de clientes tienes 2 espacios (precio, texto y link de Mercado Pago). Marca cuál está **activo**: el precio que ve la gente es el del espacio activo.
+   - **Planes**: nombre, descripción, beneficios, duración, límites y opciones sí/no de Free y Premium.
+   - **Reglas**: minutos para pagar, devolución, horas para cancelar, días de regalo, lista negra… → **Guardar**.
+   - **Textos**: lo que lee la gente al reservar y pagar.
+4. **💈 Barberías → + Barbería**: nombre, dueño, correo y WhatsApp → **Enviar por WhatsApp** (le llega el enlace y su clave). Parte con los días de Premium de regalo de Reglas.
+5. **💰 Pagos**: aquí llegan los comprobantes de Premium (barberías y clientes). Ábrelos, apruébalos o recházalos con motivo.
 
 ## 5. Lo que hace cada barbería al entrar
+Su **Inicio** le muestra lo que le falta configurar:
 1. **Más → Servicios y precios**: sus cortes con precio y duración.
-2. **Más → Ajustes**: horario de lunes a domingo, abono (por defecto $4.000), link de pago y datos de transferencia, logo.
-3. **Más → Mi equipo**: sus barberos (Free: 3 contándolo a él; Premium: 10).
-4. **Más → Clientes**: crea a cada cliente y le envía su acceso por WhatsApp.
-5. **Más → Enlace y QR**: para que sus clientes abran la app con su logo.
+2. **Más → Links de pago**: dos links del abono (monto, link y texto; uno activo) y datos de transferencia. **Sin esto no recibe reservas sin cuenta.**
+3. **Más → Horario** y **Más → Perfil de la barbería** (logo, dirección, WhatsApp).
+4. **Más → Mi equipo**: sus barberos (no ven precios ni links de pago).
+5. **Inicio → Tu link para clientes** (o Más → Enlace y QR): con ese link o QR los clientes **reservan sin cuenta** (nombre + WhatsApp), pagan el abono,
+   suben el comprobante y siguen su hora en su link personal; o se crean su cuenta.
 
 ## Revisar que todo esté activo
 SQL Editor:
 ```sql
 select jobname, schedule from cron.job;           -- barberia-tick y barberia-push
-select public.db_version();                        -- 1.4
+select public.db_version();                        -- 2.0
 ```
 Si `cron.job` no existe: **Database → Extensions** → activa **pg_cron** y **pg_net**, y vuelve a correr el paso 1.
 
@@ -93,4 +102,5 @@ La **service_role** ni la **secret key** de Supabase. La clave **anon public** s
 ```bash
 supabase/pruebas/correr.sh "-h localhost -U postgres"
 ```
-Corre `stub.sql` (simula Supabase), `instalar.sql` y `prueba.sql` (reservas, abonos, anulaciones, chat, keys, caja y permisos).
+Corre `stub.sql` (simula Supabase), `instalar.sql` y `prueba.sql` (reservas con y sin cuenta, abono en revisión, cancelación con devolución/saldo, reagendar,
+calificaciones y lista negra, pagos de Premium, chat, caja y permisos). `supabase/pruebas/actualizar.sh` prueba que actualizar desde la 1.4 no pierde nada.

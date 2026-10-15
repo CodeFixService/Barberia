@@ -91,6 +91,16 @@ http.createServer(async (req, res) => {
         return send(200, { access_token: jwt(u.id, u.email), token_type: 'bearer', expires_in: 36000, expires_at: Math.floor(Date.now() / 1000) + 36000, refresh_token: 'r-' + u.id,
           user: { id: u.id, email: u.email, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: new Date().toISOString() } });
       }
+      if (p === '/auth/v1/signup') {
+        // Como Supabase con "Confirm email" apagado: crea la cuenta (el trigger decide si se permite) y entrega la sesión.
+        const email = String(body.email || '').toLowerCase();
+        let u;
+        try { [u] = await su('insert into auth.users (email, raw_user_meta_data) values ($1, $2) returning id, email', [email, JSON.stringify(body.data || {})]); }
+        catch (e) { return send(500, { code: 500, error_code: 'unexpected_failure', msg: 'Database error saving new user' }); }
+        await su('insert into mock_pass (email, pass) values ($1, $2) on conflict (email) do update set pass = excluded.pass', [email, body.password]);
+        return send(200, { access_token: jwt(u.id, u.email), token_type: 'bearer', expires_in: 36000, expires_at: Math.floor(Date.now() / 1000) + 36000, refresh_token: 'r-' + u.id,
+          user: { id: u.id, email: u.email, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: body.data || {}, created_at: new Date().toISOString() } });
+      }
       if (p === '/auth/v1/user') {
         if (!user) return send(401, { msg: 'not authenticated' });
         if (req.method === 'PUT' && body.password) await su('update mock_pass set pass = $2 where email = $1', [user.email, body.password]);

@@ -164,8 +164,8 @@ create table if not exists public.barberias (
     {"e":"a","i":"10:00","f":"20:00","ci":"14:00","cf":"15:00"},
     {"e":"a","i":"10:00","f":"20:00","ci":"14:00","cf":"15:00"},
     {"e":"a","i":"10:00","f":"20:00","ci":"14:00","cf":"15:00"},
-    {"e":"c","i":"10:00","f":"15:00"},
-    {"e":"c","i":"10:00","f":"15:00"}]'::jsonb,
+    {"e":"a","i":"10:00","f":"15:00"},
+    {"e":"x","i":"10:00","f":"15:00"}]'::jsonb,
   comision             int not null default 50 check (comision between 0 and 100),
   sellos_meta          int not null default 10 check (sellos_meta between 3 and 30),
   created_at           timestamptz not null default now()
@@ -184,6 +184,15 @@ update public.barberias set pago1_monto = abono, pago1_link = coalesce(pago1_lin
 -- v2.0: un texto por link (ej. "Abono normal", "Abono fin de semana").
 alter table public.barberias add column if not exists pago1_texto text;
 alter table public.barberias add column if not exists pago2_texto text;
+-- v2.0: horario de partida para barberías nuevas: lunes a sábado abierto, domingo cerrado.
+alter table public.barberias alter column horario set default '[
+    {"e":"a","i":"10:00","f":"20:00","ci":"14:00","cf":"15:00"},
+    {"e":"a","i":"10:00","f":"20:00","ci":"14:00","cf":"15:00"},
+    {"e":"a","i":"10:00","f":"20:00","ci":"14:00","cf":"15:00"},
+    {"e":"a","i":"10:00","f":"20:00","ci":"14:00","cf":"15:00"},
+    {"e":"a","i":"10:00","f":"20:00","ci":"14:00","cf":"15:00"},
+    {"e":"a","i":"10:00","f":"15:00"},
+    {"e":"x","i":"10:00","f":"15:00"}]'::jsonb;
 -- v2.0: "Días a consultar" ya no existe: cada día está abierto o cerrado (los "a consultar" pasan a abiertos).
 update public.barberias set horario = (select jsonb_agg(case when d ->> 'e' = 'c' then jsonb_set(d, '{e}', '"a"') else d end order by n)
                                        from jsonb_array_elements(horario) with ordinality x(d, n))
