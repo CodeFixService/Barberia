@@ -45,8 +45,9 @@ create or replace function prueba.serv(p_nombre text) returns uuid language sql 
 create or replace function prueba.si(p_sql text) returns boolean language plpgsql security definer as $$
 declare r boolean; begin execute 'select (' || p_sql || ')' into r; return r; end $$;
 grant usage on schema prueba to anon, authenticated;
-create or replace function prueba.cod() returns text language sql security definer stable as $$ select codigo from public.barberias limit 1 $$;
+create or replace function prueba.cod() returns text language sql security definer stable as $$ select codigo from public.barberias where nombre = 'Barbería Test' $$;
 create or replace function prueba.tok(p text) returns setof public.reservas language sql security definer stable as $$ select * from public.reservas where token = p $$;
+create or replace function prueba.ref() returns text language sql security definer stable as $$ select ref_codigo from public.profiles where role = 'socio' limit 1 $$;
 grant execute on all functions in schema prueba to anon, authenticated;
 set client_min_messages = notice;
 \pset tuples_only on
@@ -334,7 +335,7 @@ select pg_temp.debe_fallar($$select public.premium_pagar('nada')$$, 'comprobante
 select public.premium_pagar('data:image/jpeg;base64,PAGO', 'Transferencia de Ana');
 select pg_temp.debe_fallar($$select public.premium_pagar('data:image/jpeg;base64,PAGO')$$, 'en revisión');
 select pg_temp.ok((public.mi_pago() ->> 'estado') = 'en_revision' and (public.mi_pago() ->> 'monto')::int = 4900, 'Ana ve su pago en revisión ($4.900)');
-select pg_temp.debe_fallar($$select public.admin_pagos('en_revision')$$, 'Solo el administrador');
+select pg_temp.debe_fallar($$select public.admin_pagos('en_revision')$$, 'Sin permiso');
 reset role;
 select pg_temp.como('juanjosuecastilloloyola@gmail.com');
 select (public.resumen() ->> 'pendientes')::int as pend \gset
@@ -415,7 +416,7 @@ select pg_temp.ok(public.barberia_publica(prueba.cod()) ->> 'nombre' = 'Barberí
 reset role;
 select pg_temp.como('ana@test.cl');
 select pg_temp.debe_fallar($$select public.tomar_push()$$, 'permission denied');
-select pg_temp.debe_fallar($$select public.admin_resumen()$$, 'Solo el administrador');
+select pg_temp.debe_fallar($$select public.admin_resumen()$$, 'Solo CodeFix');
 select pg_temp.debe_fallar($$select * from public.reservas$$, 'permission denied');
 reset role;
 select pg_temp.ok(jsonb_array_length(public.tomar_push()) > 0, 'el enviador toma los push pendientes');
@@ -452,7 +453,7 @@ select pg_temp.ok((public.mi_cuenta() -> 'barberia' -> 'pagos' ->> 'activo') = '
 reset role;
 select pg_temp.como('ana@test.cl');
 select pg_temp.ok(coalesce(jsonb_typeof(public.mi_cuenta() -> 'barberia' -> 'pagos'), 'null') = 'null' and (public.mi_cuenta() -> 'barberia' ->> 'abono')::int = 8000, 'el cliente ve solo el abono y link activos');
-select pg_temp.debe_fallar($$select public.admin_guardar_planes('{}')$$, 'Solo el administrador');
+select pg_temp.debe_fallar($$select public.admin_guardar_planes('{}')$$, 'Sin permiso');
 reset role;
 select pg_temp.como('juanjosuecastilloloyola@gmail.com');
 select public.admin_guardar_planes('{"barberia":{"clientes":{"free":3,"premium":600},"estadisticas":{"free":1,"premium":1}},"cliente":{"mensajes":{"free":5,"premium":0}},
@@ -481,6 +482,167 @@ reset role;
 select pg_temp.como('beto@test.cl');
 select pg_temp.ok(public.chat_restantes(prueba.id('pedro@test.cl')) <= 5, 'mensajes del cliente Free según el plan');
 reset role;
+
+-- 17. v2.1: socios, registro de barberías con referidos, arreglos y ventajas nuevas
+-- Socio: ve y gestiona como el admin, pero no crea ni borra.
+select pg_temp.crear('juanjosuecastilloloyola@gmail.com', 'socio@test.cl', 'Sofía', 'socio');
+select pg_temp.ok(prueba.si($q$(select role = 'socio' and ref_codigo like 's-%' and (permisos ->> 'pagos')::boolean from public.profiles where email = 'socio@test.cl')$q$), 'el admin crea un socio con su código y permisos');
+select pg_temp.como('socio@test.cl');
+select pg_temp.ok((public.mi_cuenta() ->> 'is_socio')::boolean and not (public.mi_cuenta() ->> 'is_admin')::boolean, 'el socio entra como socio');
+select pg_temp.ok((public.admin_resumen() ->> 'barberias')::int >= 1 and jsonb_typeof(public.admin_barberias()) = 'array', 'el socio ve el resumen y las barberías');
+select pg_temp.ok(jsonb_typeof(public.admin_pagos('rechazado')) = 'array', 'el socio ve los pagos');
+select pg_temp.debe_fallar($$select public.admin_limpiar('avisos')$$, 'Solo el administrador');
+select pg_temp.debe_fallar($$select public.admin_borrar_calificacion((select (x ->> 'id')::uuid from jsonb_array_elements(public.admin_calificaciones()) x limit 1))$$, 'Solo el administrador');
+select pg_temp.debe_fallar($$select public.admin_quitar_premium(prueba.id('ana@test.cl'))$$, 'Solo el administrador');
+select pg_temp.debe_fallar($$select public.admin_socios()$$, 'Solo el administrador');
+select pg_temp.debe_fallar($$select public.admin_ajuste('version_liberada', '9.9')$$, 'libera versiones');
+select pg_temp.ok(public.puede_hablar(auth.uid(), prueba.id('dueno@test.cl')), 'el socio puede escribirle a las barberías');
+reset role;
+select pg_temp.debe_fallar($$select pg_temp.crear('socio@test.cl', 'b9@test.cl', 'B9', 'owner')$$, 'Sin permiso para crear');
+select pg_temp.ok(public.puede_restablecer(prueba.id('socio@test.cl'), prueba.id('dueno@test.cl'))
+  and not public.puede_restablecer(prueba.id('socio@test.cl'), prueba.id('juanjosuecastilloloyola@gmail.com')), 'el socio restablece claves de barberías, no la del admin');
+select pg_temp.como('juanjosuecastilloloyola@gmail.com');
+select public.admin_guardar_socio(prueba.id('socio@test.cl'), '{"permisos":{"pagos":false,"premium":true,"cuentas":true,"ajustes":false,"avisos":true}}');
+select pg_temp.ok((select (x -> 'permisos' ->> 'pagos')::boolean = false from jsonb_array_elements(public.admin_socios()) x), 'el admin le cambia los permisos al socio');
+reset role;
+select pg_temp.como('socio@test.cl');
+select pg_temp.debe_fallar($$select public.admin_pagos('en_revision')$$, 'Sin permiso');
+select pg_temp.debe_fallar($$select public.admin_guardar_reglas('{"minutos_pago":10}')$$, 'Sin permiso');
+reset role;
+
+-- Registro abierto de barberías desde el link o QR (con el código de quien invita).
+set role anon;
+select pg_temp.ok((public.ref_publico(prueba.cod()) ->> 'nombre') = 'Barbería Test', 'la página de registro muestra quién invita');
+select pg_temp.ok((public.ref_publico(prueba.ref()) ->> 'tipo') = 'socio', 'también el código del socio');
+reset role;
+insert into auth.users (email, raw_user_meta_data) values ('nueva@test.cl',
+  jsonb_build_object('rol', 'barberia', 'barberia', 'Barbería Nueva', 'nombre', 'Nico', 'telefono', '+56 9 4444 5555', 'ref', (select codigo from public.barberias where nombre = 'Barbería Test')));
+select pg_temp.ok(prueba.si($q$(select b.registro_solo and b.referida_por = (select id from public.barberias where nombre = 'Barbería Test') and p.role = 'owner' and public.is_premium(p.id)
+  from public.barberias b join public.profiles p on p.id = b.owner_id where b.nombre = 'Barbería Nueva')$q$), 'la barbería se registra sola, parte con días de regalo y queda como referida');
+select pg_temp.ok(prueba.si($q$exists (select 1 from public.avisos where para = prueba.id('dueno@test.cl') and titulo like '🤝%')$q$), 'a quien invitó le llega el aviso');
+select pg_temp.ok(prueba.si($q$exists (select 1 from public.avisos where para = prueba.id('socio@test.cl') and titulo like '💈 Barbería nueva%')$q$), 'al admin y a los socios les llega la barbería nueva');
+insert into auth.users (email, raw_user_meta_data) values ('socia@test.cl',
+  jsonb_build_object('rol', 'barberia', 'barberia', 'Barbería del Socio', 'nombre', 'Sara', 'telefono', '+56944445556', 'ref', (select ref_codigo from public.profiles where role = 'socio')));
+select pg_temp.ok(prueba.si($q$(select socio_id = prueba.id('socio@test.cl') from public.barberias where nombre = 'Barbería del Socio')$q$), 'con el link del socio, la barbería queda a su nombre');
+select pg_temp.debe_fallar($$insert into auth.users (email, raw_user_meta_data) values ('mala@test.cl', '{"rol":"barberia","barberia":"X","nombre":"Y"}')$$, 'WhatsApp');
+select pg_temp.debe_fallar($$insert into auth.users (email, raw_user_meta_data) values ('owner2@test.cl', '{"rol":"owner"}')$$, 'registro está cerrado');
+select pg_temp.como('juanjosuecastilloloyola@gmail.com');
+select public.admin_guardar_reglas('{"registro_barberias":0}');
+reset role;
+select pg_temp.debe_fallar($$insert into auth.users (email, raw_user_meta_data) values ('cerrada@test.cl', '{"rol":"barberia","barberia":"Cerrada","nombre":"Ce","telefono":"+56944445557"}')$$, 'cerrado');
+select pg_temp.como('juanjosuecastilloloyola@gmail.com');
+select public.admin_guardar_reglas('{"registro_barberias":1}');
+select pg_temp.ok((select (x ->> 'registro_solo')::boolean and x ->> 'referida' = 'Barbería Test' from jsonb_array_elements(public.admin_barberias()) x where x ->> 'nombre' = 'Barbería Nueva'), 'el admin ve quién trajo a cada barbería');
+select pg_temp.ok((public.admin_resumen() ->> 'registradas_mes')::int = 2 and public.admin_resumen() ? 'renovacion', 'resumen: registradas solas y tasa de renovación');
+select pg_temp.ok(jsonb_typeof(public.admin_por_vencer()) = 'array', 'lista de Premium por vencer para cobrar');
+reset role;
+
+-- Horas de prueba v2.1: un día cercano que no sea viernes ni sábado, y un viernes lejano.
+create temp table t2 as
+select (select d from generate_series((now() at time zone 'America/Santiago')::date + 2, (now() at time zone 'America/Santiago')::date + 9, interval '1 day') d
+        where extract(isodow from d) in (1, 2, 3, 4) order by d limit 1)::date as d,
+       (select d from generate_series((now() at time zone 'America/Santiago')::date + 6, (now() at time zone 'America/Santiago')::date + 13, interval '1 day') d
+        where extract(isodow from d) = 5 order by d limit 1)::date as vie;
+grant select on t2 to authenticated, anon;
+create or replace function pg_temp.en(p_d date, p_h text) returns timestamptz language sql as $$ select (p_d + p_h::time) at time zone 'America/Santiago' $$;
+
+-- Prioridad Premium: viernes y sábados lejanos solo para Premium.
+set role anon;
+select pg_temp.debe_fallar($$select public.reservar_invitado(prueba.cod(), prueba.id('pedro@test.cl'), pg_temp.en((select vie from t2), '11:00'), array[prueba.serv('Corte')], 'Lejos', '911112222')$$, 'Premium');
+
+-- Devolución de un abono que nadie verificó: el dueño la descarta si la transferencia no llegó.
+create temp table gv1 as select public.reservar_invitado(prueba.cod(), prueba.id('pedro@test.cl'), pg_temp.en((select d from t2), '09:00'), array[prueba.serv('Corte')], 'Gabi', '911113333') as r;
+grant select on gv1 to authenticated, anon;
+select public.reserva_comprobante((select r ->> 'token' from gv1), 'data:image/jpeg;base64,GABI');
+select pg_temp.ok((public.reserva_cancelar((select r ->> 'token' from gv1)) ->> 'abono_destino') = 'devolucion', 'cancela en revisión dentro del plazo: devolución');
+select pg_temp.ok((public.reserva_ver((select r ->> 'token' from gv1)) ->> 'sin_verificar')::boolean, 'queda marcada como abono sin verificar');
+reset role;
+select pg_temp.como('dueno@test.cl');
+select pg_temp.ok((select (x ->> 'sin_verificar')::boolean and x ->> 'token' is not null from jsonb_array_elements(public.mis_pendientes() -> 'devoluciones') x where x ->> 'cliente' = 'Gabi'),
+  'el dueño ve que debe revisar si llegó (y el link para avisarle por WhatsApp)');
+select public.descartar_devolucion((select id from prueba.tok((select r ->> 'token' from gv1))));
+select pg_temp.ok((select devolucion = 'no_llego' from prueba.tok((select r ->> 'token' from gv1))), 'no llegó la transferencia: no hay devolución');
+select pg_temp.ok((select bool_and(x ? 'token') from jsonb_array_elements(public.ocupacion((select d from t2), (select d from t2)) -> 'reservas') x where (x ->> 'detalle')::boolean), 'la agenda del equipo trae el link de cada hora');
+reset role;
+
+-- Máximo de horas apartadas sin pagar por barbería (Reglas).
+-- (el máximo queda en las que ya hay apartadas + 1)
+insert into public.app_settings (key, value) select 'regla_apartadas_max', (count(*) + 1)::text from public.reservas
+where barberia_id = (select id from public.barberias where nombre = 'Barbería Test') and cliente_id is null and estado = 'esperando_abono' and expira_at > now()
+on conflict (key) do update set value = excluded.value;
+set role anon;
+select public.reservar_invitado(prueba.cod(), prueba.id('pedro@test.cl'), pg_temp.en((select d from t2), '10:00'), array[prueba.serv('Corte')], 'Uno', '911114444');
+select pg_temp.debe_fallar($$select public.reservar_invitado(prueba.cod(), prueba.id('pedro@test.cl'), pg_temp.en((select d from t2), '11:00'), array[prueba.serv('Corte')], 'Dos', '911115555')$$, 'muchas reservas');
+reset role;
+select pg_temp.como('juanjosuecastilloloyola@gmail.com');
+select public.admin_guardar_reglas('{"apartadas_max":10}');
+reset role;
+
+-- Abono rebajado (o sin abono) para clientes Premium.
+select pg_temp.como('dueno@test.cl');
+select public.guardar_barberia('{"abono_premium":0}');
+reset role;
+select public.dar_premium(prueba.id('x@test.cl'), 30, 0, 'regalo', 'prueba');
+select pg_temp.como('x@test.cl');
+create temp table x1 as select public.reservar(prueba.id('b2@test.cl'), pg_temp.en((select d from t2), '15:00'), array[prueba.serv('Corte')]) as r;
+select pg_temp.ok((select (r ->> 'abono')::int = 0 and r ->> 'estado' = 'agendada' from x1), 'cliente Premium reserva sin abono en esta barbería');
+reset role;
+
+-- Opciones de los planes que antes eran fijas (dueño en Free).
+select pg_temp.como('dueno@test.cl');
+select pg_temp.debe_fallar($$select public.guardar_servicio('{"nombre":"Con foto","precio":1,"duracion":30,"foto":"data:image/jpeg;base64,AAAA"}')$$, 'Fotos de servicios');
+select pg_temp.debe_fallar($$select public.guardar_barberia('{"comision":40}')$$, 'Comisiones');
+select pg_temp.debe_fallar($$select public.guardar_barberia('{"regalo_cumple":"20% en tu corte"}')$$, 'cumpleaños');
+select public.guardar_barberia(jsonb_build_object('comision', (public.mi_cuenta() -> 'barberia' ->> 'comision')::int));
+reset role;
+select pg_temp.como('juanjosuecastilloloyola@gmail.com');
+select public.admin_guardar_planes('{"barberia":{"fotos_servicios":{"free":1,"premium":1}}}');
+reset role;
+select pg_temp.como('dueno@test.cl');
+select public.guardar_servicio('{"nombre":"Con foto","precio":1,"duracion":30,"foto":"data:image/jpeg;base64,AAAA"}');
+select pg_temp.ok(true, 'con la opción activada en Free, el dueño Free sube fotos de servicios');
+
+-- Resumen del mes y clientes que no vuelven (Free: bloqueado, solo cantidades).
+select pg_temp.ok((public.resumen_mes() ->> 'bloqueado')::boolean and not (public.resumen_mes() ? 'ventas'), 'Free: el resumen del mes oculta la plata');
+reset role;
+insert into public.reservas (barberia_id, barbero_id, cliente_nombre, cliente_tel, inicio, fin, estado, total, creada_por)
+select id, (select id from public.profiles where email = 'pedro@test.cl'), 'Perdido', '977776666', now() - interval '60 days', now() - interval '59 days 23 hours', 'atendida', 10000, owner_id
+from public.barberias where nombre = 'Barbería Test';
+select pg_temp.como('dueno@test.cl');
+select pg_temp.ok((public.no_vuelven() ->> 'total')::int >= 1 and (public.no_vuelven() ->> 'bloqueado')::boolean and jsonb_array_length(public.no_vuelven() -> 'lista') = 0,
+  'Free: ve cuántos clientes no vuelven, la lista es Premium');
+reset role;
+update public.profiles set plan = 'premium', premium_until = now() + interval '10 days' where email = 'dueno@test.cl';
+select pg_temp.como('dueno@test.cl');
+select pg_temp.ok((select bool_or(x ->> 'nombre' = 'Perdido') from jsonb_array_elements(public.no_vuelven() -> 'lista') x), 'Premium: la lista de los que no vuelven, con su WhatsApp');
+select pg_temp.ok(public.resumen_mes() ? 'ventas', 'Premium: el resumen muestra las ganancias');
+select public.guardar_barberia('{"regalo_cumple":"20% en tu corte"}');
+reset role;
+
+-- Cumpleaños y resumen mensual automáticos.
+update public.profiles set cumple = ((now() at time zone 'America/Santiago')::date - interval '25 years')::date, cumple_avisado = null where email = 'ana@test.cl';
+select pg_temp.ok(public.cumpleanos() = 1 and public.cumpleanos() = 0, 'el regalo de cumpleaños llega una vez al año');
+update public.barberias set created_at = now() - interval '60 days', resumen_enviado = null;
+insert into public.caja (barberia_id, barbero_id, fecha, servicio, monto)
+select id, owner_id, (date_trunc('month', now() at time zone 'America/Santiago') - interval '10 days') at time zone 'America/Santiago', 'Corte', 12000 from public.barberias where nombre = 'Barbería Test';
+select pg_temp.ok(public.enviar_resumenes() >= 1 and public.enviar_resumenes() = 0, 'el resumen del mes llega una vez');
+select pg_temp.ok(prueba.si($q$exists (select 1 from public.avisos where para = prueba.id('dueno@test.cl') and titulo like '📊%' and cuerpo like 'Ganaste%')$q$), 'Premium: el resumen dice cuánto ganó');
+
+-- Pago por 3 meses con descuento y premio del referido.
+select pg_temp.como('beto@test.cl');
+select public.premium_pagar('data:image/jpeg;base64,TRES', null, 3);
+select pg_temp.ok((public.mi_pago() ->> 'monto')::int = round(2990 * 3 * 0.85), '3 meses con 15% de descuento');
+reset role;
+select pg_temp.ok(prueba.si($q$(select dias = 90 from public.pagos where user_id = prueba.id('beto@test.cl') and estado = 'en_revision')$q$), 'el pago de 3 meses da 90 días');
+update public.profiles set plan = 'free', premium_until = null where email = 'dueno@test.cl';
+select pg_temp.como('nueva@test.cl');
+select public.premium_pagar('data:image/jpeg;base64,NUEVA');
+reset role;
+select pg_temp.como('juanjosuecastilloloyola@gmail.com');
+select public.admin_pago_resolver((select (x ->> 'id')::uuid from jsonb_array_elements(public.admin_pagos('en_revision')) x where x ->> 'email' = 'nueva@test.cl'), true);
+reset role;
+select pg_temp.ok(prueba.si($q$(select public.is_premium(prueba.id('dueno@test.cl')) and (select referido_pagado from public.barberias where nombre = 'Barbería Nueva'))$q$),
+  'la barbería que invitó gana días de Premium cuando la invitada paga');
 
 \o
 \echo '✅ TODAS LAS PRUEBAS PASARON'
