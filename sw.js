@@ -8,7 +8,7 @@ const FILES = [
   'cliente/', 'cliente/index.html', 'cliente/cliente.js',
   'equipo/', 'equipo/index.html', 'equipo/equipo.js',
   'admin/', 'admin/index.html', 'admin/admin.js',
-  'b/', 'b/index.html', 'b/b.js', 'r/', 'r/index.html', 'r/r.js'
+  'b/', 'b/index.html', 'b/b.js', 'r/', 'r/index.html', 'r/r.js', 'registro/', 'registro/index.html', 'registro/registro.js'
 ];
 
 const META = 'meta';

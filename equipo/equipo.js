@@ -55,7 +55,7 @@
     if (v === 'agenda' && q.get('r')) { mostrar('agenda'); abrirReserva(q.get('r'), true); return; }
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
-    if (['plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos'].includes(v)) {
+    if (['plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink'].includes(v)) {
       mostrar('mas'); abrirSeccion(v === 'ajustes' ? 'negocio' : v); return;
     }
     mostrar(VISTAS[v] ? v : 'hoy');
@@ -104,10 +104,22 @@
     if (P2.devoluciones.length) {
       html += '<div class="sec-tit">💸 Devoluciones pendientes (' + P2.devoluciones.length + ')</div>' + P2.devoluciones.map((r) =>
         '<div class="card urgente"><div class="flex"><div class="grow"><b>' + esc(r.cliente) + ' · ' + C.plata(r.abono) + '</b><div class="sub muted">Anuló ' + (r.anulada_at ? C.hace(r.anulada_at) : '') +
-        ' su hora del ' + C.cuando(r.inicio) + ' dentro del plazo de devolución.</div></div></div>' +
+        ' su hora del ' + C.cuando(r.inicio) + ' dentro del plazo de devolución.</div>' +
+        (r.sin_verificar ? '<div class="sub" style="color:var(--consultar)">⚠️ Su abono aún no estaba aprobado: revisa tu cuenta y <b>devuélvelo solo si la transferencia llegó</b>.</div>' : '') + '</div></div>' +
         '<div class="btns">' + (r.tiene_comprobante ? '<button class="small gris" data-comp="' + r.id + '">🧾 Comprobante</button>' : '') +
+        (r.sin_verificar ? '<button class="small gris" data-nollego="' + r.id + '">No llegó (no devolver)</button>' : '') +
         (r.cliente_tel ? '<a class="btn small wsp" target="_blank" rel="noopener" href="' + C.wa(r.cliente_tel, 'Hola ' + r.cliente.split(' ')[0] + ', te devolvemos tu abono de ' + C.plata(r.abono) + '. ¿A qué cuenta te lo transferimos?') + '">WhatsApp</a>' : '') +
         '<button class="ok small" data-devuelto="' + r.id + '">✓ Ya lo devolví</button></div></div>').join('');
+    }
+    // v2.1: recordar por WhatsApp a los de mañana (1 toque por cliente).
+    const manana = C.sumarDias(f, 1);
+    const deManana = d.reservas.filter((r) => r.detalle && mias(r) && C.fechaDe(r.inicio) === manana && ['agendada', 'confirmada'].includes(r.estado) && r.cliente_tel)
+      .sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
+    if (deManana.length) {
+      html += '<div class="card' + (tiene('recordar_wsp') ? '' : ' plata" id="upRecordar') + '"><h2>📲 Recuérdales a los de mañana <span class="grow"></span><span class="pill">' + deManana.length + '</span></h2>' +
+        '<p class="muted chico" style="margin-top:-6px">Un toque y le llega por WhatsApp con su hora y su link. Así bajan los "no vino".</p><ul class="list">' + deManana.map((r) =>
+        '<li><div style="width:52px;font-weight:800">' + C.horaDe(r.inicio) + '</div><div class="grow"><b>' + esc(r.cliente) + '</b><div class="sub">' + esc(r.servicios.map((s) => s.nombre).join(' + ')) + '</div></div>' +
+        '<a class="btn small wsp" target="_blank" rel="noopener" data-recordar href="' + (tiene('recordar_wsp') ? C.wa(r.cliente_tel, msgRecordar(r)) : '#') + '">📲 Recordar</a></li>').join('') + '</ul></div>';
     }
     if (esperando.length) html += '<p class="muted chico">⏳ ' + esperando.length + ' hora(s) apartada(s) esperando que el cliente pague y suba el comprobante (se liberan solas a los ' + K.regla('minutos_pago') + ' min).</p>';
     // 3. Lo que falta configurar (dueño)
@@ -137,17 +149,36 @@
       html += '<div class="card"><h2>🔗 Tu link para clientes</h2><p class="muted chico" style="margin-top:-6px">Con este link o el QR tus clientes reservan sin cuenta o se crean la cuenta.</p>' +
         '<input readonly value="' + esc(linkClientes()) + '"><div class="btns"><button class="small" id="bCopiarLink">📋 Copiar</button><button class="small gris" id="bQR">🔳 Ver QR</button>' +
         '<a class="btn small wsp" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent('💈 Reserva tu hora en ' + b.nombre + ': ' + linkClientes()) + '">💬 Compartir</a></div></div>';
+      html += '<div id="cResumen"></div><div id="cVolver"></div>' +
+        '<div class="card tap" id="cInvitar"><div class="flex"><span style="font-size:28px">🤝</span><div class="grow"><b>Invita a otra barbería' + (K.regla('dias_referido') ? ' y gana ' + K.regla('dias_referido') + ' días de Premium' : '') + '</b>' +
+        '<div class="sub muted">Comparte tu QR de registro: cuando pague su primer mes, ganas.</div></div><span>›</span></div></div>';
       html += '<div class="card ' + (premium() ? 'oro-marco' : '') + ' tap" id="cPlan"><div class="flex"><span style="font-size:28px">' + (premium() ? '⭐' : '💎') + '</span><div class="grow"><b>' +
         (premium() ? 'Premium hasta el ' + P.fechaCorta(b.premium_until) : 'Plan Free') + '</b><div class="sub muted">' + (premium() ? 'Toca para renovar' : 'Toca para ver Premium') + '</div></div><span>›</span></div></div>';
     }
+    if (!dueno()) html += '<div class="card tap" id="cMiLink"><div class="flex"><span style="font-size:28px">🔳</span><div class="grow"><b>Mi link y QR</b>' +
+      '<div class="sub muted">Tus clientes te reservan directo a ti.</div></div><span>›</span></div></div><div id="cVolver"></div>';
     el.innerHTML = html;
     el.querySelectorAll('[data-aprobar]').forEach((x) => x.onclick = (ev) => C.accion(ev.target, async () => {
+      const r = P2.revision.find((y) => y.id === x.dataset.aprobar);
       await K.rpc('confirmar_hora', { p_reserva: x.dataset.aprobar }); K.despertarEnvios(); Avisos.actualizar(); hoy();
+      if (r && r.invitado) avisarInvitado(r, 'aprobada');
     }, '✅ Aprobada: la hora quedó agendada'));
-    el.querySelectorAll('[data-rechazar]').forEach((x) => x.onclick = () => rechazar(x.dataset.rechazar, true, () => { Avisos.actualizar(); hoy(); }));
+    el.querySelectorAll('[data-rechazar]').forEach((x) => x.onclick = () => rechazar(x.dataset.rechazar, true, () => { Avisos.actualizar(); hoy(); }, P2.revision.find((y) => y.id === x.dataset.rechazar)));
     el.querySelectorAll('[data-devuelto]').forEach((x) => x.onclick = (ev) => C.accion(ev.target, async () => {
       await K.rpc('marcar_devuelto', { p_reserva: x.dataset.devuelto }); Avisos.actualizar(); hoy();
     }, '💸 Marcado como devuelto'));
+    el.querySelectorAll('[data-nollego]').forEach((x) => x.onclick = async (ev) => {
+      if (!await C.confirmar('Revisaste tu cuenta y la transferencia no llegó: no hay nada que devolver. Al cliente le llega el aviso.', { si: 'No llegó' })) return;
+      C.accion(ev.target, async () => {
+        const r = P2.devoluciones.find((y) => y.id === x.dataset.nollego);
+        await K.rpc('descartar_devolucion', { p_reserva: x.dataset.nollego }); K.despertarEnvios(); Avisos.actualizar(); hoy();
+        if (r && r.invitado) avisarInvitado(r, 'no_llego');
+      }, 'Listo: sin devolución');
+    });
+    if ($('upRecordar')) $('upRecordar').addEventListener('click', (e) => { e.preventDefault(); P.upsell('Recordatorio por WhatsApp en 1 toque'); }, true);
+    if ($('cInvitar')) $('cInvitar').onclick = () => { mostrar('mas'); abrirSeccion('invitar'); };
+    if ($('cMiLink')) $('cMiLink').onclick = () => { mostrar('mas'); abrirSeccion('milink'); };
+    tarjetasResumen();
     el.querySelectorAll('[data-comp]').forEach((x) => x.onclick = () => verComprobante(x.dataset.comp));
     el.querySelectorAll('[data-ver]').forEach((x) => x.onclick = () => abrirReserva(x.dataset.ver));
     el.querySelectorAll('[data-ir]').forEach((x) => x.onclick = () => { mostrar('mas'); abrirSeccion(x.dataset.ir); });
@@ -163,17 +194,77 @@
   }
 
   // Rechazar el comprobante (con motivo: la hora se libera) o anular una hora agendada (el abono queda a favor).
-  async function rechazar(id, revision, despues) {
+  async function rechazar(id, revision, despues, info) {
     const motivo = await C.pedir(revision ? '❌ Rechazar comprobante' : 'Anular hora', {
       texto: revision ? 'La hora se libera y el cliente ve el motivo. ¿Por qué lo rechazas?' : 'El cliente recibirá un aviso y su abono quedará a favor. Motivo (opcional):',
       placeholder: revision ? 'Ej: No llegó la transferencia' : 'Ej: Ese día no trabajo' });
     if (motivo === null) return;
     if (revision && !motivo) return C.toast('Escribe el motivo del rechazo');
-    try { await K.rpc('rechazar_hora', { p_reserva: id, p_motivo: motivo }); K.despertarEnvios(); rango = ''; C.toast(revision ? 'Comprobante rechazado: la hora quedó libre' : 'Hora anulada'); despues && despues(); }
-    catch (e) { C.toast('⚠️ ' + e.message, 4000); }
+    try {
+      await K.rpc('rechazar_hora', { p_reserva: id, p_motivo: motivo }); K.despertarEnvios(); rango = ''; C.toast(revision ? 'Comprobante rechazado: la hora quedó libre' : 'Hora anulada'); despues && despues();
+      if (info && info.invitado) avisarInvitado(Object.assign({}, info, { motivo }), revision ? 'rechazada' : 'anulada');
+    } catch (e) { C.toast('⚠️ ' + e.message, 4000); }
   }
 
   const linkClientes = () => C.raiz() + '?b=' + bar().codigo;
+  const linkHora = (token) => C.raiz() + 'r/?t=' + token;
+  const primerNombre = (n) => String(n || '').split(' ')[0];
+
+  // v2.1: el cliente sin cuenta no recibe avisos de la app: al aprobar o rechazar, se le avisa por WhatsApp con el mensaje listo.
+  function avisarInvitado(r, tipo) {
+    const tel = r.cliente_tel;
+    if (!tel) return;
+    const b = bar(), cuando = C.cuando(r.inicio);
+    const msg = {
+      aprobada: 'Hola ' + primerNombre(r.cliente) + ' 👋 Tu hora del ' + cuando + ' en ' + b.nombre + ' quedó agendada ✅. Aquí la ves, la cancelas o la reagendas: ' + linkHora(r.token),
+      rechazada: 'Hola ' + primerNombre(r.cliente) + ', revisamos tu comprobante del ' + cuando + ' en ' + b.nombre + ' y no pudimos aprobarlo' + (r.motivo ? ': ' + r.motivo : '') +
+        '. La hora quedó libre. Puedes volver a reservar aquí: ' + linkClientes(),
+      anulada: 'Hola ' + primerNombre(r.cliente) + ', tuvimos que anular tu hora del ' + cuando + ' en ' + b.nombre + (r.motivo ? ' (' + r.motivo + ')' : '') +
+        '. Tu abono quedó a favor: reagenda aquí: ' + linkHora(r.token),
+      no_llego: 'Hola ' + primerNombre(r.cliente) + ', revisamos y no nos llegó tu transferencia del abono de la hora del ' + cuando + ' en ' + b.nombre + ', por eso no hay devolución. Si fue un error, mándanos el comprobante 🙏'
+    }[tipo];
+    const h = C.hoja('<h2>💬 Avísale por WhatsApp</h2><p class="muted" style="margin-top:-6px">' + esc(r.cliente) + ' reservó sin cuenta: no le llegan los avisos de la app.</p>' +
+      '<textarea data-m style="min-height:130px">' + esc(msg) + '</textarea><div class="btns" style="flex-direction:column">' +
+      '<a class="btn wsp full" target="_blank" rel="noopener" data-w>💬 Enviar por WhatsApp</a><button class="gris full" data-no>Ahora no</button></div>');
+    const w = h.q('[data-w]');
+    const act = () => { w.href = C.wa(tel, h.q('[data-m]').value); };
+    act(); h.q('[data-m]').oninput = act;
+    w.addEventListener('click', () => setTimeout(() => h.cerrar(), 300));
+    h.q('[data-no]').onclick = () => h.cerrar();
+  }
+
+  // Mensaje de recordatorio por WhatsApp (con el link de su hora si reservó sin cuenta).
+  function msgRecordar(r) {
+    const b = bar(), f = C.fechaDe(r.inicio), x = barbero(r.barbero_id) || {};
+    return 'Hola ' + primerNombre(r.cliente) + ' 👋 Te recordamos tu hora ' + (C.relativoDia(f) === 'Mañana' ? 'de mañana, ' : 'del ') + C.fechaLarga(f) + ' a las ' + C.horaDe(r.inicio) +
+      (x.nombre ? ' con ' + x.nombre : '') + ' en ' + b.nombre + (b.direccion ? ' (' + b.direccion + ')' : '') + '. ' +
+      (r.invitado && r.token ? 'Si no puedes venir, anúlala o reagéndala aquí: ' + linkHora(r.token) : 'Si no puedes venir, anúlala en la app con tiempo.') + ' ¡Te esperamos! 💈';
+  }
+
+  // v2.1: tarjetas del Inicio: resumen del mes (Free: con la plata borrosa) y clientes que no vuelven.
+  async function tarjetasResumen() {
+    if (dueno() && $('cResumen')) {
+      K.rpc('resumen_mes', { p_mes: null }).then((x) => {
+        const z = $('cResumen');
+        if (!z) return;
+        const borroso = (v) => x.bloqueado ? '<span class="borroso">$123.456</span>' : C.plata(v);
+        z.innerHTML = '<div class="card tap' + (x.bloqueado ? ' oro-marco' : '') + '" data-ir-res><h2>📈 Tu mes hasta hoy <span class="grow"></span>' + (x.bloqueado ? '<span class="pill oro">🔒 Premium</span>' : '<span>›</span>') + '</h2>' +
+          '<div class="stats" style="margin:0"><div class="card"><small>Ganaste</small><b>' + borroso(x.ventas) + '</b></div><div class="card"><small>Cortes</small><b>' + x.cortes + '</b></div>' +
+          '<div class="card"><small>Clientes nuevos</small><b>' + x.nuevos + '</b></div><div class="card"><small>No vinieron</small><b style="color:var(--bad)">' + x.no_vino + '</b></div></div>' +
+          (x.bloqueado ? '<p class="muted chico" style="margin-bottom:0">Con Premium ves cuánto ganaste, tu mejor día, lo que perdiste por los que no vinieron y te llega el resumen cada mes.</p>' : '') + '</div>';
+        z.querySelector('[data-ir-res]').onclick = () => { if (x.bloqueado) P.upsell('Resumen del mes con tus ganancias'); else { mostrar('mas'); abrirSeccion('resumen'); } };
+      }).catch(() => {});
+    }
+    if ($('cVolver')) {
+      K.rpc('no_vuelven').then((x) => {
+        const z = $('cVolver');
+        if (!z || !x.total) return;
+        z.innerHTML = '<div class="card tap"><div class="flex"><span style="font-size:28px">👋</span><div class="grow"><b>' + x.total + ' cliente' + (x.total === 1 ? '' : 's') + ' no vuelve' + (x.total === 1 ? '' : 'n') + ' hace +' + x.dias + ' días</b>' +
+          '<div class="sub muted">' + (x.bloqueado ? '🔒 Premium: ve quiénes son y escríbeles con una oferta en 1 toque.' : 'Escríbeles con una oferta en 1 toque.') + '</div></div><span>›</span></div></div>';
+        z.firstChild.onclick = () => { if (x.bloqueado) P.upsell('Clientes que no vuelven'); else { mostrar('mas'); abrirSeccion('volver'); } };
+      }).catch(() => {});
+    }
+  }
 
   /* ---------- Agenda ---------- */
   let vista = 'dia', fechaSel = C.hoy(), quien = null, verAnuladas = false;
@@ -294,6 +385,8 @@
         '<button data-a="aten">✔️ Atendida</button><button class="gris" data-a="novino">🚫 No vino</button>' : '') +
       (puede && ['atendida', 'no_vino'].includes(r.estado) && !r.calificado && (r.cliente_id || r.cliente_tel) ? '<button class="alt" data-a="calificar">⭐ Calificar al cliente</button>' : '') +
       (puede && activa ? '<button class="gris" data-a="mover">🔁 Mover</button>' + (!revision ? '<button class="danger" data-a="anular">Anular</button>' : '') : '') +
+      (puede && ['agendada', 'confirmada'].includes(r.estado) && r.cliente_tel && new Date(r.inicio) > Date.now() ?
+        '<button class="gris' + (tiene('recordar_wsp') ? '' : ' plata') + '" data-a="recordar">📲 Recordar</button>' : '') +
       (r.cliente_id ? '<button class="gris" data-a="chat">💬 Escribir</button>' : '') +
       (r.cliente_tel ? '<a class="btn wsp" target="_blank" rel="noopener" href="' + C.wa(r.cliente_tel, 'Hola ' + r.cliente.split(' ')[0] + ', te escribo de ' + bar().nombre + ' por tu hora del ' + C.cuando(r.inicio)) + '">WhatsApp</a>' : '') +
       '</div>');
@@ -306,9 +399,10 @@
     h.qa('[data-a]').forEach((btn) => btn.onclick = async () => {
       const a = btn.dataset.a;
       try {
-        if (a === 'aprobar') { await C.accion(btn, () => K.rpc('confirmar_hora', { p_reserva: r.id })); fin('✅ Aprobada: la hora quedó agendada'); }
-        if (a === 'rechazar') { h.cerrar(); rechazar(r.id, true, () => { Avisos.actualizar(); refrescarVista(); }); }
-        if (a === 'anular') { h.cerrar(); rechazar(r.id, false, () => { Avisos.actualizar(); refrescarVista(); }); }
+        if (a === 'aprobar') { await C.accion(btn, () => K.rpc('confirmar_hora', { p_reserva: r.id })); fin('✅ Aprobada: la hora quedó agendada'); if (r.invitado) avisarInvitado(r, 'aprobada'); }
+        if (a === 'rechazar') { h.cerrar(); rechazar(r.id, true, () => { Avisos.actualizar(); refrescarVista(); }, r); }
+        if (a === 'anular') { h.cerrar(); rechazar(r.id, false, () => { Avisos.actualizar(); refrescarVista(); }, r); }
+        if (a === 'recordar') { if (!tiene('recordar_wsp')) P.upsell('Recordatorio por WhatsApp en 1 toque'); else open(C.wa(r.cliente_tel, msgRecordar(r)), '_blank'); }
         if (a === 'devuelto') { await K.rpc('marcar_devuelto', { p_reserva: r.id }); fin('💸 Marcado como devuelto'); }
         if (a === 'comp') verComprobante(r.id);
         if (a === 'chat') { h.cerrar(); mostrar('chat'); Chat.abrir(r.cliente_id, { nombre: r.cliente, avatar: r.cliente_avatar, rol: 'client' }, r.id); }
@@ -560,8 +654,11 @@
       ['equipo', '💈', 'Mi equipo', 'Barberos y permisos'],
       ['caja', '💵', 'Caja', 'Cortes, ventas y comisiones'],
       ['estadisticas', '📊', 'Estadísticas', 'Ventas, servicios, horas'],
+      ['resumen', '📈', 'Resumen del mes', 'Cuánto ganaste y tu mejor día'],
+      ['volver', '👋', 'Clientes que no vuelven', 'Recupéralos con una oferta'],
       ['calificaciones', '⭐', 'Calificaciones', bar().calificacion && bar().calificacion.total ? bar().calificacion.promedio + ' ★ (' + bar().calificacion.total + ')' : 'Lo que dicen tus clientes'],
       ['enlace', '🔗', 'Enlace y QR', 'Para que tus clientes reserven'],
+      ['invitar', '🤝', 'Invita una barbería', K.regla('dias_referido') ? 'Gana ' + K.regla('dias_referido') + ' días de Premium' : 'Comparte la app'],
       ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbele a Josué']
@@ -569,6 +666,8 @@
       ['tiempos', '⏱️', 'Mis tiempos', 'Cuánto dura cada corte y tu descanso'],
       ['caja', '💵', 'Mi caja', 'Tus cortes'],
       ['estadisticas', '📊', 'Mis estadísticas', 'Tus cortes y clientes'],
+      ['milink', '🔳', 'Mi link y QR', 'Tus clientes te reservan directo'],
+      ['volver', '👋', 'Clientes que no vuelven', 'Escríbeles en 1 toque'],
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbele a Josué']
     ];
@@ -588,11 +687,14 @@
       mostrar('chat'); if (adminId) Chat.abrir(adminId, { nombre: 'CodeFix (soporte)', rol: 'admin', avatar: '🛟' }); return;
     }
     if (s === 'clientes') { mostrar('clientes'); return; }
-    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan'];
+    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'resumen', 'invitar'];
     if (!dueno() && soloDueno.includes(s)) { mas(); return; }
     if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); }
     const F = { equipo: secEquipo, servicios: secServicios, ofertas: secOfertas, estadisticas: secEstadisticas, negocio: secNegocio, horario: secHorario, links: secLinks,
-      caja, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, plan: () => P.plan(seccion('💎 Mi plan')),
+      caja, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
+      milink: () => P.compartir({ el: seccion('🔳 Mi link y QR'), link: K.linkBarberia(bar().codigo, yo.id), archivo: 'qr-' + primerNombre(yo.nombre),
+        texto: 'Con este link o QR tus clientes reservan <b>directo contigo</b> en ' + esc(bar().nombre) + ' (sin cuenta o con su cuenta).',
+        mensaje: '💈 Reserva tu hora conmigo en ' + bar().nombre }), plan: () => P.plan(seccion('💎 Mi plan')),
       perfil: () => P.perfil(seccion('👤 Mi cuenta'), { tour: (f) => P.tour(pasos(), f), alGuardar: () => { yo = K.cuenta; } }) };
     if (F[s]) F[s]();
   }
@@ -753,12 +855,12 @@
     const leerH = editorHorario(hz, b.horario || bar().horario);
     h.q('[data-hp]').onchange = (e) => hz.classList.toggle('hidden', !e.target.checked);
     h.q('[data-foto]').onclick = async () => { foto = await C.elegirImagen(220, 0.75); if (foto) C.toast('📷 Foto lista, toca Guardar'); };
-    if (!premium() && !esYo) { P.bloquear(h.q('#ePerfil'), 'Editar el perfil de tus barberos'); }
+    if (!tiene('editar_barberos') && !esYo) { P.bloquear(h.q('#ePerfil'), 'Editar el perfil de tus barberos'); }
     if (!tiene('horario_barbero')) P.bloquear(h.q('#eHorario'), 'Horario propio por barbero');
     h.q('[data-g]').onclick = (ev) => C.accion(ev.target, async () => {
       const p = {};
       if (h.q('[data-act]')) p.activo = h.q('[data-act]').checked;
-      if (premium() || esYo) { p.nombre = h.q('[data-n]').value; p.descripcion = h.q('[data-d]').value; if (foto) p.foto = foto; }
+      if (tiene('editar_barberos') || esYo) { p.nombre = h.q('[data-n]').value; p.descripcion = h.q('[data-d]').value; if (foto) p.foto = foto; }
       if (tiene('horario_barbero')) p.horario = h.q('[data-hp]').checked ? leerH() : null;
       await K.rpc('guardar_barbero', { p_id: b.id, p });
       if (h.q('[data-agenda]').checked !== !!b.agenda_abierta) {
@@ -841,16 +943,17 @@
       '<label>Descripción</label><input data-desc maxlength="200" value="' + esc(s ? s.descripcion || '' : '') + '"></details>' +
       '<label class="check"><input type="checkbox" data-v' + (!s || s.visible ? ' checked' : '') + '> Visible para los clientes</label>' +
       '<div id="sPrem"><label>Foto ⭐</label><div class="btns" style="margin-top:0"><button type="button" class="gris small" data-foto>📷 ' + (s && s.foto ? 'Cambiar foto' : 'Poner foto') + '</button></div>' +
-      (B.barberos.length > 1 ? '<label>¿Quién lo hace? ⭐ <span class="opc">(nada marcado = todos)</span></label>' + B.barberos.map((b) => '<label class="check"><input type="checkbox" data-bb="' + b.id + '"' + (s && s.barberos && s.barberos.includes(b.id) ? ' checked' : '') + '> ' + esc(b.nombre) + '</label>').join('') : '') + '</div>' +
+      (B.barberos.length > 1 ? '<div id="sBarb"><label>¿Quién lo hace? ⭐ <span class="opc">(nada marcado = todos)</span></label>' + B.barberos.map((b) => '<label class="check"><input type="checkbox" data-bb="' + b.id + '"' + (s && s.barberos && s.barberos.includes(b.id) ? ' checked' : '') + '> ' + esc(b.nombre) + '</label>').join('') + '</div>' : '') + '</div>' +
       '<div class="btns"><button class="full" data-g>Guardar</button>' + (s ? '<button class="danger" data-del>Borrar</button>' : '') + '</div>');
     let foto;
     h.qa('[data-dur]').forEach((b) => b.onclick = () => { h.q('[data-d]').value = b.dataset.dur; });
-    if (!premium()) P.bloquear(h.q('#sPrem'), 'Fotos y servicios por barbero');
+    if (!tiene('fotos_servicios')) P.bloquear(h.q('[data-foto]'), 'Fotos de servicios');
+    if (!tiene('servicios_barbero') && h.q('#sBarb')) P.bloquear(h.q('#sBarb'), 'Qué barbero hace cada servicio');
     h.q('[data-foto]').onclick = async () => { foto = await C.elegirImagen(500, 0.7); if (foto) C.toast('📷 Foto lista'); };
     h.q('[data-g]').onclick = (ev) => C.accion(ev.target, async () => {
       const p = { id: s ? s.id : '', nombre: h.q('[data-n]').value, precio: +h.q('[data-p]').value || 0, duracion: +h.q('[data-d]').value,
         categoria: h.q('[data-c]').value, descripcion: h.q('[data-desc]').value, visible: h.q('[data-v]').checked, orden: s ? s.orden : null,
-        barberos: premium() ? [...h.qa('[data-bb]:checked')].map((x) => x.dataset.bb) : [] };
+        barberos: tiene('servicios_barbero') ? [...h.qa('[data-bb]:checked')].map((x) => x.dataset.bb) : [] };
       if (foto) p.foto = foto;
       await K.rpc('guardar_servicio', { p });
       h.cerrar(); secServicios();
@@ -956,6 +1059,8 @@
       '<label>Portada <span class="opc">(foto grande en tu link y en el inicio de tus clientes)</span></label><div class="btns" style="margin-top:0"><button class="gris small" id="bPortada">🖼️ ' + (b.portada ? 'Cambiar' : 'Subir') + ' portada</button>' + (b.portada ? '<button class="gris small" id="bSinPortada">Quitar</button>' : '') + '</div></div>' +
       '<div class="card" id="cCom"><h2>💈 Comisión y sellos</h2><div class="row"><div><label>Comisión barberos (%)</label><input data-k="comision" type="number" min="0" max="100" value="' + b.comision + '"></div>' +
       '<div><label>Sellos para corte gratis</label><input data-k="sellos_meta" type="number" min="3" max="30" value="' + b.sellos_meta + '"></div></div></div>' +
+      '<div class="card" id="cCumple"><h2>🎂 Regalo de cumpleaños</h2><p class="muted chico" style="margin-top:-6px">El día de su cumpleaños, a tus clientes con cuenta les llega este regalo (vale 7 días). Vacío = no se envía.</p>' +
+      '<input data-k="regalo_cumple" maxlength="120" placeholder="Ej: 20% de descuento en tu corte" value="' + esc(b.regalo_cumple || '') + '"></div>' +
       '<div class="btns"><button class="grande full" id="bGuardarAj">Guardar</button></div>';
     let logo, portada, color = b.color || '';
     $('bLogo').onclick = async () => { const f = await C.elegirImagen(160, 0.8); if (!f) return; logo = f; $('aLogo').style.cssText = C.fondo(f); $('aLogo').textContent = ''; };
@@ -965,11 +1070,13 @@
     $('bPortada').onclick = async () => { const f = await C.elegirImagen(1100, 0.65); if (f) { portada = f; C.toast('🖼️ Portada lista, toca Guardar'); } };
     if ($('bSinPortada')) $('bSinPortada').onclick = () => { portada = ''; C.toast('Portada quitada, toca Guardar'); };
     if (!colores) P.bloquear($('cPrem'), 'Colores y portada');
-    if (!premium()) P.bloquear($('cCom'), 'Comisiones y sellos');
+    if (!tiene('comisiones')) P.bloquear($('cCom'), 'Comisiones y sellos');
+    if (!tiene('cumpleanos')) P.bloquear($('cCumple'), 'Regalo de cumpleaños automático');
     $('bGuardarAj').onclick = (ev) => C.accion(ev.target, async () => {
       const p = {};
       z.querySelectorAll('[data-k]').forEach((i) => {
-        if (!premium() && (i.dataset.k === 'comision' || i.dataset.k === 'sellos_meta')) return;
+        if (!tiene('comisiones') && (i.dataset.k === 'comision' || i.dataset.k === 'sellos_meta')) return;
+        if (!tiene('cumpleanos') && i.dataset.k === 'regalo_cumple') return;
         p[i.dataset.k] = i.type === 'number' ? (+i.value || 0) : i.value;
       });
       if (logo !== undefined) p.logo = logo;
@@ -1058,6 +1165,9 @@
       }).join('') +
       '<p class="muted chico">Sin link, el cliente abona por transferencia con los datos de abajo. Sin link ni datos, no recibes reservas sin cuenta.</p>' +
       '<label>Datos de transferencia</label><textarea id="tTransf" maxlength="400" placeholder="Nombre, RUT, banco, tipo y número de cuenta, correo">' + esc(b.datos_transferencia || '') + '</textarea>' +
+      '<label>⭐ Abono para clientes Premium <span class="opc">(opcional: menor que el normal, o 0 = sin abono)</span></label>' +
+      '<input id="tAbP" type="number" inputmode="numeric" min="0" max="100000" placeholder="Igual que el normal" value="' + (b.abono_premium == null ? '' : b.abono_premium) + '">' +
+      '<p class="muted chico">Un beneficio para que tus clientes se hagan Premium: reservan pagando menos abono (o nada).</p>' +
       '<div class="btns"><button class="grande full" id="bGuardarL">Guardar</button></div></div>';
     z.querySelectorAll('input[name="pagoActivo"]').forEach((r) => r.onchange = () => {
       z.querySelectorAll('[data-pago]').forEach((c) => {
@@ -1070,7 +1180,7 @@
       const caja = (n) => z.querySelector('[data-pago="' + n + '"]');
       const leer = (n) => ({ monto: caja(n).querySelector('[data-pm]').value, link: caja(n).querySelector('[data-pl]').value, texto: caja(n).querySelector('[data-px]').value });
       const activo = +((z.querySelector('input[name="pagoActivo"]:checked') || {}).value || 1);
-      yo = await K.rpc('guardar_barberia', { p: { pagos: { activo, p1: leer(1), p2: leer(2) }, datos_transferencia: $('tTransf').value } });
+      yo = await K.rpc('guardar_barberia', { p: { pagos: { activo, p1: leer(1), p2: leer(2) }, datos_transferencia: $('tTransf').value, abono_premium: $('tAbP').value } });
       secLinks();
     }, '✅ Links guardados');
   }
@@ -1087,6 +1197,77 @@
       (d.ultimas.length ? '<div class="card"><h2>💬 Últimas</h2><ul class="list">' + d.ultimas.map((q) => '<li><div class="grow"><span class="estrellas">' + '★'.repeat(q.estrellas) + '<span style="color:var(--line)">' + '★'.repeat(5 - q.estrellas) + '</span></span>' +
         ' <b>' + esc(q.nombre || 'Cliente') + '</b>' + (q.comentario ? '<div class="sub">' + esc(q.comentario) + '</div>' : '') + '</div><span class="muted chico">' + C.hace(q.created_at) + '</span></li>').join('') + '</ul></div>' : '') +
       '<p class="muted chico">Tú también calificas a tus clientes después de atenderlos (o si no vinieron). Con ' + K.regla('estrellas_lista_negra') + ' estrella(s) o menos quedan en la lista negra de Clientes.</p>';
+  }
+
+  /* ----- v2.1: Resumen del mes (dueño) ----- */
+  let resMes = 'actual';
+  async function secResumen() {
+    const z = seccion('📈 Resumen del mes');
+    const f = C.hoy();
+    const [y, m] = f.split('-').map(Number);
+    const ant = new Date(Date.UTC(y, m - 2, 1));
+    const mes = resMes === 'actual' ? f : ant.getUTCFullYear() + '-' + C.pad(ant.getUTCMonth() + 1) + '-01';
+    z.innerHTML = '<div class="seg" style="margin-bottom:12px"><button data-r="actual">Este mes</button><button data-r="pasado">Mes pasado</button></div><div id="resZona"><p class="muted">Cargando…</p></div>';
+    z.querySelectorAll('[data-r]').forEach((b) => { b.classList.toggle('on', b.dataset.r === resMes); b.onclick = () => { resMes = b.dataset.r; secResumen(); }; });
+    let x;
+    try { x = await K.rpc('resumen_mes', { p_mes: mes }); } catch (e) { if ($('resZona')) $('resZona').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (!$('resZona')) return;
+    const bl = x.bloqueado;
+    const plata = (v) => bl ? '<span class="borroso">$123.456</span>' : C.plata(v);
+    const txt = (v) => bl ? '<span class="borroso">Bloqueado</span>' : esc(v || '—');
+    const dif = !bl && x.ventas_ant ? Math.round((x.ventas - x.ventas_ant) / x.ventas_ant * 100) : null;
+    $('resZona').innerHTML = '<div class="card' + (bl ? ' plata" id="upRes' : '') + '"><div class="stats" style="margin:0">' +
+      '<div class="card"><small>💵 Ganaste</small><b>' + plata(x.ventas) + '</b>' + (dif !== null ? '<small>' + (dif >= 0 ? '↑' : '↓') + Math.abs(dif) + '% vs mes anterior</small>' : '') + '</div>' +
+      '<div class="card"><small>✂️ Cortes</small><b>' + x.cortes + '</b></div><div class="card"><small>👥 Clientes</small><b>' + x.clientes + '</b><small>' + x.nuevos + ' nuevos</small></div>' +
+      '<div class="card"><small>🚫 No vinieron</small><b style="color:var(--bad)">' + x.no_vino + '</b><small>perdiste ' + plata(x.perdido_no_vino) + '</small></div>' +
+      '<div class="card"><small>💳 Abonos</small><b>' + plata(x.abonos) + '</b></div><div class="card"><small>👋 No vuelven</small><b>' + (x.sin_volver || 0) + '</b></div></div>' +
+      '<ul class="list" style="margin-top:10px"><li><span class="grow">📆 Mejor día</span><b>' + (x.mejor_dia ? C.DIAS_LARGO[x.mejor_dia - 1] : '—') + '</b></li>' +
+      '<li><span class="grow">💈 Barbero con más cortes</span><b>' + txt(x.mejor_barbero) + '</b></li><li><span class="grow">✂️ Servicio estrella</span><b>' + txt(x.servicio_top) + '</b></li></ul>' +
+      (bl ? '<p class="muted chico">🔒 Con Premium ves tus ganancias, lo que perdiste por los que no vinieron, tu mejor barbero y te llega este resumen solo cada mes.</p>' : '<p class="muted chico">El día 1 de cada mes te llega este resumen del mes anterior 🔔.</p>') + '</div>';
+    if ($('upRes')) $('upRes').onclick = () => P.upsell('Resumen del mes con tus ganancias');
+  }
+
+  /* ----- v2.1: Clientes que no vuelven (oferta por WhatsApp en 1 toque) ----- */
+  async function secVolver() {
+    const z = seccion('👋 Clientes que no vuelven');
+    z.innerHTML = '<p class="muted">Cargando…</p>';
+    let x;
+    try { x = await K.rpc('no_vuelven'); } catch (e) { z.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    const b = bar();
+    const base = b.mensaje_volver || '¡Te echamos de menos en ' + b.nombre + '! 💈 Esta semana tienes 10% de descuento en tu corte. Reserva aquí: ' + linkClientes();
+    const msg = (c) => 'Hola ' + primerNombre(c.nombre) + ' 👋 ' + base;
+    if (x.bloqueado) {
+      z.innerHTML = '<div class="card plata" id="upVolver"><h2>👋 ' + x.total + ' cliente(s) no vuelven hace +' + x.dias + ' días</h2><p class="muted">Ve quiénes son, cuántas veces vinieron y escríbeles con una oferta por WhatsApp en 1 toque.</p>' +
+        '<ul class="list">' + ['Juan P.', 'Diego R.', 'Matías S.'].map((n) => '<li><span class="grow borroso">' + n + '</span><span class="btn small wsp">💬 Oferta</span></li>').join('') + '</ul></div>';
+      $('upVolver').onclick = () => P.upsell('Clientes que no vuelven');
+      return;
+    }
+    z.innerHTML = '<div class="card"><p class="muted chico" style="margin-top:0">Su última visita fue hace más de ' + x.dias + ' días y no tienen hora agendada.</p>' +
+      (dueno() ? '<label>Mensaje para invitarlos a volver</label><textarea id="tVolver" maxlength="300">' + esc(base) + '</textarea><div class="btns"><button class="small gris" id="bGVolver">Guardar mensaje</button></div>' : '') + '</div>' +
+      (x.lista.length ? '<div class="card"><ul class="list">' + x.lista.map((c, i) => '<li><div class="grow"><b>' + esc(c.nombre) + '</b><div class="sub">' + c.visitas + ' visita' + (c.visitas === 1 ? '' : 's') +
+        ' · última hace ' + c.dias + ' días' + (c.cliente_id ? '' : ' · sin cuenta') + '</div></div>' +
+        (c.telefono ? '<a class="btn small wsp" target="_blank" rel="noopener" data-v="' + i + '" href="' + C.wa(c.telefono, msg(c)) + '">💬 Oferta</a>' : '<span class="muted chico">sin WhatsApp</span>') + '</li>').join('') + '</ul></div>'
+        : '<div class="card empty"><span class="ico">🎉</span>¡Todos tus clientes están volviendo!</div>');
+    if ($('tVolver')) $('tVolver').oninput = () => z.querySelectorAll('[data-v]').forEach((a) => {
+      const c = x.lista[+a.dataset.v]; a.href = C.wa(c.telefono, 'Hola ' + primerNombre(c.nombre) + ' 👋 ' + $('tVolver').value);
+    });
+    if ($('bGVolver')) $('bGVolver').onclick = (ev) => C.accion(ev.target, async () => { yo = await K.rpc('guardar_barberia', { p: { mensaje_volver: $('tVolver').value } }); }, '✅ Mensaje guardado');
+  }
+
+  /* ----- v2.1: Invita a otra barbería (referidos) ----- */
+  async function secInvitar() {
+    const z = seccion('🤝 Invita una barbería');
+    const dias = K.regla('dias_referido');
+    const zz = P.compartir({ el: z, link: K.linkRegistro(bar().codigo), archivo: 'invita-' + bar().codigo,
+      texto: '¿Conoces otra barbería? Compártele este link o QR: crea su app en minutos' + (K.regla('dias_regalo') ? ' con ' + K.regla('dias_regalo') + ' días de Premium de regalo' : '') + '.' +
+        (dias ? '<br><b>Cuando pague su primer mes, tú ganas ' + dias + ' días de Premium gratis.</b>' : ''),
+      mensaje: '💈 Te recomiendo esta app de reservas para tu barbería (yo la uso en ' + bar().nombre + '). Créala aquí', extra: '<div id="lRef"></div>' });
+    try {
+      const r = await K.rpc('mis_referidos');
+      if (!zz.querySelector('#lRef')) return;
+      zz.querySelector('#lRef').innerHTML = '<div class="card"><h2>📋 Tus invitadas</h2>' + (r.lista.length ? '<ul class="list">' + r.lista.map((x) => '<li><span class="grow"><b>' + esc(x.nombre) + '</b><div class="sub">se registró ' + P.fechaCorta(x.created_at) + '</div></span>' +
+        (x.pagado ? '<span class="pill ok">🎁 ganaste</span>' : '<span class="pill">esperando su pago</span>') + '</li>').join('') + '</ul>' : '<p class="muted" style="margin:0">Aún no se registra nadie con tu link.</p>') + '</div>';
+    } catch (e) { /* nada */ }
   }
 
   /* ----- Enlace y QR para clientes ----- */

@@ -23,7 +23,7 @@ end $$;
 Si todavía no uniste la rama, pega el contenido completo de `instalar.sql`).
 
 Si aparece un aviso de operación destructiva, toca **Run this query** (es normal).
-Al final debe decir **"Barbería instalada ✅ versión 2.0"**. Se puede volver a correr cuando haya una versión nueva: no borra datos.
+Al final debe decir **"Barbería instalada ✅ versión 2.1"**. Se puede volver a correr cuando haya una versión nueva: no borra datos.
 
 > **Para actualizar a una versión nueva** basta con correr este mismo paso 1 otra vez (también puedes copiar la consulta en
 > la app: **Administración → Ajustes → Versión → Copiar consulta**). Al terminar, la versión se **libera sola** y a todos les
@@ -83,11 +83,20 @@ Su **Inicio** le muestra lo que le falta configurar:
 6. **Inicio → Tu link para clientes** (o Más → Enlace y QR): con ese link o QR los clientes **reservan sin cuenta** (nombre + WhatsApp), pagan el abono,
    suben el comprobante y siguen su hora en su link personal; o se crean su cuenta.
 
+## 6. Novedades v2.1 (registro de barberías, socios y QR)
+- **Resumen → Link y QR para nuevas barberías**: cualquiera crea su barbería sola (parte con los días de regalo de Reglas). Te llega un aviso por cada una.
+  Para cerrarlo: **Ajustes → Reglas → Registro abierto de barberías = 0**. Necesita **Allow new users to sign up** activado (paso 2).
+- **Ajustes → Socios → + Socio**: tu socio entra al mismo panel y ve todo, pero **no crea ni borra** (barberías, socios, calificaciones, limpiezas, quitar Premium).
+  Le marcas qué puede hacer: pagos, Premium y días, claves y suspensiones, ajustes (precios, planes, reglas, textos) y avisos masivos.
+  Cada socio tiene su link/QR de registro: las barberías que entren con él quedan a su nombre.
+- **Referidos**: cada barbería tiene en Más → Invita una barbería su QR. Cuando la invitada paga su primer mes, la que invitó gana los días de Reglas.
+- **3 meses por adelantado**: en Precios y links pon (opcional) el link con el monto de 3 meses con descuento (Reglas → descuento).
+
 ## Revisar que todo esté activo
 SQL Editor:
 ```sql
 select jobname, schedule from cron.job;           -- barberia-tick y barberia-push
-select public.db_version();                        -- 2.0
+select public.db_version();                        -- 2.1
 ```
 Si `cron.job` no existe: **Database → Extensions** → activa **pg_cron** y **pg_net**, y vuelve a correr el paso 1.
 
@@ -104,4 +113,4 @@ La **service_role** ni la **secret key** de Supabase. La clave **anon public** s
 supabase/pruebas/correr.sh "-h localhost -U postgres"
 ```
 Corre `stub.sql` (simula Supabase), `instalar.sql` y `prueba.sql` (reservas con y sin cuenta, abono en revisión, cancelación con devolución/saldo, reagendar,
-calificaciones y lista negra, pagos de Premium, chat, caja y permisos). `supabase/pruebas/actualizar.sh` prueba que actualizar desde la 1.4 no pierde nada.
+calificaciones y lista negra, pagos de Premium, chat, caja y permisos). `supabase/pruebas/actualizar.sh` prueba que actualizar desde la 1.4 y desde la 2.0 no pierde nada.

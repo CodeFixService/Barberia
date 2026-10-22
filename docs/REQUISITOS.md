@@ -323,3 +323,15 @@ parte justo cuando termina la anterior (también después de la colación o de u
 
 **Página de la barbería (link o QR):** arriba lo principal, la cuenta (Entrar / Crear mi cuenta; quien ya tiene sesión entra directo a su app);
 debajo, reservar sin cuenta (solo agenda y valida con el comprobante).
+
+---
+
+## v2.1 · Crecer y vender Premium (acordado con Josué)
+- **Socio**: hace lo mismo que el admin en el panel, menos crear y borrar. El admin elige sus permisos (pagos, Premium, claves y suspensiones, ajustes, avisos).
+- **QR en todos los perfiles**. El de CodeFix (y el de cada socio) lleva a crear una barbería; el de cada barbería, a reservar en ella; el de "Invita una barbería", al registro con referido.
+- **Registro abierto de barberías** con regla para cerrarlo y máximo 30 por hora. Referido: la que invita gana días de Premium cuando la invitada paga su primer mes.
+- Arreglos: WhatsApp al cliente sin cuenta al aprobar o rechazar; devolución sin verificar ("devuélvelo solo si llegó" / "No llegó"); duración real por barbero;
+  fotos de servicios, servicios por barbero, editar barberos y comisión/sellos como opciones sí/no; máximo de horas apartadas sin pagar (Reglas, 10).
+- Premium barbería: resumen del mes (Free borroso), clientes que no vuelven, recordatorio por WhatsApp, regalo de cumpleaños. Pago por 3 meses con descuento (15 %).
+- Premium cliente: prioridad en viernes y sábados (Free hasta 3 días antes) y abono rebajado o sin abono si la barbería lo ofrece.
+- Admin: Premium por vencer este mes con cobro por WhatsApp y tasa de renovación.

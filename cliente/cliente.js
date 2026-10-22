@@ -28,6 +28,19 @@
   const reservables = () => B.barberos.filter((b) => b.reservable);
   const carroItems = () => [...carro].map(servicio).filter(Boolean);
   const carroDur = () => carroItems().reduce((t, s) => t + s.duracion, 0);
+  const hm = (m) => (m >= 60 ? Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) : '') : m + ' min');
+  // v2.1: lo que dura de verdad con el barbero elegido (sus tiempos + su descanso), no la duración general de la barbería.
+  const durServ = (s) => { const x = barberoSel && barberoSel !== '*' ? barbero(barberoSel) : null; const d = x && x.duraciones && +x.duraciones[s.id]; return d > 0 ? d : s.duracion; };
+  function durTxt() {
+    if (!carro.size) return '';
+    if (barberoSel && barberoSel !== '*' && barbero(barberoSel)) return '≈ ' + hm(durCon(barbero(barberoSel))) + ' con ' + barbero(barberoSel).nombre.split(' ')[0];
+    const ds = reservables().map(durCon);
+    if (!ds.length) return carroDur() + ' min';
+    const a = Math.min(...ds), z = Math.max(...ds);
+    return '≈ ' + (a === z ? hm(a) : hm(a) + ' a ' + hm(z)) + ' según el barbero';
+  }
+  // v2.1: abono que paga este cliente (la barbería puede rebajarlo o quitarlo a los Premium).
+  const abonoMio = () => { const b = bar(); return prem() && b.abono_premium != null ? Math.min(b.abono, b.abono_premium) : b.abono; };
   const carroTotal = () => carroItems().reduce((t, s) => t + s.precio, 0);
   const horarios = () => Object.fromEntries(B.barberos.map((b) => [b.id, b.horario]));
 
@@ -86,6 +99,12 @@
     }
     if (yo.saldo > 0) html += '<div class="card"><div class="flex"><span style="font-size:28px">💰</span><div class="grow"><b>Tienes ' + C.plata(yo.saldo) + ' a favor</b><div class="sub muted">Se usa solo como abono en tu próxima reserva.</div></div></div></div>';
     html += '<div id="sellos"></div>';
+    // v2.1: regalo de cumpleaños (vale 7 días desde el cumpleaños).
+    if (yo.cumple && b.regalo_cumple && K.tiene('barberia', 'cumpleanos', !!b.premium)) {
+      const cf = C.hoy().slice(0, 4) + yo.cumple.slice(4);
+      if (C.hoy() >= cf && C.hoy() <= C.sumarDias(cf, 7)) html += '<div class="card oro-marco"><div class="flex"><span style="font-size:32px">🎂</span><div class="grow"><b>¡Feliz cumpleaños!</b>' +
+        '<div class="sub">' + esc(b.nombre) + ' te regala: <b>' + esc(b.regalo_cumple) + '</b>. Vale hasta el ' + P.fechaCorta(C.sumarDias(cf, 7) + 'T12:00:00') + '. Muéstralo al llegar.</div></div></div></div>';
+    }
     // Ofertas
     const of = B.ofertas || [];
     html += '<div class="sec-tit" id="ofertas">🏷️ Ofertas</div>';
@@ -102,6 +121,9 @@
       (!x.reservable ? '<div class="sub">🔴 Agenda llena · escríbele por mensaje</div>' : '') + '</div>' +
       (yo.favorito === x.id ? '<span class="pill oro">❤️ Favorito</span>' : '') +
       '<button class="icono" data-chat="' + x.id + '" aria-label="Escribir">💬</button></li>').join('') + '</ul></div>';
+    // v2.1: compartir la barbería con un amigo (link y QR).
+    html += '<div class="card tap" id="cCompartir"><div class="flex"><span style="font-size:28px">📲</span><div class="grow"><b>Recomienda ' + esc(b.nombre) + '</b>' +
+      '<div class="sub muted">Compártele el link o el QR a un amigo para que reserve.</div></div><span>›</span></div></div>';
     // Datos de la barbería
     const sem = b.horario || [];
     html += '<div class="sec-tit">📍 La barbería</div><div class="card">' + (b.direccion ? '<p style="margin-top:0">📍 ' + esc(b.direccion) + '</p>' : '') +
@@ -118,6 +140,8 @@
     };
     el.querySelectorAll('[data-chat]').forEach((x) => x.onclick = () => { location.hash = 'chat?con=' + x.dataset.chat; });
     el.querySelectorAll('.oferta.plata').forEach((x) => x.onclick = () => P.upsell('Ofertas VIP'));
+    $('cCompartir').onclick = () => P.compartir({ titulo: '📲 Recomienda ' + b.nombre, link: K.linkBarberia(b.codigo), archivo: 'qr-' + b.codigo,
+      texto: 'Tu amigo reserva su hora en <b>' + esc(b.nombre) + '</b> con este link o QR, sin crear cuenta.', mensaje: '💈 Te recomiendo ' + b.nombre + ', reserva tu hora aquí' });
     activarTarjetas(el);
     // Sellos (si la barbería es Premium)
     K.rpc('mis_sellos').then((s) => {
@@ -139,7 +163,7 @@
     if (h.estado === 'en_revision' || h.estado === 'por_aprobar') extra = '<p class="muted chico" style="margin:8px 0 0">🧾 ' + (h.visto_barbero ? '<span class="ticks visto">✓✓</span> ' + esc(h.barbero) + ' vio tu comprobante. ' : '') +
       'Tu barbero está verificando el abono: apenas lo apruebe, tu hora queda agendada. Tu hora ya está guardada.</p>';
     if (h.estado === 'agendada' || h.estado === 'confirmada') extra = '<p class="chico" style="margin:8px 0 0;color:var(--ok)">✅ Agendada' + (h.confirmada_at ? ' el ' + C.cuando(h.confirmada_at) : '') + '. ¡Te esperamos!</p>';
-    if (h.estado === 'anulada') extra = '<p class="muted chico" style="margin:8px 0 0">' + esc(h.motivo || 'Anulada') + (h.abono_destino === 'saldo' ? ' · abono a favor' : h.abono_destino === 'perdido' ? ' · abono perdido' :
+    if (h.estado === 'anulada') extra = '<p class="muted chico" style="margin:8px 0 0">' + esc(h.motivo || 'Anulada') + (h.abono_destino === 'saldo' ? ' · abono a favor' : h.devolucion === 'no_llego' ? ' · la barbería no recibió la transferencia' : h.abono_destino === 'perdido' ? ' · abono perdido' :
       h.abono_destino === 'devolucion' ? ' · ' + (h.devolucion === 'devuelta' ? 'abono devuelto ✅' : 'te devolverán el abono') : '') + '</p>';
     if (h.estado === 'atendida' && !h.calificada && futura === false) extra = '<div class="btns"><button class="small alt" data-calificar="' + h.id + '">⭐ Calificar a la barbería</button></div>';
     return '<div class="card' + (compacta ? ' proxima' : '') + '"><div class="hora-card"><div class="fecha"><small>' + C.DIAS[C.dow(f) - 1] + '</small><b>' + (+f.slice(8)) + '</b><i>' + C.horaDe(h.inicio) + '</i></div>' +
@@ -207,18 +231,19 @@
       if (cat) html += '<div class="sec-tit">' + esc(cat) + '</div>';
       html += B.servicios.filter((s) => (s.categoria || '') === cat).map((s) =>
         '<div class="serv' + (carro.has(s.id) ? ' en-carro' : '') + '" data-s="' + s.id + '"><span class="foto" style="' + C.fondo(s.foto) + '">' + (s.foto ? '' : '✂️') + '</span>' +
-        '<div class="grow"><b>' + esc(s.nombre) + '</b><span class="sub muted">' + s.duracion + ' min' + (s.descripcion ? ' · ' + esc(s.descripcion) : '') + '</span></div>' +
+        '<div class="grow"><b>' + esc(s.nombre) + '</b><span class="sub muted">' + durServ(s) + ' min' + (s.descripcion ? ' · ' + esc(s.descripcion) : '') + '</span></div>' +
         '<div style="text-align:right"><div class="precio-s">' + C.plata(s.precio) + '</div><button class="small ' + (carro.has(s.id) ? 'ok' : 'alt') + '">' + (carro.has(s.id) ? '✓' : '+ Agregar') + '</button></div></div>').join('');
     });
     html += '<div class="paso"><span class="n">2</span><b>Elige tu barbero</b></div><div class="barberos">';
     if (reservables().length > 1) html += '<button class="barb' + (barberoSel === '*' ? ' on' : '') + '" data-b="*"><span class="av">🎲</span>El que esté libre<small>más horas</small></button>';
     html += B.barberos.map((x) => '<button class="barb' + (barberoSel === x.id ? ' on' : '') + (x.reservable ? '' : ' cerrada') + '" data-b="' + x.id + '">' + C.avatar(x, yo.favorito === x.id ? 'premium' : '') +
-      esc(x.nombre.split(' ')[0]) + '<small>' + (x.reservable ? (yo.favorito === x.id ? '❤️ favorito' : 'disponible') : '🔴 agenda llena') + '</small></button>').join('');
-    html += '</div>';
+      esc(x.nombre.split(' ')[0]) + '<small>' + (x.reservable ? (carro.size ? '≈ ' + hm(durCon(x)) : yo.favorito === x.id ? '❤️ favorito' : 'disponible') : '🔴 agenda llena') + '</small></button>').join('');
+    html += '</div>' + (carro.size ? '<p class="muted chico" style="margin:6px 4px 0">⏱️ Tu cita dura ' + esc(durTxt()) + ' (incluye su descanso).</p>' : '');
     html += '<div class="paso"><span class="n">3</span><b class="grow">Elige día y hora</b></div>' +
       '<div class="seg" style="margin-bottom:10px"><button data-vista="dia">Día</button><button data-vista="semana">Semana</button><button data-vista="mes">Mes</button></div>' +
       '<div id="cal"></div><div class="leyenda"><span class="l">Libre</span><span class="o">Ocupado</span><span class="m">Mía</span></div>' +
-      '<p class="muted chico">Abono para reservar: <b>' + C.plata(b.abono) + '</b> (se descuenta del total). Reservas hasta ' + diasMax() + ' días adelante' + (prem() ? '' : ' · <a href="#plan">Premium: ' + K.limite('dias', true) + '</a>') + '.</p>';
+      '<p class="muted chico">Abono para reservar: <b>' + C.plata(abonoMio()) + '</b>' + (prem() && abonoMio() < b.abono ? ' ⭐ (rebajado por ser Premium)' : '') + ' (se descuenta del total).' +
+      (!prem() && b.abono_premium != null && b.abono_premium < b.abono ? ' <a href="#plan">⭐ Premium: abono ' + (b.abono_premium ? C.plata(b.abono_premium) : 'gratis') + '</a>.' : '') + ' Reservas hasta ' + diasMax() + ' días adelante' + (prem() ? '' : ' · <a href="#plan">Premium: ' + K.limite('dias', true) + '</a>') + '.</p>';
     el.innerHTML = html;
     el.querySelectorAll('.serv').forEach((x) => x.onclick = () => {
       const id = x.dataset.s;
@@ -243,7 +268,7 @@
     const bb = $('carroBarra');
     if (!carro.size || vistaActual !== 'agendar') { bb.classList.add('hidden'); return; }
     bb.classList.remove('hidden');
-    bb.innerHTML = '<div class="grow"><b>🛒 ' + carro.size + ' servicio' + (carro.size > 1 ? 's' : '') + ' · ' + C.plata(carroTotal()) + '</b><small>' + carroDur() + ' min · elige una hora abajo 👇</small></div>' +
+    bb.innerHTML = '<div class="grow"><b>🛒 ' + carro.size + ' servicio' + (carro.size > 1 ? 's' : '') + ' · ' + C.plata(carroTotal()) + '</b><small>' + esc(durTxt()) + ' · elige una hora abajo 👇</small></div>' +
       '<button class="small gris" id="bVaciar" style="background:transparent;color:inherit;border-color:rgba(255,255,255,.3)">Vaciar</button>';
     $('bVaciar').onclick = () => { carro.clear(); pintarAgendar(); };
   }
@@ -282,7 +307,10 @@
       cal.innerHTML = '<div class="dias" id="tira"></div><div class="card" id="slots"></div>';
       A.tiraDias($('tira'), { cuantos: ventana(), sel: fechaSel, info: infoDia, alElegir: (f) => { fechaSel = f; pintarCalendario(); } });
       // Días más allá del límite: plateados (Premium).
-      $('tira').querySelectorAll('.dia').forEach((d) => { if (d.dataset.f > lim) P.bloquear(d, 'Reservar hasta ' + K.limite('dias', true) + ' días adelante'); });
+      $('tira').querySelectorAll('.dia').forEach((d) => {
+        if (d.dataset.f > lim) P.bloquear(d, 'Reservar hasta ' + K.limite('dias', true) + ' días adelante');
+        else if (K.prioridadBloquea(d.dataset.f, prem())) P.bloquear(d, 'Prioridad Premium: viernes y sábados con más de ' + K.regla('dias_prioridad') + ' días');
+      });
       const s = horasDe(fechaSel);
       const dh = A.diaHorario(barberoSel === '*' ? (reservables()[0] || {}).horario : barbero(barberoSel).horario, fechaSel);
       let h = '<h2>' + C.fechaLarga(fechaSel) + '</h2>';
@@ -316,6 +344,7 @@
           const s = horasDe(c.f).find((x) => x.min >= m && x.min < m + 30 && x.estado === 'libre');
           if (!s) return C.toast('Esa hora no está disponible para tu cita');
           if (c.f > lim) return P.upsell('Reservar hasta ' + K.limite('dias', true) + ' días adelante');
+          if (K.prioridadBloquea(c.f, prem())) return P.upsell('Prioridad Premium: viernes y sábados');
           confirmar(s, c.f);
         } });
     } else {
@@ -326,7 +355,7 @@
       $('mAnt').onclick = () => mover(-1);
       $('mSig').onclick = () => mover(1);
       A.mes($('mes'), { mes: mesSel, info: (f) => (f < C.hoy() || f > C.sumarDias(C.hoy(), ventana()) ? { cerrado: f < C.hoy() } : infoDia(f)),
-        alDia: (f) => { if (f < C.hoy()) return; if (f > lim) return P.upsell('Reservar hasta ' + K.limite('dias', true) + ' días adelante'); fechaSel = f; vista = 'dia'; pintarAgendar(); } });
+        alDia: (f) => { if (f < C.hoy()) return; if (f > lim) return P.upsell('Reservar hasta ' + K.limite('dias', true) + ' días adelante'); if (K.prioridadBloquea(f, prem())) return P.upsell('Prioridad Premium: viernes y sábados'); fechaSel = f; vista = 'dia'; pintarAgendar(); } });
     }
   }
 
@@ -340,14 +369,15 @@
     const b = bar();
     const x = barbero(slot.barbero || barberoSel);
     const items = carroItems();
-    const usaSaldo = b.abono === 0 || yo.saldo >= b.abono;
+    const abono = abonoMio();
+    const usaSaldo = abono === 0 || yo.saldo >= abono;
     const h = C.hoja('<h2>📅 Confirma tu hora</h2><div class="hora-card" style="margin-bottom:12px"><div class="fecha"><small>' + C.DIAS[C.dow(f) - 1] + '</small><b>' + (+f.slice(8)) + '</b><i>' + slot.hhmm + '</i></div>' +
-      '<div class="grow"><b>' + C.fechaLarga(f) + ', ' + slot.hhmm + '</b><div class="muted">con ' + esc(x.nombre) + ' · hasta las ' + C.horaDe(new Date(slot.t.getTime() + durCon(x) * 60000)) + '</div></div></div>' +
+      '<div class="grow"><b>' + C.fechaLarga(f) + ', ' + slot.hhmm + '</b><div class="muted">con ' + esc(x.nombre) + ' · hasta las ' + C.horaDe(new Date(slot.t.getTime() + durCon(x) * 60000)) + ' (' + hm(durCon(x)) + ')</div></div></div>' +
       '<div class="resumen-carro">' + items.map((s) => '<div><span>' + esc(s.nombre) + '</span><span>' + C.plata(s.precio) + '</span></div>').join('') +
       '<div style="border-top:1px solid var(--line);padding-top:6px"><b>Total</b><b>' + C.plata(carroTotal()) + '</b></div>' +
-      '<div><span>Abono ahora ' + (usaSaldo ? '(con tu saldo a favor)' : '') + '</span><b>' + C.plata(b.abono) + '</b></div>' +
-      '<div class="muted"><span>Pagas en la barbería</span><span>' + C.plata(Math.max(0, carroTotal() - b.abono)) + '</span></div></div>' +
-      '<p class="muted chico">' + (usaSaldo ? 'Usaremos tu saldo a favor como abono.' : esc(K.texto('reserva_pago'))) + '</p>' +
+      '<div><span>Abono ahora ' + (abono === 0 ? '⭐ (sin abono por ser Premium)' : usaSaldo ? '(con tu saldo a favor)' : abono < b.abono ? '⭐ (rebajado)' : '') + '</span><b>' + C.plata(abono) + '</b></div>' +
+      '<div class="muted"><span>Pagas en la barbería</span><span>' + C.plata(Math.max(0, carroTotal() - abono)) + '</span></div></div>' +
+      '<p class="muted chico">' + (abono === 0 ? 'No necesitas abonar: tu hora queda agendada al tiro.' : usaSaldo ? 'Usaremos tu saldo a favor como abono.' : esc(K.texto('reserva_pago'))) + '</p>' +
       '<p class="muted chico">' + esc(K.texto('reserva_politica')) + '</p>' +
       '<div class="btns"><button class="grande full" data-ok>' + (usaSaldo ? '✅ Reservar' : '✅ Reservar y abonar') + '</button></div>');
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {

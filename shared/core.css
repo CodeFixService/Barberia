@@ -463,3 +463,6 @@ ul.feat li::before { content: '⭐'; margin-right: 8px; }
   background: var(--field); flex: none; }
 .pasos-reserva .on i { background: var(--brand); color: var(--brand-ink); }
 .pasos-reserva .hecho i { background: var(--ok); color: #fff; }
+
+/* v2.1: números borrosos (Premium bloqueado) */
+.borroso { filter: blur(6px); user-select: none; pointer-events: none; }

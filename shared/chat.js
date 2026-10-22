@@ -5,7 +5,7 @@
   const esc = C.esc;
   let raiz = null, abierto = null, timer = null, reservaAdjunta = null;
 
-  const ROL = { admin: 'Soporte CodeFix', owner: 'Dueño', barber: 'Barbero', client: 'Cliente' };
+  const ROL = { admin: 'Soporte CodeFix', socio: 'Socio CodeFix', owner: 'Dueño', barber: 'Barbero', client: 'Cliente' };
 
   function montar(el) { raiz = el; lista(); }
 
