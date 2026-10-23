@@ -34,6 +34,7 @@
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
     if (v === 'admin') { mostrar('resumen'); return; }
+    if (v === 'registro') { mostrar('ajustes'); abrirAjuste('registro'); return; }
     mostrar(VISTAS[v] ? v : 'resumen');
   }
   addEventListener('hashchange', ruta);
@@ -105,7 +106,7 @@
       '<div class="barras" style="margin:10px 0"><div class="b"><span>Usado</span><span class="t"><i style="width:' + Math.min(100, pct) + '%"></i></span><span>' + pct + '%</span></div></div>' +
       '<details><summary class="muted chico">Tamaño por tabla</summary><table class="tabla">' + uso.tablas.slice(0, 15).map((t) => '<tr><td>' + esc(t.tabla) + '</td><td class="n">' + (t.filas >= 0 ? t.filas : '') + ' filas</td><td class="n">' + MB(t.bytes) + '</td></tr>').join('') + '</table></details>' +
       '<p class="muted chico">Fotos guardadas: ' + uso.comprobantes + ' comprobante(s) y ' + uso.fotos_chat + ' foto(s) del chat. Se borran solas a los ' + K.regla('dias_comprobantes') + ' días; nunca se borra un comprobante en revisión.</p>' +
-      (esAdmin ? '<div class="btns"><button class="small gris" data-limpiar="comprobantes">🧾 Comprobantes de +7 días</button><button class="small gris" data-limpiar="fotos_chat">🖼️ Fotos del chat de +7 días</button>' +
+      (permiso('eliminar') ? '<div class="btns"><button class="small gris" data-limpiar="comprobantes">🧾 Comprobantes de +7 días</button><button class="small gris" data-limpiar="fotos_chat">🖼️ Fotos del chat de +7 días</button>' +
       '<button class="small gris" data-limpiar="avisos">🔔 Avisos de +2 días</button><button class="small gris" data-limpiar="anuladas">❌ Horas anuladas de +7 días</button></div>' : '') + '</div>';
     if (rep.length) html += '<div class="card"><h2>🚩 Reportes (' + rep.length + ')</h2><ul class="list">' + rep.map((r) => '<li><div class="grow"><b>' + esc(r.de) + ' reportó a ' + esc(r.contra) + '</b><div class="sub">' + esc(r.reason) + ' · "' + esc(r.excerpt || '') + '"</div></div>' +
       '<button class="small gris" data-rok="' + r.id + '">Ignorar</button><button class="small danger" data-rsus="' + r.id + '">Suspender</button></li>').join('') + '</ul></div>';
@@ -170,14 +171,14 @@
   async function pintarBarberias() {
     const el = $('v-barberias');
     el.innerHTML = '<div class="card" style="padding:12px"><div class="seg"><button data-m="barberias">💈 Barberías</button><button data-m="clientes">👥 Clientes</button><button data-m="equipo">✂️ Barberos</button></div>' +
-      '<div class="flex" style="margin-top:10px"><input id="fB" placeholder="🔎 Buscar…" class="grow">' + (esAdmin ? '<button id="bNuevaB">+ Barbería</button>' : '<button class="gris" id="bNuevaB">🔳 QR</button>') + '</div>' +
+      '<div class="flex" style="margin-top:10px"><input id="fB" placeholder="🔎 Buscar…" class="grow">' + (permiso('crear') ? '<button id="bNuevaB">+ Barbería</button>' : '<button class="gris" id="bNuevaB">🔳 QR</button>') + '</div>' +
       (modoLista === 'barberias' ? '<div class="chips" style="margin-top:10px">' + [['todas', 'Todas'], ['premium', '⭐ Premium'], ['free', 'Free'], ['por_vencer', '⏳ Por vencer'], ['inactivas', '😴 Inactivas'], ['suspendidas', '⛔ Suspendidas'],
           ['solas', '✨ Se registraron solas']].concat(esAdmin ? [] : [['mias', '🤝 Mías']])
         .map(([k, t]) => '<button class="chip' + (filtro === k ? ' on' : '') + '" data-fl="' + k + '">' + t + '</button>').join('') + '</div>' : '') +
       '</div><div id="lB"><p class="muted centro">Cargando…</p></div>';
     el.querySelectorAll('[data-m]').forEach((b) => { b.classList.toggle('on', b.dataset.m === modoLista); b.onclick = () => { modoLista = b.dataset.m; pintarBarberias(); }; });
     el.querySelectorAll('[data-fl]').forEach((b) => b.onclick = () => { filtro = b.dataset.fl; pintarBarberias(); });
-    $('bNuevaB').onclick = esAdmin ? nuevaBarberia : qrRegistro;
+    $('bNuevaB').onclick = permiso('crear') ? nuevaBarberia : qrRegistro;
     const z = $('lB');
     if (modoLista === 'barberias') {
       try { barberias = await K.rpc('admin_barberias'); } catch (e) { z.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
@@ -238,8 +239,9 @@
   function botonesPlan(u, alTerminar) {
     return {
       html: (permiso('premium') ? '<button class="oro small" data-act>⭐ Activar 1 mes (pagado)</button><button class="small gris" data-dias>🎁 Regalar días</button>' : '') +
-        (u.premium && esAdmin ? '<button class="small gris" data-quitar>Quitar Premium</button>' : ''),
+        (u.premium && permiso('eliminar') ? '<button class="small gris" data-quitar>Quitar Premium</button>' : ''),
       activar(h) {
+        if (h.q('[data-quitar]')) h.q('[data-quitar]').onclick = async () => { if (await C.confirmar('¿Quitar el Premium? Queda en Free sin perder datos.', { si: 'Quitar', peligro: true })) { await K.rpc('admin_quitar_premium', { p_user: u.id }); h.cerrar(); alTerminar(); } };
         if (!permiso('premium')) return;
         h.q('[data-act]').onclick = (ev) => C.accion(ev.target, async () => { await K.rpc('admin_activar', { p_user: u.id, p_meses: 1, p_precio: null }); K.despertarEnvios(); h.cerrar(); alTerminar(); }, '⭐ Premium activado por 1 mes');
         h.q('[data-dias]').onclick = async () => {
@@ -247,7 +249,6 @@
           if (!n) return;
           try { await K.rpc('admin_dias', { p_user: u.id, p_dias: +n }); K.despertarEnvios(); h.cerrar(); alTerminar(); C.toast('🎁 ' + n + ' días regalados'); } catch (e) { C.toast('⚠️ ' + e.message); }
         };
-        if (h.q('[data-quitar]')) h.q('[data-quitar]').onclick = async () => { if (await C.confirmar('¿Quitar el Premium? Queda en Free sin perder datos.', { si: 'Quitar', peligro: true })) { await K.rpc('admin_quitar_premium', { p_user: u.id }); h.cerrar(); alTerminar(); } };
       }
     };
   }
@@ -262,7 +263,9 @@
       '<div data-recos></div><div data-det><p class="muted">Cargando detalle…</p></div>' +
       '<div class="btns"><button class="gris" data-chat>💬 Escribir</button>' + (b.whatsapp ? '<a class="btn wsp" target="_blank" rel="noopener" href="' + C.wa(b.whatsapp, 'Hola ' + b.dueno.split(' ')[0] + ' 👋') + '">WhatsApp</a>' : '') +
       '<button class="gris" data-agenda>📅 Ver agenda</button><a class="btn gris" target="_blank" rel="noopener" href="' + C.raiz() + 'b/?b=' + esc(b.codigo) + '">🔗 Su link</a>' +
-      (permiso('cuentas') ? '<button class="gris" data-clave>🔑 Restablecer clave</button><button class="' + (b.suspended ? 'ok' : 'danger') + '" data-sus>' + (b.suspended ? 'Reactivar' : 'Suspender') + '</button>' : '') + '</div>');
+      (permiso('cuentas') ? '<button class="gris" data-clave>🔑 Restablecer clave</button><button class="' + (b.suspended ? 'ok' : 'danger') + '" data-sus>' + (b.suspended ? 'Reactivar' : 'Suspender') + '</button>' : '') +
+      (permiso('eliminar') ? '<button class="danger" data-eliminar>🗑️ Eliminar barbería</button>' : '') + '</div>');
+    if (h.q('[data-eliminar]')) h.q('[data-eliminar]').onclick = () => eliminarCuenta({ id: b.owner_id, nombre: b.dueno, rol: 'owner', barberia: b.nombre }, () => { h.cerrar(); pintarBarberias(); });
     bp.activar(h);
     const rec = recomendaciones(b);
     h.q('[data-recos]').innerHTML = rec.length ? '<h3>💡 Recomendaciones</h3>' + rec.map((r, i) => '<div class="reco"><span style="font-size:20px">' + r[0] + '</span><div class="grow">' + esc(r[1]) + '</div><button class="small alt" data-r="' + i + '">Enviar</button></div>').join('') : '';
@@ -315,6 +318,22 @@
     pintar();
   }
 
+  // v2.2: eliminar una cuenta (barbero, cliente) o una barbería completa. Queda en el registro de cambios.
+  async function eliminarCuenta(u, despues) {
+    let confirmar = null;
+    if (u.rol === 'owner') {
+      confirmar = await C.pedir('🗑️ Eliminar la barbería ' + u.barberia, { texto: 'Se borra TODO: el dueño, sus barberos, sus clientes con cuenta, horas, caja y pagos. No se puede deshacer. ' +
+        'Si solo quieres cortarla, usa Suspender. Para confirmar escribe el nombre exacto de la barbería:', placeholder: u.barberia, si: 'Eliminar todo' });
+      if (!confirmar) return;
+    } else {
+      const txt = u.rol === 'barber' ? 'Se borra la cuenta de ' + u.nombre + '. Sus horas pasadas y su caja quedan a nombre del dueño. Si tiene horas por venir, muévelas o anúlalas primero.'
+        : 'Se borra la cuenta de ' + u.nombre + '. Sus horas por venir se anulan y su historial queda con su nombre, sin cuenta.';
+      if (!await C.confirmar(txt + '\nNo se puede deshacer. Si solo quieres cortarle el acceso, usa Suspender.', { titulo: '🗑️ Eliminar cuenta', si: 'Eliminar', peligro: true })) return;
+    }
+    try { await K.rpc('eliminar_cuenta', { p_user: u.id, p_confirmar: confirmar }); C.toast('🗑️ Eliminado. Quedó en el registro de cambios'); despues && despues(); }
+    catch (e) { C.toast('⚠️ ' + e.message, 5000); }
+  }
+
   function fichaUsuario(u) {
     const plan = u.rol === 'owner' || u.rol === 'client';
     const bp = botonesPlan(u, pintarBarberias);
@@ -323,8 +342,10 @@
       (u.telefono ? ' · ' + esc(u.telefono) : '') + '<br>Creado ' + P.fechaCorta(u.created_at) + ' · ' + C.conexion(u.last_seen).txt +
       (u.premium && u.premium_until ? '<br>⭐ Premium hasta ' + P.fechaCorta(u.premium_until) : '') + (u.trial_used && u.rol === 'client' ? '<br>🎁 Ya usó su prueba' : '') + '</p>' +
       '<div class="btns">' + (plan ? bp.html : '') +
-      (permiso('cuentas') ? '<button class="small gris" data-clave>🔑 Restablecer clave</button><button class="small ' + (u.suspended ? 'ok' : 'danger') + '" data-sus>' + (u.suspended ? 'Reactivar' : 'Suspender') + '</button>' : '') + '</div>');
+      (permiso('cuentas') ? '<button class="small gris" data-clave>🔑 Restablecer clave</button><button class="small ' + (u.suspended ? 'ok' : 'danger') + '" data-sus>' + (u.suspended ? 'Reactivar' : 'Suspender') + '</button>' : '') +
+      (permiso('eliminar') ? '<button class="small danger" data-eliminar>🗑️ Eliminar cuenta</button>' : '') + '</div>');
     if (plan) bp.activar(h);
+    if (h.q('[data-eliminar]')) h.q('[data-eliminar]').onclick = () => eliminarCuenta({ id: u.id, nombre: u.nombre, rol: u.rol, barberia: u.barberia }, () => { h.cerrar(); pintarBarberias(); });
     if (!permiso('cuentas')) return;
     h.q('[data-sus]').onclick = async () => { await K.rpc('admin_suspender', { p_user: u.id, p_suspender: !u.suspended }); h.cerrar(); pintarBarberias(); };
     h.q('[data-clave]').onclick = async () => {
@@ -636,7 +657,7 @@
     try { l = await K.rpc('admin_calificaciones'); } catch (e) { z.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     z.innerHTML = '<p class="muted chico">Borra las injustas u ofensivas. Las de clientes a barberías forman el promedio público; las de barberías a clientes, la lista negra.</p>' +
       (l.length ? '<div class="card"><ul class="list">' + l.map((q) => '<li><div class="grow"><span class="estrellas">' + '★'.repeat(q.estrellas) + '</span> <b>' + (q.autor === 'cliente' ? esc(q.cliente || 'Cliente') + ' → ' + esc(q.barberia) : esc(q.barberia) + ' → ' + esc(q.cliente || 'Cliente')) + '</b>' +
-        '<div class="sub">' + esc([q.motivo, q.comentario].filter(Boolean).join(' · ')) + ' · ' + C.hace(q.created_at) + '</div></div>' + (esAdmin ? '<button class="small danger" data-del="' + q.id + '">Borrar</button>' : '') + '</li>').join('') + '</ul></div>'
+        '<div class="sub">' + esc([q.motivo, q.comentario].filter(Boolean).join(' · ')) + ' · ' + C.hace(q.created_at) + '</div></div>' + (permiso('eliminar') ? '<button class="small danger" data-del="' + q.id + '">Borrar</button>' : '') + '</li>').join('') + '</ul></div>'
         : '<div class="card empty"><span class="ico">⭐</span>Aún no hay calificaciones.</div>');
     z.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
       if (!await C.confirmar('¿Borrar esta calificación? Cambia el promedio.', { si: 'Borrar', peligro: true })) return;
@@ -648,19 +669,29 @@
     const z = seccion('📜 Registro de cambios');
     let l = [];
     try { l = await K.rpc('admin_auditoria'); } catch (e) { z.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-    z.innerHTML = '<div class="card"><ul class="list">' + (l.map((a) => '<li><div class="grow"><b>' + esc(a.accion) + '</b> <span class="sub">' + esc(a.detalle) + '</span></div><span class="sub">' + C.cuando(a.created_at) + '</span></li>').join('') ||
-      '<li class="muted">Aún no hay cambios registrados.</li>') + '</ul></div>';
+    let filtroReg = 'todo';
+    const pintar = () => {
+      const f = l.filter((a) => filtroReg === 'todo' || (filtroReg === 'socios' && a.rol === 'socio') || (filtroReg === 'borrados' && /Eliminar|Limpieza|borrada|Quitar|Suspender/.test(a.accion)));
+      z.innerHTML = '<p class="muted chico">Todo lo que hacen tú, tus socios y los dueños al eliminar cuentas queda aquí, con quién y cuándo.</p>' +
+        '<div class="chips" style="margin-bottom:10px"><button class="chip" data-f="todo">Todo</button><button class="chip" data-f="socios">🤝 Socios</button><button class="chip" data-f="borrados">🗑️ Borrados y cortes</button></div>' +
+        '<div class="card"><ul class="list">' + (f.map((a) => '<li><div class="grow"><b>' + esc(a.accion) + '</b> <span class="sub">' + esc(a.detalle) + '</span>' +
+        '<div class="sub">por ' + esc(a.quien) + (a.rol === 'socio' ? ' <span class="pill">socio</span>' : '') + '</div></div><span class="sub">' + C.cuando(a.created_at) + '</span></li>').join('') ||
+        '<li class="muted">Nada por aquí.</li>') + '</ul></div>';
+      z.querySelectorAll('[data-f]').forEach((b) => { b.classList.toggle('on', b.dataset.f === filtroReg); b.onclick = () => { filtroReg = b.dataset.f; pintar(); }; });
+    };
+    pintar();
   }
 
-  // v2.1: Socios. Ven y gestionan como el admin según sus permisos; nunca crean ni borran.
+  // v2.2: Socios. Gestionan como el admin según sus permisos (también crean y eliminan); todo queda en el registro de cambios.
   const PERMISOS = [['pagos', '💰 Aprobar y rechazar pagos Premium'], ['premium', '⭐ Activar Premium y regalar días'], ['cuentas', '🔑 Restablecer claves y suspender'],
-    ['ajustes', '⚙️ Precios, planes, reglas y textos'], ['avisos', '📣 Avisos masivos']];
+    ['ajustes', '⚙️ Precios, planes, reglas y textos'], ['avisos', '📣 Avisos masivos'], ['crear', '➕ Crear barberías'],
+    ['eliminar', '🗑️ Eliminar cuentas y barberías, borrar calificaciones, limpiar y quitar Premium']];
   async function secSocios() {
     const z = seccion('🤝 Socios');
     z.innerHTML = '<p class="muted">Cargando…</p>';
     let l = [];
     try { l = await K.rpc('admin_socios'); } catch (e) { z.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
-    z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + l.length + ' socio' + (l.length === 1 ? '' : 's') + '</b><div class="muted chico">Entran al mismo panel. No pueden crear ni borrar nada (barberías, socios, calificaciones, limpiezas ni quitar Premium).</div></div>' +
+    z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + l.length + ' socio' + (l.length === 1 ? '' : 's') + '</b><div class="muted chico">Entran al mismo panel y hacen lo que les marques. Todo lo que hacen queda en el Registro de cambios, y si eliminan o cortan algo te llega un aviso. Solo tú creas y eliminas socios.</div></div>' +
       '<button id="bNuevoSocio">+ Socio</button></div></div>' + l.map((x) => '<div class="card' + (x.suspended ? '' : '') + '" data-socio="' + x.id + '"><h2><span class="grow">' + esc(x.nombre) + '</span>' +
       (x.suspended ? '<span class="pill bad">suspendido</span>' : '<span class="pill ok">activo</span>') + '</h2><div class="sub muted">' + esc(x.email) + ' · ' + C.conexion(x.last_seen).txt +
       ' · trajo ' + x.barberias + ' barbería(s), ' + x.premium + ' Premium</div>' +
@@ -682,7 +713,7 @@
   }
   function nuevoSocio() {
     const h = C.hoja('<h2>🤝 Nuevo socio</h2><label>Nombre</label><input data-n maxlength="80"><label>Correo <span class="opc">(con este entra)</span></label><input data-e type="email" inputmode="email">' +
-      '<label>WhatsApp</label><input data-t inputmode="tel" placeholder="+56 9…"><p class="muted chico">Parte con todos los permisos (menos crear y borrar). Se los cambias después.</p><p class="err" data-err></p>' +
+      '<label>WhatsApp</label><input data-t inputmode="tel" placeholder="+56 9…"><p class="muted chico">Parte con todos los permisos. Se los cambias después; todo lo que haga queda en el Registro de cambios.</p><p class="err" data-err></p>' +
       '<div class="btns"><button class="full" data-ok>Crear socio</button></div>');
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
       const d = { nombre: h.q('[data-n]').value.trim(), email: h.q('[data-e]').value.trim().toLowerCase(), telefono: h.q('[data-t]').value.trim(), clave: K.claveNueva(), tipo: 'socio' };

@@ -12,7 +12,7 @@ reserva con abono y comprobante, mensajes con vistos, caja de cortes y planes Fr
 | Rol | Página | Qué hace |
 |---|---|---|
 | **Super admin** (Josué) | `admin/` | Crea barberías (parten con días de regalo), aprueba los **pagos de Premium con comprobante**, da/quita Premium y días, suspende. Ve el uso del servidor por tabla con botones de limpieza, filtros de barberías, y edita **precios y links, planes, reglas, textos**, avisos masivos, calificaciones y el registro de cambios. |
-| **Socio** (de Josué) | `admin/` | El mismo panel del admin según sus permisos (pagos, Premium, claves, ajustes, avisos). **No crea ni borra nada.** Tiene su link/QR de registro: las barberías que traiga quedan a su nombre. |
+| **Socio** (de Josué) | `admin/` | El mismo panel del admin según sus permisos (pagos, Premium, claves, ajustes, avisos, crear barberías y eliminar). **Todo lo que hace queda en el Registro de cambios** y si elimina algo le llega un aviso a Josué. Solo Josué crea y elimina socios. Tiene su link/QR de registro: las barberías que traiga quedan a su nombre. |
 | **Dueño** | `equipo/` | Inicio con lo urgente (abonos por revisar, devoluciones, lo que falta configurar, su link y QR). Agenda, clientes (con y sin cuenta) y lista negra. En Más: perfil, horario, servicios, **links de pago**, ofertas, equipo, caja, estadísticas, calificaciones y plan. |
 | **Barbero** | `equipo/` | Su agenda, **aprueba los abonos de sus clientes**, califica clientes y ve la cantidad de cortes. **No ve precios ni montos**, ni cambia links, perfil o plan. |
 | **Cliente con cuenta** | `cliente/` | Reserva, abona con comprobante, reagenda, anula, califica, chatea, Premium con comprobante. Se crea la cuenta desde el link de su barbería (o se la crea la barbería). |
@@ -27,6 +27,11 @@ reserva con abono y comprobante, mensajes con vistos, caja de cortes y planes Fr
 4. Si no sube el comprobante a tiempo, la hora se libera sola. Si nadie revisa, se le recuerda al barbero y al dueño; 24 h después de la hora, el abono queda a favor del cliente.
 5. **Cancelar o reagendar** las veces que quiera: en los primeros N minutos se devuelve el abono (el dueño lo marca devuelto); con X horas o más queda saldo a favor; después se pierde. Todo editable en Reglas.
 6. Después de la visita se califican mutuamente (una vez por visita). El promedio de la barbería lo ven todos; con pocas estrellas el cliente queda en la **lista negra** (puede reservar, pero sale la alerta).
+
+## v2.2
+- **Eliminar cuentas**: el admin (y el socio con permiso) elimina barberos, clientes y barberías completas (escribiendo su nombre). El dueño elimina sus barberos y clientes.
+  El historial de un barbero pasa al dueño; el de un cliente queda con su nombre. Suspender sigue disponible para solo cortar el acceso.
+- **Registro de cambios** con quién hizo cada cosa y filtros (socios, borrados y cortes).
 
 ## v2.1
 - **QR para compartir en todos los perfiles**: admin y socios (registro de barberías), dueño (clientes + invitar barberías), barbero (su link directo), cliente (recomendar su barbería).

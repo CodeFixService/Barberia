@@ -335,3 +335,7 @@ debajo, reservar sin cuenta (solo agenda y valida con el comprobante).
 - Premium barbería: resumen del mes (Free borroso), clientes que no vuelven, recordatorio por WhatsApp, regalo de cumpleaños. Pago por 3 meses con descuento (15 %).
 - Premium cliente: prioridad en viernes y sábados (Free hasta 3 días antes) y abono rebajado o sin abono si la barbería lo ofrece.
 - Admin: Premium por vencer este mes con cobro por WhatsApp y tasa de renovación.
+
+## v2.2 · Eliminar cuentas y registro
+- El admin elimina barberos, clientes y barberías (además de suspender). El dueño elimina sus barberos y clientes.
+- El socio también crea barberías, edita y elimina (según sus permisos), pero **todo queda en el registro de cambios** con su nombre, y al admin le llega un aviso cuando elimina o corta algo.
