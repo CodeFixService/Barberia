@@ -792,7 +792,7 @@
         '<div class="btns"><button data-g>Guardar</button></div>' : (c.notas ? '<p class="muted">📝 ' + esc(c.notas) + '</p>' : '')) +
       '<div class="btns">' + (!inv ? '<button class="gris" data-chat>💬 Escribir</button>' : '') + '<button class="gris" data-hora>📅 Agendar hora</button>' +
       (c.telefono ? '<a class="btn wsp" target="_blank" rel="noopener" href="' + C.wa(c.telefono, 'Hola ' + (c.nombre || '').split(' ')[0] + ' 👋') + '">WhatsApp</a>' : '') +
-      (dueno() && !inv ? '<button class="gris" data-clave>🔑 Restablecer clave</button>' : '') + '</div>');
+      (dueno() && !inv ? '<button class="gris" data-clave>🔑 Restablecer clave</button><button class="danger" data-eliminar>🗑️ Eliminar</button>' : '') + '</div>');
     if (h.q('[data-g]')) h.q('[data-g]').onclick = (ev) => C.accion(ev.target, async () => {
       await K.rpc('guardar_cliente', { p_id: c.id, p: { telefono: h.q('[data-t]').value, notas: h.q('[data-notas]').value, saldo: +h.q('[data-saldo]').value || 0, bloqueado: h.q('[data-bloq]').checked } });
       h.cerrar(); clientes = null; pintarClientes();
@@ -800,6 +800,7 @@
     if (h.q('[data-chat]')) h.q('[data-chat]').onclick = () => { h.cerrar(); mostrar('chat'); Chat.abrir(c.id, { nombre: c.nombre, avatar: c.avatar, foto: c.foto, rol: 'client' }); };
     h.q('[data-hora]').onclick = () => { h.cerrar(); nuevaHora(yo.id, C.hoy(), null, c); };
     if (h.q('[data-clave]')) h.q('[data-clave]').onclick = () => restablecer(c, h);
+    if (h.q('[data-eliminar]')) h.q('[data-eliminar]').onclick = () => eliminar(c, 'client', () => { h.cerrar(); pintarClientes(); });
   }
 
   async function restablecer(p, hoja) {
@@ -849,7 +850,8 @@
       '<label class="check"><input type="checkbox" data-agenda' + (b.agenda_abierta ? ' checked' : '') + '> Agenda abierta a clientes <span class="muted chico">(desmarca = agenda llena)</span></label>' +
       (!esYo ? '<label class="check"><input type="checkbox" data-act' + (b.activo ? ' checked' : '') + '> Activo (si lo desactivas, no aparece para reservar)</label>' : '') +
       '<div id="eHorario"><label class="check"><input type="checkbox" data-hp' + (propio ? ' checked' : '') + '> Horario propio (si no, usa el de la barbería)</label><div data-hz class="' + (propio ? '' : 'hidden') + '"></div></div>' +
-      '<div class="btns"><button data-g>Guardar</button>' + (!esYo ? '<button class="gris" data-chat>💬 Escribir</button><button class="gris" data-clave>🔑 Restablecer clave</button>' : '') + '</div>');
+      '<div class="btns"><button data-g>Guardar</button>' + (!esYo ? '<button class="gris" data-chat>💬 Escribir</button><button class="gris" data-clave>🔑 Restablecer clave</button>' +
+        '<button class="danger" data-eliminar>🗑️ Eliminar</button>' : '') + '</div>');
     let foto;
     const hz = h.q('[data-hz]');
     const leerH = editorHorario(hz, b.horario || bar().horario);
@@ -871,6 +873,16 @@
     }, '✅ Guardado');
     if (h.q('[data-chat]')) h.q('[data-chat]').onclick = () => { h.cerrar(); mostrar('chat'); Chat.abrir(b.id, { nombre: b.nombre, avatar: b.avatar, foto: b.foto, rol: 'barber' }); };
     if (h.q('[data-clave]')) h.q('[data-clave]').onclick = () => restablecer({ id: b.id, nombre: b.nombre, telefono: b.telefono }, h);
+    if (h.q('[data-eliminar]')) h.q('[data-eliminar]').onclick = () => eliminar(b, 'barber', async () => { h.cerrar(); await cargarBarberia(); secEquipo(); });
+  }
+
+  // v2.2: eliminar un barbero o un cliente con cuenta (queda en el registro de cambios de CodeFix).
+  async function eliminar(p, rol, despues) {
+    const txt = rol === 'barber' ? 'Se borra la cuenta de ' + p.nombre + '. Sus horas pasadas y su caja quedan a tu nombre. Si tiene horas por venir, muévelas o anúlalas primero. ' +
+      'Si solo quieres que no aparezca para reservar, desmarca "Activo".' : 'Se borra la cuenta de ' + p.nombre + '. Sus horas por venir se anulan y su historial queda con su nombre, sin cuenta.';
+    if (!await C.confirmar(txt + '\nNo se puede deshacer.', { titulo: '🗑️ Eliminar ' + (rol === 'barber' ? 'barbero' : 'cliente'), si: 'Eliminar', peligro: true })) return;
+    try { await K.rpc('eliminar_cuenta', { p_user: p.id, p_confirmar: null }); C.toast('🗑️ ' + p.nombre + ' eliminado'); clientes = null; despues && despues(); }
+    catch (e) { C.toast('⚠️ ' + e.message, 5000); }
   }
 
   // Editor de horario semanal (lunes a domingo): Abierto / Cerrado, horas y colación.

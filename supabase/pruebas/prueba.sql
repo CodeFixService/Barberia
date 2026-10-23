@@ -48,6 +48,7 @@ grant usage on schema prueba to anon, authenticated;
 create or replace function prueba.cod() returns text language sql security definer stable as $$ select codigo from public.barberias where nombre = 'Barbería Test' $$;
 create or replace function prueba.tok(p text) returns setof public.reservas language sql security definer stable as $$ select * from public.reservas where token = p $$;
 create or replace function prueba.ref() returns text language sql security definer stable as $$ select ref_codigo from public.profiles where role = 'socio' limit 1 $$;
+create or replace function prueba.duenode(p text) returns uuid language sql security definer stable as $$ select owner_id from public.barberias where nombre = p $$;
 grant execute on all functions in schema prueba to anon, authenticated;
 set client_min_messages = notice;
 \pset tuples_only on
@@ -491,14 +492,19 @@ select pg_temp.como('socio@test.cl');
 select pg_temp.ok((public.mi_cuenta() ->> 'is_socio')::boolean and not (public.mi_cuenta() ->> 'is_admin')::boolean, 'el socio entra como socio');
 select pg_temp.ok((public.admin_resumen() ->> 'barberias')::int >= 1 and jsonb_typeof(public.admin_barberias()) = 'array', 'el socio ve el resumen y las barberías');
 select pg_temp.ok(jsonb_typeof(public.admin_pagos('rechazado')) = 'array', 'el socio ve los pagos');
-select pg_temp.debe_fallar($$select public.admin_limpiar('avisos')$$, 'Solo el administrador');
-select pg_temp.debe_fallar($$select public.admin_borrar_calificacion((select (x ->> 'id')::uuid from jsonb_array_elements(public.admin_calificaciones()) x limit 1))$$, 'Solo el administrador');
-select pg_temp.debe_fallar($$select public.admin_quitar_premium(prueba.id('ana@test.cl'))$$, 'Solo el administrador');
+-- v2.2: el socio también borra y limpia, pero queda en el registro (y al admin le llega el aviso).
+select pg_temp.ok((public.admin_limpiar('avisos') ->> 'borrados') is not null, 'el socio puede limpiar');
+select pg_temp.ok((select x ->> 'quien' = 'Sofía · CodeFix' and x ->> 'rol' = 'socio' from jsonb_array_elements(public.admin_auditoria()) x where x ->> 'accion' = 'Limpieza' limit 1),
+  'la limpieza del socio queda en el registro con su nombre');
 select pg_temp.debe_fallar($$select public.admin_socios()$$, 'Solo el administrador');
 select pg_temp.debe_fallar($$select public.admin_ajuste('version_liberada', '9.9')$$, 'libera versiones');
 select pg_temp.ok(public.puede_hablar(auth.uid(), prueba.id('dueno@test.cl')), 'el socio puede escribirle a las barberías');
 reset role;
-select pg_temp.debe_fallar($$select pg_temp.crear('socio@test.cl', 'b9@test.cl', 'B9', 'owner')$$, 'Sin permiso para crear');
+select pg_temp.crear('socio@test.cl', 'b9@test.cl', 'B9', 'owner', 'Barbería del Socio 2');
+select pg_temp.ok(prueba.si($q$(select socio_id = prueba.id('socio@test.cl') from public.barberias where nombre = 'Barbería del Socio 2')$q$)
+  and prueba.si($q$exists (select 1 from public.auditoria where accion = 'Crear cuenta' and quien = prueba.id('socio@test.cl'))$q$), 'el socio crea barberías (a su nombre y con registro)');
+select pg_temp.debe_fallar($$select pg_temp.crear('socio@test.cl', 'socio2@test.cl', 'S2', 'socio')$$, 'crea barberías');
+select pg_temp.ok(prueba.si($q$exists (select 1 from public.avisos where para = prueba.id('juanjosuecastilloloyola@gmail.com') and titulo like '📜%Limpieza%')$q$), 'al admin le llega el aviso de lo que borró el socio');
 select pg_temp.ok(public.puede_restablecer(prueba.id('socio@test.cl'), prueba.id('dueno@test.cl'))
   and not public.puede_restablecer(prueba.id('socio@test.cl'), prueba.id('juanjosuecastilloloyola@gmail.com')), 'el socio restablece claves de barberías, no la del admin');
 select pg_temp.como('juanjosuecastilloloyola@gmail.com');
@@ -643,6 +649,45 @@ select public.admin_pago_resolver((select (x ->> 'id')::uuid from jsonb_array_el
 reset role;
 select pg_temp.ok(prueba.si($q$(select public.is_premium(prueba.id('dueno@test.cl')) and (select referido_pagado from public.barberias where nombre = 'Barbería Nueva'))$q$),
   'la barbería que invitó gana días de Premium cuando la invitada paga');
+
+-- 18. v2.2: eliminar cuentas (barberos, clientes y barberías), con registro de cambios
+select pg_temp.crear('dueno@test.cl', 'b4@test.cl', 'Barbero 4', 'barber');
+insert into public.caja (barberia_id, barbero_id, fecha, servicio, monto)
+select barberia_id, id, now() - interval '3 days', 'Corte viejo', 9000 from public.profiles where email = 'b4@test.cl';
+select pg_temp.como('pedro@test.cl');
+select pg_temp.debe_fallar($$select public.eliminar_cuenta(prueba.id('b4@test.cl'))$$, 'Sin permiso');
+reset role;
+select pg_temp.como('dueno@test.cl');
+select pg_temp.debe_fallar($$select public.eliminar_cuenta(prueba.id('pedro@test.cl'))$$, 'horas por venir');
+select public.eliminar_cuenta(prueba.id('b4@test.cl'));
+reset role;
+select pg_temp.ok(prueba.si($q$not exists (select 1 from auth.users where email = 'b4@test.cl')
+  and exists (select 1 from public.caja where servicio = 'Corte viejo' and nota like 'Era de Barbero 4%')$q$), 'el dueño elimina un barbero; su caja pasa al dueño con una nota');
+select pg_temp.como('dueno@test.cl');
+select public.eliminar_cuenta(prueba.id('beto@test.cl'));
+reset role;
+select pg_temp.ok(prueba.si($q$not exists (select 1 from public.profiles where email = 'beto@test.cl')
+  and exists (select 1 from public.reservas where cliente_nombre = 'Beto' and cliente_id is null)$q$), 'el dueño elimina un cliente; su historial queda con su nombre');
+select pg_temp.como('socio@test.cl');
+select pg_temp.debe_fallar($$select public.eliminar_cuenta(prueba.id('x@test.cl'))$$, 'Sin permiso');
+reset role;
+select pg_temp.como('juanjosuecastilloloyola@gmail.com');
+select public.admin_guardar_socio(prueba.id('socio@test.cl'), '{"permisos":{"eliminar":true}}');
+reset role;
+select pg_temp.como('socio@test.cl');
+select public.eliminar_cuenta(prueba.id('x@test.cl'));
+select pg_temp.debe_fallar($$select public.eliminar_cuenta(prueba.id('juanjosuecastilloloyola@gmail.com'))$$, 'administrador');
+select pg_temp.debe_fallar($$select public.eliminar_cuenta(prueba.duenode('Barbería del Socio'), 'otro nombre')$$, 'escribe su nombre');
+select public.eliminar_cuenta(prueba.duenode('Barbería del Socio'), 'barbería del socio');
+reset role;
+select pg_temp.ok(prueba.si($q$not exists (select 1 from public.barberias where nombre = 'Barbería del Socio') and not exists (select 1 from auth.users where email = 'socia@test.cl')$q$),
+  'el socio elimina una barbería completa escribiendo su nombre');
+select pg_temp.ok(prueba.si($q$(select count(*) >= 2 from public.auditoria where accion in ('Eliminar cuenta', 'Eliminar barbería') and quien = prueba.id('socio@test.cl'))
+  and exists (select 1 from public.avisos where para = prueba.id('juanjosuecastilloloyola@gmail.com') and titulo like '📜%Eliminar barbería%')$q$),
+  'lo que elimina el socio queda en el registro y le avisa al admin');
+select pg_temp.como('juanjosuecastilloloyola@gmail.com');
+select pg_temp.ok((select bool_or(x ->> 'accion' = 'Eliminar cuenta' and x ->> 'quien' = 'Juan Dueño') from jsonb_array_elements(public.admin_auditoria()) x), 'también queda lo que elimina el dueño');
+reset role;
 
 \o
 \echo '✅ TODAS LAS PRUEBAS PASARON'

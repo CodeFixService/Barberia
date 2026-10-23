@@ -23,7 +23,7 @@ end $$;
 Si todavía no uniste la rama, pega el contenido completo de `instalar.sql`).
 
 Si aparece un aviso de operación destructiva, toca **Run this query** (es normal).
-Al final debe decir **"Barbería instalada ✅ versión 2.1"**. Se puede volver a correr cuando haya una versión nueva: no borra datos.
+Al final debe decir **"Barbería instalada ✅ versión 2.2"**. Se puede volver a correr cuando haya una versión nueva: no borra datos.
 
 > **Para actualizar a una versión nueva** basta con correr este mismo paso 1 otra vez (también puedes copiar la consulta en
 > la app: **Administración → Ajustes → Versión → Copiar consulta**). Al terminar, la versión se **libera sola** y a todos les
@@ -86,8 +86,11 @@ Su **Inicio** le muestra lo que le falta configurar:
 ## 6. Novedades v2.1 (registro de barberías, socios y QR)
 - **Resumen → Link y QR para nuevas barberías**: cualquiera crea su barbería sola (parte con los días de regalo de Reglas). Te llega un aviso por cada una.
   Para cerrarlo: **Ajustes → Reglas → Registro abierto de barberías = 0**. Necesita **Allow new users to sign up** activado (paso 2).
-- **Ajustes → Socios → + Socio**: tu socio entra al mismo panel y ve todo, pero **no crea ni borra** (barberías, socios, calificaciones, limpiezas, quitar Premium).
-  Le marcas qué puede hacer: pagos, Premium y días, claves y suspensiones, ajustes (precios, planes, reglas, textos) y avisos masivos.
+- **Ajustes → Socios → + Socio**: tu socio entra al mismo panel. Le marcas qué puede hacer: pagos, Premium y días, claves y suspensiones, ajustes (precios, planes, reglas, textos),
+  avisos masivos, crear barberías y eliminar (cuentas, barberías, calificaciones, limpiezas, quitar Premium). **Todo queda en Ajustes → Registro de cambios** y si elimina algo te llega un aviso.
+  Solo tú creas y eliminas socios.
+- **Eliminar cuentas (v2.2)**: en Barberías → ficha de la barbería (🗑️ Eliminar barbería, escribiendo su nombre) o en Clientes / Barberos → ficha (🗑️ Eliminar cuenta).
+  El dueño también elimina a sus barberos y clientes desde Mi equipo y Clientes.
   Cada socio tiene su link/QR de registro: las barberías que entren con él quedan a su nombre.
 - **Referidos**: cada barbería tiene en Más → Invita una barbería su QR. Cuando la invitada paga su primer mes, la que invitó gana los días de Reglas.
 - **3 meses por adelantado**: en Precios y links pon (opcional) el link con el monto de 3 meses con descuento (Reglas → descuento).
@@ -96,7 +99,7 @@ Su **Inicio** le muestra lo que le falta configurar:
 SQL Editor:
 ```sql
 select jobname, schedule from cron.job;           -- barberia-tick y barberia-push
-select public.db_version();                        -- 2.1
+select public.db_version();                        -- 2.2
 ```
 Si `cron.job` no existe: **Database → Extensions** → activa **pg_cron** y **pg_net**, y vuelve a correr el paso 1.
 

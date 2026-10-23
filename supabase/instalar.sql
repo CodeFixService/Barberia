@@ -18,11 +18,11 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.1'::text $$;
+language sql immutable as $$ select '2.2'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'QR para compartir en todos los perfiles, registro de barberías con referidos, resumen del mes, clientes que no vuelven, recordatorio por WhatsApp, Premium por 3 meses con descuento, cumpleaños y socios.'::text $$;
+language sql immutable as $$ select 'Eliminar cuentas (barberos, clientes y barberías) desde el panel, y el socio ahora crea, edita y elimina dejando todo en el registro de cambios.'::text $$;
 
 -- Planes Free / Premium (v1.4): el admin los edita desde su panel. Estos son los valores de partida.
 create table if not exists public.planes (
@@ -262,6 +262,9 @@ alter table public.profiles add column if not exists permisos jsonb;           -
 alter table public.profiles add column if not exists ref_codigo text;          -- socio: su código para el link de registro de barberías
 create unique index if not exists profiles_ref_idx on public.profiles (ref_codigo) where ref_codigo is not null;
 alter table public.profiles add column if not exists cumple_avisado int;       -- año en que se le envió el regalo de cumpleaños
+-- v2.2: los socios también crean barberías y eliminan (todo queda en el registro de cambios). Los que ya existían parten con ambos permisos.
+update public.profiles set permisos = coalesce(permisos, '{}'::jsonb) || '{"crear": true, "eliminar": true}'::jsonb
+where role = 'socio' and not (coalesce(permisos, '{}'::jsonb) ? 'eliminar');
 -- Quién trajo a cada barbería (otra barbería o un socio) y si ya se pagó el premio del referido.
 alter table public.barberias add column if not exists referida_por uuid references public.barberias (id) on delete set null;
 alter table public.barberias add column if not exists socio_id uuid references public.profiles (id) on delete set null;
@@ -339,7 +342,7 @@ begin
     on conflict (id) do nothing;
     if rol = 'socio' then
       update public.profiles set ref_codigo = public.nuevo_ref(),
-        permisos = '{"pagos": true, "premium": true, "cuentas": true, "ajustes": true, "avisos": true}'::jsonb where id = new.id;
+        permisos = '{"pagos": true, "premium": true, "cuentas": true, "ajustes": true, "avisos": true, "crear": true, "eliminar": true}'::jsonb where id = new.id;
     end if;
   elsif meta ->> 'rol' = 'barberia' then
     -- v2.1: cualquiera crea su barbería desde el link o QR de registro (de CodeFix, de un socio o de otra barbería).
@@ -388,6 +391,10 @@ begin
       plan = case when dias > 0 then 'premium' else plan end,
       premium_until = case when dias > 0 then now() + make_interval(days => dias) else premium_until end
     where id = new.id;
+    -- v2.2: la barbería que crea un socio desde el panel queda a su nombre.
+    if inv.created_by is not null and exists (select 1 from public.profiles where id = inv.created_by and role = 'socio') then
+      update public.barberias set socio_id = inv.created_by where id = b;
+    end if;
     if dias > 0 then
       insert into public.licenses (key, tipo, para_nombre, meses, dias, precio, origen, redeemed_by, redeemed_at, inicio, termino, nota)
       values (public.nueva_key(), 'barberia', v_bnom, 1, dias, 0, 'regalo',
@@ -616,10 +623,18 @@ create table if not exists public.auditoria (
 create index if not exists auditoria_fecha_idx on public.auditoria (created_at desc);
 alter table public.auditoria enable row level security;
 
+-- v2.2: drop por el cambio de lenguaje (sql → plpgsql). Si lo hace un socio y es algo que borra o corta, al admin le llega un aviso.
+drop function if exists public.auditar(text, text);
 create or replace function public.auditar(p_accion text, p_detalle text) returns void
-language sql security definer set search_path = '' as $$
-  insert into public.auditoria (quien, accion, detalle) values (auth.uid(), left(p_accion, 80), left(coalesce(p_detalle, ''), 400))
-$$;
+language plpgsql security definer set search_path = '' as $$
+begin
+  insert into public.auditoria (quien, accion, detalle) values (auth.uid(), left(p_accion, 80), left(coalesce(p_detalle, ''), 400));
+  if p_accion in ('Eliminar cuenta', 'Eliminar barbería', 'Limpieza', 'Calificación borrada', 'Quitar Premium', 'Suspender')
+     and exists (select 1 from public.profiles where id = auth.uid() and role = 'socio') then
+    perform public.avisar(auth.uid(), public.admin_id(), 'aviso', '📜 ' || (select public.nombre_de(p) from public.profiles p where p.id = auth.uid()) || ': ' || p_accion,
+      left(coalesce(p_detalle, ''), 300), 'registro');
+  end if;
+end $$;
 
 -- v2.0: links de pago de Premium (2 por plan, uno activo). El precio publicado es el del link activo.
 insert into public.app_settings (key, value)
@@ -776,6 +791,7 @@ begin
   if coalesce(trim(p_value), '') = '' then delete from public.app_settings where key = p_key;
   else insert into public.app_settings (key, value) values (p_key, left(trim(p_value), 300))
        on conflict (key) do update set value = excluded.value; end if;
+  perform public.auditar('Ajuste', p_key || ' = ' || coalesce(nullif(trim(p_value), ''), '(vacío)'));
 end $$;
 
 create table if not exists public.app_secrets (
@@ -1046,6 +1062,13 @@ begin
   end if;
   if c.role = 'admin' and lower(c.email) = public.admin_email() then
     if p_rol not in ('owner', 'socio') then return jsonb_build_object('ok', false, 'error', 'El administrador crea barberías y socios'); end if;
+  elsif c.role = 'socio' then
+    -- v2.2: el socio con permiso "crear" crea barberías (no socios).
+    if not coalesce((c.permisos ->> 'crear')::boolean, false) then return jsonb_build_object('ok', false, 'error', 'Sin permiso para crear cuentas'); end if;
+    if p_rol <> 'owner' then return jsonb_build_object('ok', false, 'error', 'El socio crea barberías'); end if;
+    if (select count(*) from public.profiles where created_by = c.id and created_at > now() - interval '1 day') >= 30 then
+      return jsonb_build_object('ok', false, 'error', 'Máximo 30 barberías nuevas por día');
+    end if;
   elsif c.role = 'owner' then
     if p_rol not in ('barber', 'client') then return jsonb_build_object('ok', false, 'error', 'Solo puedes crear barberos y clientes'); end if;
     prem := public.is_premium(c.id);
@@ -1088,6 +1111,10 @@ begin
           jsonb_build_object('barberia', left(trim(coalesce(p_barberia, '')), 80)), c.id)
   on conflict (email) do update set nombre = excluded.nombre, role = excluded.role, barberia_id = excluded.barberia_id,
     telefono = excluded.telefono, extra = excluded.extra, created_by = excluded.created_by, created_at = now();
+  if c.role in ('admin', 'socio') then
+    insert into public.auditoria (quien, accion, detalle)
+    values (c.id, 'Crear cuenta', case p_rol when 'owner' then 'Barbería ' || coalesce(nullif(trim(p_barberia), ''), trim(p_nombre)) when 'socio' then 'Socio ' || trim(p_nombre) else trim(p_nombre) end || ' · ' || em);
+  end if;
   return jsonb_build_object('ok', true);
 end $$;
 
@@ -1110,15 +1137,24 @@ begin
 end $$;
 
 -- ¿Quién puede restablecer la clave de quién? admin → cualquiera; dueño → su gente.
+-- v2.2: si el admin o un socio restablece una clave, queda en el registro de cambios.
 create or replace function public.puede_restablecer(p_caller uuid, p_target uuid) returns boolean
-language sql stable security definer set search_path = '' as $$
+language plpgsql security definer set search_path = '' as $$
+declare ok boolean; quien public.profiles;
+begin
   select exists (
     select 1 from public.profiles c, public.profiles t
     where c.id = p_caller and t.id = p_target and c.id <> t.id and not c.suspended and t.role <> 'admin'
       and ((c.role = 'admin' and lower(c.email) = public.admin_email())
            or (c.role = 'socio' and coalesce((c.permisos ->> 'cuentas')::boolean, false) and t.role in ('owner', 'barber', 'client'))
-           or (c.role = 'owner' and t.barberia_id = c.barberia_id and t.role in ('barber', 'client'))))
-$$;
+           or (c.role = 'owner' and t.barberia_id = c.barberia_id and t.role in ('barber', 'client')))) into ok;
+  select * into quien from public.profiles where id = p_caller;
+  if ok and quien.role in ('admin', 'socio') then
+    insert into public.auditoria (quien, accion, detalle)
+    select p_caller, 'Restablecer clave', public.nombre_de(t) || ' · ' || t.email from public.profiles t where t.id = p_target;
+  end if;
+  return ok;
+end $$;
 
 create or replace function public.marcar_clave_temporal(p_id uuid) returns void
 language sql security definer set search_path = '' as $$
@@ -1234,6 +1270,7 @@ begin
           coalesce(p_precio, public.plan_valor(case when p.role = 'owner' then 'barberia' else 'cliente' end, 'precio', true), 4900) * greatest(1, least(12, coalesce(p_meses, 1))),
           'directo')
   returning * into l;
+  perform public.auditar('Activar Premium', p_meses || ' mes(es) a ' || public.nombre_de(p));
   return jsonb_build_object('hasta', public.extender_premium(p_user, l.id), 'key', l.key);
 end $$;
 
@@ -1280,7 +1317,7 @@ end $$;
 create or replace function public.admin_quitar_premium(p_user uuid) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
-  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  if not public.es_gestor('eliminar') then raise exception 'Sin permiso'; end if;
   update public.profiles set plan = 'free', premium_until = null where id = p_user and role <> 'admin';
   perform public.auditar('Quitar Premium', (select public.nombre_de(x) from public.profiles x where x.id = p_user));
 end $$;
@@ -3472,7 +3509,7 @@ create or replace function public.admin_limpiar(p_que text) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare n int := 0;
 begin
-  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  if not public.es_gestor('eliminar') then raise exception 'Sin permiso'; end if;
   if p_que = 'comprobantes' then
     update public.reservas set comprobante = null where comprobante is not null and estado <> 'en_revision' and comprobante_at < now() - interval '7 days';
     get diagnostics n = row_count;
@@ -3501,8 +3538,8 @@ language plpgsql stable security definer set search_path = '' as $$
 begin
   if not public.es_gestor() then raise exception 'Solo CodeFix'; end if;
   return (select coalesce(jsonb_agg(jsonb_build_object('accion', a.accion, 'detalle', a.detalle, 'created_at', a.created_at,
-      'quien', coalesce(public.nombre_de(p), 'Sistema')) order by a.created_at desc), '[]'::jsonb)
-    from (select * from public.auditoria order by created_at desc limit 200) a left join public.profiles p on p.id = a.quien);
+      'quien', coalesce(public.nombre_de(p), 'Sistema'), 'rol', p.role) order by a.created_at desc), '[]'::jsonb)
+    from (select * from public.auditoria order by created_at desc limit 300) a left join public.profiles p on p.id = a.quien);
 end $$;
 
 create or replace function public.admin_calificaciones() returns jsonb
@@ -3517,7 +3554,7 @@ end $$;
 create or replace function public.admin_borrar_calificacion(p_id uuid) returns void
 language plpgsql security definer set search_path = '' as $$
 begin
-  if not public.is_admin() then raise exception 'Solo el administrador'; end if;
+  if not public.es_gestor('eliminar') then raise exception 'Sin permiso'; end if;
   delete from public.calificaciones where id = p_id;
   perform public.auditar('Calificación borrada', p_id::text);
 end $$;
@@ -3650,6 +3687,7 @@ begin
          or (p_para = 'barberias_premium' and p.role = 'owner' and public.is_premium(p.id))
          or (p_para like 'barberia:%' and p.barberia_id::text = substr(p_para, 10)));
   get diagnostics n = row_count;
+  perform public.auditar('Aviso masivo', left(trim(p_titulo), 90) || ' · a ' || n || ' persona(s)');
   return n;
 end $$;
 
@@ -3682,6 +3720,8 @@ begin
   if not public.es_gestor('cuentas') then raise exception 'Sin permiso'; end if;
   update public.reports set resolved = true where id = p_id returning * into r;
   if p_suspender then update public.profiles set suspended = true where id = r.reported and role not in ('admin', 'socio'); end if;
+  perform public.auditar(case when p_suspender then 'Suspender' else 'Reporte ignorado' end,
+    'Reporte contra ' || coalesce((select public.nombre_de(x) from public.profiles x where x.id = r.reported), '?') || ': ' || coalesce(r.reason, ''));
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -3854,7 +3894,7 @@ begin
   if not public.is_admin() then raise exception 'Solo el administrador'; end if;
   if not exists (select 1 from public.profiles where id = p_id and role = 'socio') then raise exception 'Socio no encontrado'; end if;
   if jsonb_typeof(p -> 'permisos') = 'object' then
-    foreach k in array array['pagos', 'premium', 'cuentas', 'ajustes', 'avisos'] loop
+    foreach k in array array['pagos', 'premium', 'cuentas', 'ajustes', 'avisos', 'crear', 'eliminar'] loop
       perm := perm || jsonb_build_object(k, coalesce((p -> 'permisos' ->> k)::boolean, false));
     end loop;
   end if;
@@ -3863,6 +3903,59 @@ begin
     suspended = case when p ? 'suspended' then coalesce((p ->> 'suspended')::boolean, false) else suspended end
   where id = p_id;
   perform public.auditar('Socio', (select public.nombre_de(x) from public.profiles x where x.id = p_id) || ' · ' || p::text);
+end $$;
+
+-- ---------------------------------------------------------------------
+-- v2.2: Eliminar cuentas. Admin y socios (permiso "eliminar"): barberos, clientes y barberías completas.
+-- El dueño: sus barberos y sus clientes. Todo queda en el registro de cambios.
+--   Barbero: no puede tener horas por venir; su historial (horas y caja) pasa al dueño con una nota.
+--   Cliente: sus horas por venir se anulan; el historial queda con su nombre, sin cuenta.
+--   Barbería (dueño): se borra todo (equipo, clientes, horas, caja). Hay que escribir el nombre de la barbería.
+-- ---------------------------------------------------------------------
+create or replace function public.eliminar_cuenta(p_user uuid, p_confirmar text default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; t public.profiles; b public.barberias; n int; nom text;
+begin
+  me := public.yo_activo();
+  select * into t from public.profiles where id = p_user;
+  if t.id is null then raise exception 'Cuenta no encontrada'; end if;
+  if t.id = me.id then raise exception 'No puedes eliminar tu propia cuenta desde aquí'; end if;
+  if t.role = 'admin' then raise exception 'La cuenta del administrador no se elimina'; end if;
+  if t.role = 'socio' and not public.is_admin() then raise exception 'Solo el administrador elimina socios'; end if;
+  if not (public.es_gestor('eliminar') or (me.role = 'owner' and t.barberia_id = me.barberia_id and t.role in ('barber', 'client'))) then
+    raise exception 'Sin permiso para eliminar esta cuenta';
+  end if;
+  nom := public.nombre_de(t);
+  select * into b from public.barberias where id = t.barberia_id;
+  if t.role = 'barber' then
+    if exists (select 1 from public.reservas where barbero_id = t.id and inicio > now()
+               and estado in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada')) then
+      raise exception '% tiene horas por venir. Muévelas a otro barbero o anúlalas antes de eliminarlo.', nom;
+    end if;
+    update public.reservas set barbero_id = b.owner_id, nota = left('Era de ' || nom || ' (eliminado)' || coalesce(' · ' || nota, ''), 200)
+    where barbero_id = t.id;
+    update public.caja set barbero_id = b.owner_id, nota = left('Era de ' || nom || ' (eliminado)' || coalesce(' · ' || nota, ''), 200)
+    where barbero_id = t.id;
+    update public.servicios set barberos = nullif(array_remove(barberos, t.id), '{}') where barberia_id = b.id and t.id = any(barberos);
+  elsif t.role = 'client' then
+    update public.reservas set cliente_nombre = coalesce(cliente_nombre, t.nombre) where cliente_id = t.id;
+    update public.caja set cliente_nombre = coalesce(cliente_nombre, t.nombre) where cliente_id = t.id;
+    update public.reservas set estado = 'anulada', motivo = 'Cuenta eliminada', anulada_at = now(), anulada_por = me.id, expira_at = null
+    where cliente_id = t.id and estado in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada') and inicio > now();
+  elsif t.role = 'owner' then
+    if lower(trim(coalesce(p_confirmar, ''))) <> lower(trim(b.nombre)) then
+      raise exception 'Para eliminar la barbería escribe su nombre exacto: %', b.nombre;
+    end if;
+    select count(*) into n from public.profiles where barberia_id = b.id and role <> 'owner';
+    perform public.auditar('Eliminar barbería', b.nombre || ' (' || b.codigo || ') · dueño ' || nom || ' · ' || t.email || ' · ' || n || ' cuenta(s) de equipo y clientes');
+    delete from auth.users where id in (select id from public.profiles where barberia_id = b.id and role <> 'owner');
+    delete from auth.users where id = t.id;
+    return jsonb_build_object('ok', true, 'eliminada', b.nombre);
+  end if;
+  perform public.auditar('Eliminar cuenta', case t.role when 'barber' then 'Barbero ' when 'client' then 'Cliente ' when 'socio' then 'Socio ' else '' end ||
+    nom || ' · ' || t.email || coalesce(' · ' || b.nombre, ''));
+  delete from auth.users where id = t.id;
+  return jsonb_build_object('ok', true, 'eliminada', nom);
 end $$;
 
 -- Premium que vence este mes (barberías y clientes), para cobrar por WhatsApp.

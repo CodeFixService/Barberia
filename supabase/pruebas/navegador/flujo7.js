@@ -83,7 +83,7 @@ const raizLocal = (u) => u.replace(/^https?:\/\/[^/]+\//, BASE);
     await cerrarHojas(soc);
     await soc.click('nav.tabs [data-v="barberias"]');
     await soc.waitForSelector('#bNuevaB');
-    ok((await soc.textContent('#bNuevaB')).includes('QR'), 'la socia no crea barberías (solo comparte el QR)');
+    ok((await soc.textContent('#bNuevaB')).includes('+ Barbería'), 'la socia también crea barberías (v2.2)');
     await soc.click('nav.tabs [data-v="ajustes"]');
     ok(!(await soc.$('[data-s="socios"]')) && !(await soc.$('[data-s="version"]')), 'la socia no ve Socios ni Versión');
     await foto(soc, 'socia-ajustes');
@@ -229,6 +229,34 @@ const raizLocal = (u) => u.replace(/^https?:\/\/[^/]+\//, BASE);
     ok(t10.includes('Barbería La Navaja') && t10.includes('Barbería El Peine') && t10.includes('por Barbería La Navaja') && t10.includes('socio Sofía Socia'),
       'el admin ve las barberías registradas solas, quién las trajo y su socio');
     await foto(adm, 'admin-registradas-solas');
+
+    // 11) v2.2: la socia elimina una barbería (escribiendo su nombre) y queda en el registro; el admin lo ve
+    await soc.click('nav.tabs [data-v="barberias"]');
+    await soc.waitForSelector('.barb-card');
+    await soc.click('.barb-card:has-text("Barbería El Peine")');
+    await soc.waitForSelector('.sheet [data-eliminar]', { timeout: 10000 });
+    await soc.click('.sheet [data-eliminar]');
+    await soc.waitForSelector('.sheet [data-v]');
+    await soc.fill('.sheet [data-v]', 'Barbería El Peine');
+    await soc.click('.sheet [data-si]');
+    await esperar(1500);
+    ok(!(await q("select 1 from barberias where nombre = 'Barbería El Peine'")).length && !(await q("select 1 from auth.users where email = 'pia@peine.cl'")).length,
+      'la socia elimina una barbería completa (escribiendo su nombre)');
+    await adm.click('nav.tabs [data-v="ajustes"]');
+    await adm.click('[data-s="registro"]');
+    await adm.click('[data-f="socios"]');
+    await adm.waitForSelector('text=Eliminar barbería', { timeout: 10000 });
+    ok((await texto(adm)).includes('Sofía Socia · CodeFix'), 'el admin ve en el registro lo que eliminó la socia y quién fue');
+    await foto(adm, 'admin-registro-socios');
+    // El dueño elimina un cliente con cuenta desde su ficha
+    await q("insert into auth.users (email, raw_user_meta_data) values ('cli@navaja.cl', $1)", [JSON.stringify({ rol: 'cliente', barberia: nav.codigo, nombre: 'Cliente Borrable', telefono: '+56933332222' })]);
+    await own.goto(BASE + 'equipo/#clientes');
+    await own.waitForSelector('#lCli li', { timeout: 15000 });
+    await own.click('#lCli li:has-text("Cliente Borrable")');
+    await own.click('.sheet [data-eliminar]');
+    await own.click('.sheet [data-si]');
+    await esperar(1200);
+    ok(!(await q("select 1 from profiles where email = 'cli@navaja.cl'")).length, 'el dueño elimina un cliente desde su ficha');
 
     ok(!errores.length, 'sin errores en el navegador' + (errores.length ? ':\n' + errores.join('\n') : ''));
     console.log('✅ FLUJO v2.1 COMPLETO');
