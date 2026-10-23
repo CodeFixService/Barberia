@@ -38,13 +38,25 @@
   document.title = V.nombre + ' · Reserva tu hora';
 
   const carro = new Set();
-  let barberoSel = null, fechaSel = C.hoy();
+  // v2.1: el link de un barbero (b/?b=código&con=<barbero>) llega con ese barbero elegido.
+  let barberoSel = params.get('con') || null, fechaSel = C.hoy();
   let datos = { reservas: [], bloqueos: [] };
   const servicio = (id) => V.servicios.find((s) => s.id === id);
   const barbero = (id) => V.barberos.find((b) => b.id === id);
   const reservables = () => V.barberos.filter((b) => b.reservable);
   const carroItems = () => [...carro].map(servicio).filter(Boolean);
   const carroDur = () => carroItems().reduce((t, s) => t + s.duracion, 0);
+  const hm = (m) => (m >= 60 ? Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) : '') : m + ' min');
+  // v2.1: duración real con el barbero elegido (sus tiempos + su descanso).
+  const durServ = (s) => { const x = barberoSel && barberoSel !== '*' ? barbero(barberoSel) : null; const d = x && x.duraciones && +x.duraciones[s.id]; return d > 0 ? d : s.duracion; };
+  function durTxt() {
+    if (!carro.size) return '';
+    if (barberoSel && barberoSel !== '*' && barbero(barberoSel)) return '≈ ' + hm(durCon(barbero(barberoSel))) + ' con ' + barbero(barberoSel).nombre.split(' ')[0];
+    const ds = reservables().map(durCon);
+    if (!ds.length) return carroDur() + ' min';
+    const a = Math.min(...ds), z = Math.max(...ds);
+    return '≈ ' + (a === z ? hm(a) : hm(a) + ' a ' + hm(z)) + ' según el barbero';
+  }
   const carroTotal = () => carroItems().reduce((t, s) => t + s.precio, 0);
   const horarios = () => Object.fromEntries(V.barberos.map((b) => [b.id, b.horario]));
   const misTokens = () => (C.leer('tokens', []) || []).filter((x) => x.codigo === V.codigo);
@@ -128,13 +140,14 @@
       if (cat) html += '<div class="sec-tit">' + esc(cat) + '</div>';
       html += V.servicios.filter((s) => (s.categoria || '') === cat).map((s) =>
         '<div class="serv' + (carro.has(s.id) ? ' en-carro' : '') + '" data-s="' + s.id + '"><span class="foto" style="' + C.fondo(s.foto) + '">' + (s.foto ? '' : '✂️') + '</span>' +
-        '<div class="grow"><b>' + esc(s.nombre) + '</b><span class="sub muted">' + s.duracion + ' min' + (s.descripcion ? ' · ' + esc(s.descripcion) : '') + '</span></div>' +
+        '<div class="grow"><b>' + esc(s.nombre) + '</b><span class="sub muted">' + durServ(s) + ' min' + (s.descripcion ? ' · ' + esc(s.descripcion) : '') + '</span></div>' +
         '<div style="text-align:right"><div class="precio-s">' + C.plata(s.precio) + '</div><button class="small ' + (carro.has(s.id) ? 'ok' : 'alt') + '">' + (carro.has(s.id) ? '✓' : '+ Agregar') + '</button></div></div>').join('');
     });
     html += '<div class="paso"><span class="n">2</span><b>Elige tu barbero</b></div><div class="barberos">';
     if (reservables().length > 1) html += '<button class="barb' + (barberoSel === '*' ? ' on' : '') + '" data-b="*"><span class="av">🎲</span>El que esté libre<small>más horas</small></button>';
     html += V.barberos.map((x) => '<button class="barb' + (barberoSel === x.id ? ' on' : '') + (x.reservable ? '' : ' cerrada') + '" data-b="' + x.id + '">' + C.avatar(x) +
-      esc(x.nombre.split(' ')[0]) + '<small>' + (x.reservable ? 'disponible' : '🔴 agenda llena') + '</small></button>').join('') + '</div>';
+      esc(x.nombre.split(' ')[0]) + '<small>' + (x.reservable ? (carro.size ? '≈ ' + hm(durCon(x)) : 'disponible') : '🔴 agenda llena') + '</small></button>').join('') + '</div>' +
+      (carro.size ? '<p class="muted chico" style="margin:6px 4px 0">⏱️ Tu cita dura ' + esc(durTxt()) + ' (incluye su descanso).</p>' : '');
     html += '<div class="paso"><span class="n">3</span><b>Elige día y hora</b></div><div class="dias" id="tira"></div><div class="card" id="slots"></div>' +
       '<p class="muted chico">Abono para reservar: <b>' + C.plata(V.abono) + '</b> (se descuenta del total). ' + esc(K.texto('reserva_pago')) + '</p>';
     el.innerHTML = html;
@@ -152,7 +165,7 @@
     const bb = $('carroBarra');
     if (!carro.size) { bb.classList.add('hidden'); return; }
     bb.classList.remove('hidden');
-    bb.innerHTML = '<div class="grow"><b>🛒 ' + carro.size + ' servicio' + (carro.size > 1 ? 's' : '') + ' · ' + C.plata(carroTotal()) + '</b><small>' + carroDur() + ' min · elige una hora 👇</small></div>' +
+    bb.innerHTML = '<div class="grow"><b>🛒 ' + carro.size + ' servicio' + (carro.size > 1 ? 's' : '') + ' · ' + C.plata(carroTotal()) + '</b><small>' + esc(durTxt()) + ' · elige una hora 👇</small></div>' +
       '<button class="small gris" id="bVaciar" style="background:transparent;color:inherit;border-color:rgba(255,255,255,.3)">Vaciar</button>';
     $('bVaciar').onclick = () => { carro.clear(); pintarReservar(); };
   }
@@ -181,6 +194,13 @@
     if (!barberoSel) { $('slots').innerHTML = '<div class="empty"><span class="ico">💈</span>Todos los barberos tienen la agenda llena por ahora. Escríbele a la barbería.</div>'; $('tira').innerHTML = ''; return; }
     const ids = barberoSel === '*' ? reservables().map((x) => x.id) : [barberoSel];
     A.tiraDias($('tira'), { cuantos: Math.min(60, V.dias_max + 1), sel: fechaSel, info: (f) => A.llenado(ids, f, datos, horarios()), alElegir: (f) => { fechaSel = f; pintarSlots(); } });
+    // v2.1: viernes y sábados lejanos son para clientes Premium (con cuenta).
+    $('tira').querySelectorAll('.dia').forEach((d) => { if (K.prioridadBloquea(d.dataset.f, false)) { d.classList.add('plata'); d.title = 'Solo clientes Premium'; } });
+    if (K.prioridadBloquea(fechaSel, false)) {
+      $('slots').innerHTML = '<h2>' + C.fechaLarga(fechaSel) + '</h2><div class="empty"><span class="ico">⭐</span>Los viernes y sábados con más de ' + K.regla('dias_prioridad') +
+        ' días de anticipación son para clientes Premium. Elige un día más cercano' + (V.registro ? ' o crea tu cuenta y hazte Premium.' : '.') + '</div>';
+      return;
+    }
     const s = horasDe(fechaSel);
     const dh = A.diaHorario(barberoSel === '*' ? (reservables()[0] || {}).horario : barbero(barberoSel).horario, fechaSel);
     let html = '<h2>' + C.fechaLarga(fechaSel) + '</h2>';
@@ -200,7 +220,7 @@
     const yoInv = C.leer('invitado', {}) || {};
     const items = carroItems();
     const h = C.hoja('<h2>📅 Confirma tu hora</h2><div class="hora-card" style="margin-bottom:12px"><div class="fecha"><small>' + C.DIAS[C.dow(f) - 1] + '</small><b>' + (+f.slice(8)) + '</b><i>' + slot.hhmm + '</i></div>' +
-      '<div class="grow"><b>' + C.fechaLarga(f) + ', ' + slot.hhmm + '</b><div class="muted">con ' + esc(x.nombre) + ' · hasta las ' + C.horaDe(new Date(slot.t.getTime() + durCon(x) * 60000)) + '</div></div></div>' +
+      '<div class="grow"><b>' + C.fechaLarga(f) + ', ' + slot.hhmm + '</b><div class="muted">con ' + esc(x.nombre) + ' · hasta las ' + C.horaDe(new Date(slot.t.getTime() + durCon(x) * 60000)) + ' (' + hm(durCon(x)) + ')</div></div></div>' +
       '<div class="resumen-carro">' + items.map((s) => '<div><span>' + esc(s.nombre) + '</span><span>' + C.plata(s.precio) + '</span></div>').join('') +
       '<div style="border-top:1px solid var(--line);padding-top:6px"><b>Total</b><b>' + C.plata(carroTotal()) + '</b></div>' +
       (V.abono ? '<div><span>Abono ahora</span><b>' + C.plata(V.abono) + '</b></div><div class="muted"><span>Pagas en la barbería</span><span>' + C.plata(Math.max(0, carroTotal() - V.abono)) + '</span></div>' : '') + '</div>' +

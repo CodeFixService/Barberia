@@ -64,8 +64,10 @@
     if (R.estado === 'anulada') {
       html += '<p class="muted" style="margin-bottom:0">' + esc(R.motivo || 'Anulada') + '</p>';
       if (R.abono_destino === 'saldo') html += '<p><b>💰 Tu abono de ' + C.plata(R.abono) + ' quedó como saldo a favor</b>' + (R.saldo_hasta ? '<br><span class="muted chico">Úsalo para reagendar antes del ' + C.cuando(R.saldo_hasta).split(' · ')[0] + '</span>' : '') + '</p>';
-      if (R.abono_destino === 'devolucion') html += '<p><b>💸 La barbería te devolverá ' + C.plata(R.abono) + '</b><br><span class="muted chico">' + (R.devolucion === 'devuelta' ? '✅ Ya lo marcó como devuelto.' : 'Te lo transfiere a la brevedad.') + '</span></p>';
-      if (R.abono_destino === 'perdido') html += '<p class="muted chico">El abono no se devuelve (se anuló fuera de plazo).</p>';
+      if (R.abono_destino === 'devolucion') html += '<p><b>💸 La barbería te devolverá ' + C.plata(R.abono) + '</b><br><span class="muted chico">' + (R.devolucion === 'devuelta' ? '✅ Ya lo marcó como devuelto.' :
+        R.sin_verificar ? 'Primero revisa que le haya llegado tu transferencia y después te la devuelve.' : 'Te lo transfiere a la brevedad.') + '</span></p>';
+      if (R.devolucion === 'no_llego') html += '<p><b>La barbería no recibió tu transferencia</b><br><span class="muted chico">Por eso no hay devolución. Si fue un error, escríbele con tu comprobante.</span></p>';
+      if (R.abono_destino === 'perdido' && R.devolucion !== 'no_llego') html += '<p class="muted chico">El abono no se devuelve (se anuló fuera de plazo).</p>';
     }
     if (R.estado === 'no_vino') html += '<p class="muted">El abono no se devuelve. Si fue un error, escríbele a la barbería.</p>';
     html += '</div>';

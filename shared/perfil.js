@@ -16,13 +16,16 @@
         'Servicios ' + ilim(L('servicios', true), 100) + ', con foto (Free: ' + L('servicios', false) + ')', 'Calendario "Todos" en columnas y vista Año',
         'Colores, portada y fotos de tu equipo', 'Ofertas ' + (L('ofertas', true) >= 50 ? 'ilimitadas' : 'hasta ' + L('ofertas', true)) + ' y ofertas VIP',
         'Recordatorios automáticos a tus clientes', 'Tarjeta de sellos (ej. 10 cortes = 1 gratis)', 'Caja con reportes, comisiones y la de todos tus barberos',
-        'Estadísticas por barbero, servicios y horas más pedidas', 'Horario y servicios propios por barbero', 'Lista de espera para tus clientes', 'Marca CodeFix discreta'];
+        'Estadísticas por barbero, servicios y horas más pedidas', 'Horario y servicios propios por barbero', 'Lista de espera para tus clientes',
+        'Resumen del mes: cuánto ganaste, tu mejor día y lo que perdiste por los que no vinieron', 'Clientes que no vuelven, con WhatsApp y oferta en 1 toque',
+        'Recordatorio por WhatsApp en 1 toque (menos "no vino")', 'Regalo de cumpleaños automático a tus clientes', 'Marca CodeFix discreta'];
     }
     const m = L('mensajes', true), mf = L('mensajes', false);
     return ['Reserva hasta ' + L('dias', true) + ' días adelante (Free: ' + L('dias', false) + ')', 'Hasta ' + L('activas', true) + ' horas activas a la vez (Free: ' + L('activas', false) + ')',
       m === 0 ? 'Mensajes sin límite y prioritarios ⭐' : 'Hasta ' + m + ' mensajes seguidos (Free: ' + (mf || 'sin límite') + ')',
       'Ofertas VIP exclusivas', 'Recordatorios 24 h y 2 h antes de tu hora', 'Lista de espera: te avisamos si se libera una hora',
-      'Barbero favorito, se elige solo al agendar', 'Todos los colores, uno a tu gusto, tu foto y marco dorado'];
+      'Barbero favorito, se elige solo al agendar', 'Todos los colores, uno a tu gusto, tu foto y marco dorado',
+      'Prioridad: reserva viernes y sábados antes que nadie', 'Abono rebajado o sin abono en las barberías que lo ofrecen'];
   }
 
   const fechaCorta = (t) => { const f = C.fechaDe(t).split('-'); return f[2] + '/' + f[1] + '/' + f[0]; };
@@ -49,12 +52,31 @@
     el.addEventListener('click', (e) => { e.preventDefault(); e.stopImmediatePropagation(); upsell(que); }, true);
   }
 
+  /* ---------- Compartir: link + QR (descargar, copiar, WhatsApp) ---------- */
+  // o = { titulo, texto, link, mensaje, archivo, el (si va dentro de una sección en vez de una hoja) }
+  function compartir(o) {
+    const msg = (o.mensaje || '') + (o.mensaje ? ': ' : '') + o.link;
+    const html = '<div class="card centro">' + (o.texto ? '<p style="margin-top:0">' + o.texto + '</p>' : '') +
+      '<img class="qr-img" src="' + C.qr(o.link, 440) + '" alt="QR" style="width:220px;max-width:70%;display:block;margin:10px auto;border-radius:12px">' +
+      '<input readonly value="' + esc(o.link) + '" style="text-align:center">' +
+      '<div class="btns" style="justify-content:center"><button data-copiar>📋 Copiar</button>' +
+      '<a class="btn gris" download="' + esc(o.archivo || 'qr') + '.png" href="' + C.qr(o.link, 900) + '">⬇️ Descargar QR</a>' +
+      '<a class="btn wsp" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(msg) + '">💬 WhatsApp</a>' +
+      (navigator.share ? '<button class="gris" data-share>📤 Compartir</button>' : '') + '</div></div>';
+    const z = o.el || C.hoja('<h2>' + esc(o.titulo || '🔳 Compartir') + '</h2><div data-z></div>').q('[data-z]');
+    z.innerHTML = html + (o.extra || '');
+    z.querySelector('[data-copiar]').onclick = () => C.copiar(o.link);
+    if (z.querySelector('[data-share]')) z.querySelector('[data-share]').onclick = () => navigator.share({ title: o.titulo || '', text: o.mensaje || '', url: o.link }).catch(() => {});
+    return z;
+  }
+
   /* ---------- Mi plan: pagar con el link y subir el comprobante (lo aprueba CodeFix) ---------- */
   async function plan(el) {
     const a = await K.refrescar() || K.cuenta;
     const s = await K.ajustes();
     const grupo = K.grupoDe(a.role);
     const lk = K.linkPremium(grupo);
+    const tri = K.linkTrimestral(grupo);
     const info = K.planInfo(grupo, 'premium');
     const dur = info.duracion_dias || 30;
     const prueba = grupo === 'cliente' ? K.plan('cliente', 'prueba_dias', true) : 0;
@@ -83,8 +105,13 @@
       html += '<h3>' + (prem ? 'Renovar (se suma desde tu fecha de término)' : '¿Cómo lo activo?') + '</h3>' +
         '<p class="muted chico" style="margin-top:0">' + esc(K.texto('pago_instrucciones')) + '</p>' +
         '<div class="pasos-reserva"><div class="on"><i>1</i>Paga ' + C.plata(lk.monto) + (lk.texto ? ' · ' + esc(lk.texto) : '') + '</div><div class="on"><i>2</i>Sube la foto del comprobante</div><div><i>3</i>Te avisamos cuando se apruebe</div></div>' +
+        (tri ? '<label>¿Cuánto tiempo?</label><div class="seg" data-meses><button class="on" data-m="1">1 mes · ' + C.plata(lk.monto) + '</button>' +
+          '<button data-m="3">3 meses · ' + C.plata(tri.monto) + ' <span class="pill ok">-' + tri.descuento + '%</span></button></div>' +
+          '<p class="muted chico hidden" data-tri-txt>Pagas ' + C.plata(tri.monto) + ' en vez de ' + C.plata(lk.monto * 3) + (tri.texto ? ' · ' + esc(tri.texto) : '') +
+          (tri.url ? '' : '. Paga por transferencia y sube el comprobante.') + '</p>' : '') +
         '<div class="btns" style="flex-direction:column">' +
-        (lk.url ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(lk.url) + '">💳 Pagar ' + C.plata(lk.monto) + '</a>' : '') +
+        (lk.url ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(lk.url) + '" data-pagar1>💳 Pagar ' + C.plata(lk.monto) + '</a>' : '') +
+        (tri && tri.url ? '<a class="btn oro full hidden" target="_blank" rel="noopener" href="' + esc(tri.url) + '" data-pagar3>💳 Pagar 3 meses · ' + C.plata(tri.monto) + '</a>' : '') +
         (s.datos_transferencia ? '<button class="gris full" data-transf>🏦 Ver datos de transferencia</button>' : '') +
         '<button class="alt full" data-foto>📷 Subir comprobante</button><img class="comp-img hidden" data-prev alt="Comprobante">' +
         '<button class="full ok hidden" data-enviar>✅ Enviar comprobante</button></div>';
@@ -96,11 +123,19 @@
     el.innerHTML = html;
     const q = (x) => el.querySelector(x);
     if (q('[data-transf]')) q('[data-transf]').onclick = () => {
-      const h = C.hoja('<h2>🏦 Transferencia</h2><p style="white-space:pre-line">' + esc(s.datos_transferencia) + '</p><p class="muted">Monto: <b>' + C.plata(lk.monto) + '</b></p>' +
+      const monto = meses === 3 && tri ? tri.monto : lk.monto;
+      const h = C.hoja('<h2>🏦 Transferencia</h2><p style="white-space:pre-line">' + esc(s.datos_transferencia) + '</p><p class="muted">Monto: <b>' + C.plata(monto) + '</b></p>' +
         '<div class="btns"><button data-c class="full">📋 Copiar datos</button></div>');
-      h.q('[data-c]').onclick = () => C.copiar(s.datos_transferencia + '\nMonto: ' + C.plata(lk.monto));
+      h.q('[data-c]').onclick = () => C.copiar(s.datos_transferencia + '\nMonto: ' + C.plata(monto));
     };
-    let foto = null;
+    let foto = null, meses = 1;
+    el.querySelectorAll('[data-meses] [data-m]').forEach((b) => b.onclick = () => {
+      meses = +b.dataset.m;
+      el.querySelectorAll('[data-meses] [data-m]').forEach((x) => x.classList.toggle('on', x === b));
+      if (q('[data-pagar1]')) q('[data-pagar1]').classList.toggle('hidden', meses === 3);
+      if (q('[data-pagar3]')) q('[data-pagar3]').classList.toggle('hidden', meses !== 3);
+      if (q('[data-tri-txt]')) q('[data-tri-txt]').classList.toggle('hidden', meses !== 3);
+    });
     if (q('[data-foto]')) q('[data-foto]').onclick = async () => {
       const img = await C.elegirImagen(1000, 0.6);
       if (!img) return;
@@ -110,7 +145,7 @@
       q('[data-foto]').textContent = '📷 Cambiar foto';
     };
     if (q('[data-enviar]')) q('[data-enviar]').onclick = (ev) => C.accion(ev.target, async () => {
-      await K.rpc('premium_pagar', { p_imagen: foto, p_nota: null });
+      await K.rpc('premium_pagar', { p_imagen: foto, p_nota: null, p_meses: meses });
       K.despertarEnvios();
       plan(el);
     }, '🧾 Comprobante enviado. Te avisamos al aprobarlo');
@@ -127,7 +162,7 @@
     const a = K.cuenta;
     const esCliente = a.role === 'client';
     const prem = esCliente ? K.clienteTiene('colores') : true;
-    const ROL = { admin: 'Administrador', owner: 'Dueño', barber: 'Barbero', client: 'Cliente' };
+    const ROL = { admin: 'Administrador', socio: 'Socio CodeFix', owner: 'Dueño', barber: 'Barbero', client: 'Cliente' };
     let tema = 'auto';
     try { tema = localStorage.getItem('barb:tema') || 'auto'; } catch (e) { /* sin acceso */ }
     if (!['auto', 'light', 'dark'].includes(tema)) tema = 'auto';
@@ -261,5 +296,5 @@
     pintar();
   }
 
-  global.Perfil = { perfil, plan, upsell, bloquear, tour, beneficios, fechaCorta, diasQuedan };
+  global.Perfil = { perfil, plan, upsell, bloquear, tour, beneficios, fechaCorta, diasQuedan, compartir };
 })(window);

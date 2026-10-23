@@ -147,6 +147,10 @@ async function texto(p) { return p.evaluate(() => document.body.innerText); }
     await own.click('[data-aprobar]');
     await esperar(1200);
     ok((await q('select estado from reservas where token = $1', [token]))[0].estado === 'agendada', 'aprobado: queda agendada');
+    // v2.1: como reservó sin cuenta, se ofrece avisarle por WhatsApp con su link.
+    await own.waitForSelector('.sheet [data-w]', { timeout: 10000 });
+    ok((await own.getAttribute('.sheet [data-w]', 'href')).includes(encodeURIComponent('r/?t=' + token)), 'al aprobar se ofrece avisarle por WhatsApp con el link de su hora');
+    await own.click('.sheet [data-no]');
     await inv.reload();
     await inv.waitForSelector('text=¡Tu hora está agendada!', { timeout: 10000 });
     await foto(inv, 'invitado-agendada');
@@ -163,7 +167,9 @@ async function texto(p) { return p.evaluate(() => document.body.innerText); }
     await inv.waitForSelector('text=quedó como saldo a favor', { timeout: 10000 });
     await foto(inv, 'invitado-cancelada-con-saldo');
     await inv.click('[data-reag]');
-    await inv.waitForSelector('.sheet .slot:not([disabled])', { timeout: 10000 });
+    await inv.waitForSelector('.sheet [data-tira] .dia', { timeout: 10000 });
+    // (de noche ya no quedan horas hoy: busca el primer día con horas libres)
+    for (let i = 0; i < 10 && !(await inv.$('.sheet .slot:not([disabled])')); i++) { await inv.click('.sheet [data-tira] .dia >> nth=' + i); await esperar(300); }
     await inv.click('.sheet .slot:not([disabled])');
     await inv.waitForSelector('.sheet [data-si]');
     await inv.click('.sheet [data-si]');

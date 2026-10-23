@@ -69,7 +69,7 @@
     }
   }
 
-  const PAGINAS = { admin: 'admin/', owner: 'equipo/', barber: 'equipo/', client: 'cliente/' };
+  const PAGINAS = { admin: 'admin/', socio: 'admin/', owner: 'equipo/', barber: 'equipo/', client: 'cliente/' };
   const paginaDe = (rol) => PAGINAS[rol] || '';
 
   // Al abrir cada página: exige sesión y el rol correcto.
@@ -196,9 +196,10 @@
   /* ---------- Planes Free / Premium (los edita el admin) ---------- */
   const PLANES_BASE = {
     barberia: { barberos: [3, 10], clientes: [40, 500], servicios: [8, 100], ofertas: [1, 50], precio: [0, 4900], prueba_dias: [0, 7],
-      estadisticas: [0, 1], recordatorios: [0, 1], caja_reportes: [0, 1], colores: [0, 1], ofertas_vip: [0, 1], sellos: [0, 1], horario_barbero: [0, 1], vista_todos: [0, 1] },
+      estadisticas: [0, 1], recordatorios: [0, 1], caja_reportes: [0, 1], colores: [0, 1], ofertas_vip: [0, 1], sellos: [0, 1], horario_barbero: [0, 1], vista_todos: [0, 1],
+      fotos_servicios: [0, 1], servicios_barbero: [0, 1], editar_barberos: [0, 1], comisiones: [0, 1], resumen_mes: [0, 1], recuperar: [0, 1], recordar_wsp: [0, 1], cumpleanos: [0, 1] },
     cliente: { activas: [1, 3], dias: [14, 45], mensajes: [3, 0], precio: [0, 4900], prueba_dias: [0, 7],
-      lista_espera: [0, 1], favorito: [0, 1], recordatorios: [0, 1], ofertas_vip: [0, 1], colores: [0, 1] }
+      lista_espera: [0, 1], favorito: [0, 1], recordatorios: [0, 1], ofertas_vip: [0, 1], colores: [0, 1], prioridad: [0, 1] }
   };
   // Valor de un plan: plan('cliente', 'dias', true) → 45
   function plan(grupo, clave, premium) {
@@ -218,7 +219,8 @@
 
   /* ---------- Reglas, textos y links (los edita el admin) ---------- */
   const REGLAS_BASE = { minutos_pago: 10, minutos_devolucion: 10, horas_cancelacion: 24, dias_saldo: 90, dias_regalo: 30, dias_aviso: 3,
-    dias_comprobantes: 30, dias_anuladas: 30, estrellas_lista_negra: 2, minutos_recordar_revision: 15, activas_invitado: 1 };
+    dias_comprobantes: 30, dias_anuladas: 30, estrellas_lista_negra: 2, minutos_recordar_revision: 15, activas_invitado: 1,
+    apartadas_max: 10, dias_prioridad: 3, dias_sin_volver: 45, descuento_3meses: 15, dias_referido: 30, registro_barberias: 1 };
   function regla(k) { const r = (C.leer('ajustes', {}) || {}).reglas || {}; return r[k] !== undefined ? +r[k] : REGLAS_BASE[k]; }
   // Texto editable con variables: texto('reserva_politica') → reemplaza {minutos}, {devolucion}, {horas}.
   function texto(k, def) {
@@ -231,6 +233,19 @@
     const l = (s.links_premium || {})[grupo];
     if (l && l['s' + (l.activo || 1)]) { const x = l['s' + (l.activo || 1)]; return { monto: x.monto != null ? +x.monto : plan(grupo, 'precio', true), url: x.url || '', texto: x.texto || '' }; }
     return { monto: plan(grupo, 'precio', true), url: s['link_pago_' + grupo] || s.link_pago || '', texto: '' };
+  }
+  // v2.1: link opcional para pagar 3 meses por adelantado: { url, texto, monto, descuento } (null si no está disponible).
+  function linkTrimestral(grupo) {
+    const d = regla('descuento_3meses');
+    if (!(d > 0)) return null;
+    const l = ((C.leer('ajustes', {}) || {}).links_premium || {})[grupo] || {};
+    const t = l.trimestral || {};
+    return { url: t.url || '', texto: t.texto || '', descuento: d, monto: Math.round(linkPremium(grupo).monto * 3 * (100 - d) / 100) };
+  }
+  // v2.1: ¿se puede reservar este día? Los viernes y sábados con más de N días de anticipación son para clientes Premium.
+  function prioridadBloquea(f, premium) {
+    const n = regla('dias_prioridad');
+    return n > 0 && !tiene('cliente', 'prioridad', !!premium) && [5, 6].includes(C.dow(f)) && f > C.sumarDias(C.hoy(), n);
   }
   function planInfo(grupo, nivel) { return (((C.leer('ajustes', {}) || {}).planes_info || {})[grupo] || {})[nivel] || {}; }
 
@@ -250,6 +265,26 @@
     if (!data.session) return { confirmar: true };
     return { cuenta: await refrescar() };
   }
+
+  // v2.1: crear una barbería desde el link o QR de registro (el servidor la crea con sus días de regalo).
+  async function registrarBarberia(d) {
+    if (!sb) throw new Error('Falta configurar el servidor');
+    if (String(d.clave || '').length < 6) throw new Error('La clave debe tener al menos 6 caracteres');
+    const { data, error } = await sb.auth.signUp({ email: d.email.trim().toLowerCase(), password: d.clave,
+      options: { data: { rol: 'barberia', barberia: d.barberia, nombre: d.nombre, telefono: d.telefono, ref: d.ref || '' } } });
+    if (error) {
+      const m = amigable(error);
+      if (/registered|already/i.test(m)) throw new Error('Ese correo ya tiene cuenta. Entra con tu clave.');
+      if (/signups not allowed/i.test(m)) throw new Error('El registro aún no está habilitado. Escríbele a CodeFix.');
+      if (/Database error/i.test(m)) throw new Error('No se pudo crear la barbería. Revisa los datos o intenta más tarde (el registro puede estar cerrado).');
+      throw new Error(m);
+    }
+    if (!data.session) return { confirmar: true };
+    return { cuenta: await refrescar() };
+  }
+  // Links para compartir la app (cada perfil tiene el suyo).
+  const linkRegistro = (ref) => C.raiz() + 'registro/' + (ref ? '?ref=' + encodeURIComponent(ref) : '');
+  const linkBarberia = (codigo, barbero) => C.raiz() + 'b/?b=' + encodeURIComponent(codigo) + (barbero ? '&con=' + encodeURIComponent(barbero) : '');
 
   /* ---------- Actualizaciones con botón ---------- */
   const mayor = (a, b) => {
@@ -309,7 +344,8 @@
     listo, sb, rpc, refrescar, exigir, entrar, salir, cambiarClave, crearUsuario, restablecerClave, probarServidor, despertarEnvios,
     claveNueva, mensajeAcceso, activarPush, sincronizarPush, pushActivo, pushPosible, esIOS, instalada, ajustes, revisarActualizacion,
     recordarBarberia, barberiaLocal, paginaDe, irA, aplicarMarca, amigable, colorPremium, plan, limite, grupoDe,
-    tiene, barberiaTiene, clienteTiene, regla, texto, linkPremium, planInfo, registrarse,
+    tiene, barberiaTiene, clienteTiene, regla, texto, linkPremium, linkTrimestral, prioridadBloquea, planInfo, registrarse,
+    registrarBarberia, linkRegistro, linkBarberia,
     get cuenta() { return cuenta; },
     premium: () => !!(cuenta && cuenta.is_premium),
     barberiaPremium: () => !!(cuenta && cuenta.barberia && cuenta.barberia.premium)
