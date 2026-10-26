@@ -18,11 +18,11 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.2'::text $$;
+language sql immutable as $$ select '2.3'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'Eliminar cuentas (barberos, clientes y barberías) desde el panel, y el socio ahora crea, edita y elimina dejando todo en el registro de cambios.'::text $$;
+language sql immutable as $$ select 'Íconos nuevos y modernos en toda la app, y pantallas más ordenadas en el celular.'::text $$;
 
 -- Planes Free / Premium (v1.4): el admin los edita desde su panel. Estos son los valores de partida.
 create table if not exists public.planes (

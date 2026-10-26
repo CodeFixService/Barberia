@@ -292,14 +292,14 @@ select pg_temp.ok((public.mi_cuenta() ->> 'descanso_min')::int = 20 and (public.
 reset role;
 set role anon;
 create temp table g3 as select public.reservar_invitado(prueba.cod(), prueba.id('b2@test.cl'),
-  ((now() at time zone 'America/Santiago')::date + 4)::timestamp at time zone 'America/Santiago' + interval '10 hours', array[prueba.serv('Corte')], 'Tiempo Test', '911112222') as r;
+  ((now() at time zone 'America/Santiago')::date + 4 + case when extract(isodow from (now() at time zone 'America/Santiago')::date + 4) in (5, 6) then 3 else 0 end)::timestamp at time zone 'America/Santiago' + interval '10 hours', array[prueba.serv('Corte')], 'Tiempo Test', '911112222') as r;
 grant select on g3 to authenticated;
 reset role;
 select pg_temp.ok(prueba.si($q$(select fin - inicio = interval '90 minutes' from public.reservas where token = (select r ->> 'token' from g3))$q$),
   'un corte de 70 min + 20 de descanso bloquea 1 h 30 al tiro');
 set role anon;
 select pg_temp.debe_fallar($$select public.reservar_invitado(prueba.cod(), prueba.id('b2@test.cl'),
-  ((now() at time zone 'America/Santiago')::date + 4)::timestamp at time zone 'America/Santiago' + interval '11 hours', array[prueba.serv('Corte')], 'Otro', '933334444')$$, 'acaba de ocupar');
+  ((now() at time zone 'America/Santiago')::date + 4 + case when extract(isodow from (now() at time zone 'America/Santiago')::date + 4) in (5, 6) then 3 else 0 end)::timestamp at time zone 'America/Santiago' + interval '11 hours', array[prueba.serv('Corte')], 'Otro', '933334444')$$, 'acaba de ocupar');
 select pg_temp.ok((public.vista_publica(prueba.cod()) -> 'barberos' -> 0) ? 'paso', 'la vista libre conoce los tiempos de cada barbero');
 reset role;
 
