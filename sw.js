@@ -3,7 +3,7 @@
    (el aviso aparece cuando el administrador libera la versión nueva). */
 const FILES = [
   './', 'index.html', 'legal.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
-  'shared/core.css', 'shared/core.js', 'shared/iconos.js', 'shared/config.js', 'shared/cuenta.js', 'shared/avisos.js', 'shared/chat.js',
+  'shared/core.css', 'shared/core.js', 'shared/iconos.js', 'shared/instalar.js', 'shared/config.js', 'shared/cuenta.js', 'shared/avisos.js', 'shared/chat.js',
   'shared/agenda.js', 'shared/perfil.js', 'shared/vendor/supabase.js', 'shared/vendor/qrcode.js',
   'cliente/', 'cliente/index.html', 'cliente/cliente.js',
   'equipo/', 'equipo/index.html', 'equipo/equipo.js',
