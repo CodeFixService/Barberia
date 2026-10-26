@@ -661,7 +661,7 @@
       ['invitar', '🤝', 'Invita una barbería', K.regla('dias_referido') ? 'Gana ' + K.regla('dias_referido') + ' días de Premium' : 'Comparte la app'],
       ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
-      ['soporte', '🛟', 'Soporte CodeFix', 'Escríbele a Josué']
+      ['soporte', '🛟', 'Soporte CodeFix', 'Escríbenos']
     ] : [
       ['tiempos', '⏱️', 'Mis tiempos', 'Cuánto dura cada corte y tu descanso'],
       ['caja', '💵', 'Mi caja', 'Tus cortes'],
@@ -669,7 +669,7 @@
       ['milink', '🔳', 'Mi link y QR', 'Tus clientes te reservan directo'],
       ['volver', '👋', 'Clientes que no vuelven', 'Escríbeles en 1 toque'],
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
-      ['soporte', '🛟', 'Soporte CodeFix', 'Escríbele a Josué']
+      ['soporte', '🛟', 'Soporte CodeFix', 'Escríbenos']
     ];
     el.innerHTML = '<div class="menu-grid">' + items.map((i) => '<button data-s="' + i[0] + '"><span>' + i[1] + '</span>' + i[2] + '<small>' + esc(i[3]) + '</small></button>').join('') + '</div>';
     el.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { history.replaceState(null, '', '#' + b.dataset.s); abrirSeccion(b.dataset.s); });

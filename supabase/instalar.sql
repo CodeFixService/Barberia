@@ -1487,7 +1487,7 @@ begin
   raise exception 'Actualiza la app: ahora el pago se envía con la foto del comprobante en Mi plan.';
   if me.role not in ('owner', 'client') then raise exception 'Esta cuenta no tiene plan'; end if;
   if exists (select 1 from public.requests where user_id = me.id and kind = 'pago' and status = 'pendiente') then
-    raise exception 'Ya avisaste tu pago. Josué lo revisará pronto.';
+    raise exception 'Ya avisaste tu pago. Lo revisaremos pronto.';
   end if;
   insert into public.requests (user_id, kind, note) values (me.id, 'pago', left(p_nota, 200));
   select nombre into b from public.barberias where id = me.barberia_id;

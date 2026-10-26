@@ -239,7 +239,7 @@
   function marca(discreta) {
     const el = document.createElement('footer');
     el.className = 'marca' + (discreta ? ' discreta' : '');
-    el.innerHTML = '💈 App de reservas por <b>' + esc(cfg.MARCA || 'CodeFix') + '</b> · ' + esc(cfg.AUTOR || '') +
+    el.innerHTML = '💈 App de reservas por <b>' + esc(cfg.MARCA || 'CodeFix') + '</b>' +
       ' <span class="ver">v' + VERSION + '</span>';
     (document.querySelector('main') || document.body).appendChild(el);
   }
