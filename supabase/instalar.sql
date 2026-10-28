@@ -18,11 +18,11 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.13'::text $$;
+language sql immutable as $$ select '2.14'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'Premium se nota: la app se ve dorada y te mostramos todo lo que incluye. Más seguridad al entrar.'::text $$;
+language sql immutable as $$ select 'Nuevo: guía para partir, chat con soporte y términos en el botón 🛟; pagos más claros (copias cada dato) y con tarjeta.'::text $$;
 
 -- Planes Free / Premium (v1.4): el admin los edita desde su panel. Estos son los valores de partida.
 create table if not exists public.planes (
@@ -4396,11 +4396,27 @@ $$;
 create or replace function public.cfx_marcar_verificado(p_cuenta uuid, p_si boolean) returns void
 language sql security definer set search_path = '' as $$ select null::void $$;
 
+-- Guía para partir (núcleo · ayuda): lo que le falta configurar a la barbería. Se marca solo cuando lo hace.
+create or replace function public.cfx_guia_app() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select jsonb_build_array(
+    jsonb_build_object('k', 'perfil', 't', 'Nombre, logo y dirección', 'd', 'Así te reconocen tus clientes al reservar.', 'ir', 'equipo/#negocio',
+      'ok', b.nombre <> 'Mi barbería' and b.logo is not null and coalesce(b.direccion, '') <> ''),
+    jsonb_build_object('k', 'whatsapp', 't', 'Tu WhatsApp', 'd', 'Para que tus clientes te escriban.', 'ir', 'equipo/#negocio', 'ok', coalesce(b.whatsapp, '') <> ''),
+    jsonb_build_object('k', 'servicios', 't', 'Servicios y precios', 'd', 'Corte, barba, perfilado… con su precio y duración.', 'ir', 'equipo/#servicios',
+      'ok', exists (select 1 from public.servicios s where s.barberia_id = b.id)),
+    jsonb_build_object('k', 'abono', 't', 'Cómo te pagan el abono', 'd', 'Agrega tu link de pago o tus datos de transferencia. Sin esto no puedes cobrar el abono previo.', 'ir', 'equipo/#links',
+      'ok', b.abono = 0 or coalesce(b.link_pago, '') <> '' or coalesce(b.pago1_link, '') <> '' or coalesce(b.pago2_link, '') <> '' or coalesce(b.datos_transferencia, '') <> ''))
+  from public.barberias b where b.owner_id = auth.uid()), '[]'::jsonb)
+$$;
+
 -- >>> CFX núcleo (no editar aquí: se copia de saas/nucleo/sql con sincronizar.py)
 -- ---------------------------------------------------------------------
 -- CodeFix · Pagos (igual en las 6 apps; lo reparte nucleo/sincronizar.py). Se administra desde el Centro de Mando → Pagos.
 --   Precios iguales en las 6: negocio (inicio, mensual, anual) y cliente (mensual, anual). Link de pago SIN monto (la persona
---   escribe el monto; se le suma la comisión del link) o transferencia, y foto del comprobante. Tú apruebas y se activa el Premium.
+--   escribe el monto; se le suma el cargo por pago online, visible como una línea aparte), tarjeta (otro link, con su propio cargo)
+--   o transferencia (precio exacto, sin cargo), y foto del comprobante. Tú apruebas y se activa el Premium por días enteros.
+--   Liberar: por N días nadie queda bloqueado y las cuentas creadas en ese tiempo no pagan el primer pago (quedan en gratis).
 --   El comprobante se borra al aprobar o rechazar (ya no sirve). Negocios nuevos: bloqueados hasta su primer pago (si está activado).
 --   Cada app define antes: cfx_yo(), cfx_dar_premium(uuid, text, int), cfx_avisar(uuid, text, text) y cfx_avisar_admin(text, text).
 -- ---------------------------------------------------------------------
@@ -4409,7 +4425,7 @@ alter table public.cfx_config enable row level security;
 insert into public.cfx_config (clave, valor) values ('pagos', jsonb_build_object(
   'negocio', jsonb_build_object('inicio', 4900, 'inicio_dias', 30, 'mensual', 4900, 'anual', 49900, 'exigir_inicio', true),
   'cliente', jsonb_build_object('mensual', 3000, 'anual', 29900),
-  'link', '', 'comision_pct', 0, 'whatsapp', '',
+  'link', '', 'comision_pct', 0, 'whatsapp', '', 'tarjeta', jsonb_build_object('link', '', 'comision_pct', 0),
   'transferencia', jsonb_build_object('banco', '', 'tipo', '', 'numero', '', 'rut', '', 'titular', '', 'correo', ''),
   'inicio_desde', now()))
 on conflict (clave) do nothing;
@@ -4432,6 +4448,11 @@ create table if not exists public.cfx_pagos (
   resuelto    timestamptz
 );
 alter table public.cfx_pagos add column if not exists cupon text;
+alter table public.cfx_pagos add column if not exists meses int check (meses is null or meses between 1 and 24);
+alter table public.cfx_pagos drop constraint if exists cfx_pagos_medio_check;
+alter table public.cfx_pagos add constraint cfx_pagos_medio_check check (medio in ('link', 'transferencia', 'tarjeta'));
+alter table public.cfx_pagos drop constraint if exists cfx_pagos_periodo_check;
+alter table public.cfx_pagos add constraint cfx_pagos_periodo_check check (periodo in ('inicio', 'mensual', 'meses', 'anual', 'otro'));
 create index if not exists cfx_pagos_cuenta_idx on public.cfx_pagos (cuenta, creado desc);
 create index if not exists cfx_pagos_estado_idx on public.cfx_pagos (estado, creado);
 alter table public.cfx_pagos enable row level security;
@@ -4443,6 +4464,7 @@ revoke all on public.cfx_config, public.cfx_pagos, public.cfx_exentos from anon,
 create or replace function public.cfx_pago_estado() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 declare c jsonb := (select valor from public.cfx_config where clave = 'pagos'); y jsonb := public.cfx_yo(); pagado boolean; debe boolean; bloq boolean;
+        lib jsonb := (select valor from public.cfx_config where clave = 'liberar'); ld timestamptz := (lib ->> 'desde')::timestamptz; lh timestamptz := (lib ->> 'hasta')::timestamptz;
 begin
   if y is null or (y ->> 'id') is null then raise exception 'Inicia sesión'; end if;
   pagado := exists (select 1 from public.cfx_pagos where cuenta = (y ->> 'id')::uuid and estado = 'aprobado')
@@ -4450,39 +4472,47 @@ begin
   -- debe_inicio: cuenta nueva (desde que activaste la regla) sin primer pago. bloqueado: además es un negocio.
   -- Solo si ya hay una forma de pago configurada (si no, nadie podría pagar).
   debe := coalesce((c #>> '{negocio,exigir_inicio}')::boolean, false) and not pagado
-     and (coalesce(c ->> 'link', '') <> '' or coalesce(c #>> '{transferencia,numero}', '') <> '')
-     and (y ->> 'creado')::timestamptz > coalesce((c ->> 'inicio_desde')::timestamptz, now());
+     and (coalesce(c ->> 'link', '') <> '' or coalesce(c #>> '{transferencia,numero}', '') <> '' or coalesce(c #>> '{tarjeta,link}', '') <> '')
+     and (y ->> 'creado')::timestamptz > coalesce((c ->> 'inicio_desde')::timestamptz, now())
+     -- Liberado: mientras dure nadie queda bloqueado; las cuentas creadas en ese tiempo quedan en gratis sin primer pago.
+     and not (lh is not null and (now() < lh or (y ->> 'creado')::timestamptz between coalesce(ld, '-infinity') and lh));
   bloq := debe and y ->> 'rol' = 'negocio';
   return jsonb_build_object('config', c - 'inicio_desde', 'yo', y, 'pagado', pagado, 'bloqueado', bloq, 'debe_inicio', debe,
+    'liberado_hasta', case when lh > now() then lh end,
     'ultimo', (select to_jsonb(x) from (select id, periodo, monto, medio, estado, dias, motivo, creado, resuelto from public.cfx_pagos
                where cuenta = (y ->> 'id')::uuid order by creado desc limit 1) x));
 end $$;
 
 drop function if exists public.cfx_pago_pedir(text, int, text, text, text);
-create or replace function public.cfx_pago_pedir(p_periodo text, p_monto int, p_medio text, p_comprobante text, p_nota text default '', p_cupon text default null) returns uuid
+drop function if exists public.cfx_pago_pedir(text, int, text, text, text, text);
+create or replace function public.cfx_pago_pedir(p_periodo text, p_monto int, p_medio text, p_comprobante text, p_nota text default '', p_cupon text default null, p_meses int default null) returns uuid
 language plpgsql security definer set search_path = '' as $$
 declare y jsonb := public.cfx_yo(); i uuid; cup text := nullif(upper(trim(coalesce(p_cupon, ''))), '');
 begin
   if y is null or (y ->> 'id') is null then raise exception 'Inicia sesión'; end if;
   if y ->> 'rol' not in ('negocio', 'cliente') and p_periodo <> 'otro' then raise exception 'Pide al dueño de la cuenta que haga el pago'; end if;
-  if p_periodo not in ('inicio', 'mensual', 'anual', 'otro') or p_medio not in ('link', 'transferencia') then raise exception 'Datos no válidos'; end if;
+  if p_periodo not in ('inicio', 'mensual', 'meses', 'anual', 'otro') or p_medio not in ('link', 'transferencia', 'tarjeta') then raise exception 'Datos no válidos'; end if;
+  if p_periodo = 'meses' and coalesce(p_meses, 0) not between 2 and 11 then raise exception 'Elige de 2 a 11 meses'; end if;
   if coalesce(p_monto, 0) < 1 then raise exception 'Escribe el monto que pagaste'; end if;
   if coalesce(length(p_comprobante), 0) < 200 then raise exception 'Sube la foto del comprobante'; end if;
   if cup is not null then perform public.cfx_cupon_ver(cup); end if;
   if exists (select 1 from public.cfx_pagos where cuenta = (y ->> 'id')::uuid and estado = 'pendiente') then raise exception 'Ya tienes un pago en revisión. Te avisamos apenas se apruebe.'; end if;
   if (select count(*) from public.cfx_pagos where cuenta = (y ->> 'id')::uuid and creado > now() - interval '1 day') >= 5 then raise exception 'Demasiados intentos hoy. Escribe a soporte.'; end if;
-  insert into public.cfx_pagos (cuenta, email, nombre, rol, periodo, monto, medio, nota, comprobante, cupon)
+  insert into public.cfx_pagos (cuenta, email, nombre, rol, periodo, monto, medio, nota, comprobante, cupon, meses)
   values ((y ->> 'id')::uuid, coalesce(y ->> 'email', ''), left(coalesce(y ->> 'nombre', ''), 80), case when y ->> 'rol' in ('negocio', 'cliente') then y ->> 'rol' else 'otro' end,
-          p_periodo, p_monto, p_medio, left(coalesce(p_nota, ''), 300), p_comprobante, cup)
+          p_periodo, p_monto, p_medio, left(coalesce(p_nota, ''), 300), p_comprobante, cup, case when p_periodo = 'meses' then p_meses end)
   returning id into i;
-  perform public.cfx_avisar_admin('💳 Pago por revisar', coalesce(nullif(y ->> 'nombre', ''), y ->> 'email') || ' · $' || p_monto || ' (' || p_periodo || ')' || coalesce(' · cupón ' || cup, ''));
+  -- Aviso al tiro: al Centro de Mando si la app está vinculada (si no, al administrador de esta app).
+  perform public.cfx_al_cm('💳 Pago por revisar', coalesce(nullif(y ->> 'nombre', ''), y ->> 'email') || ' · $' || p_monto || ' (' || case p_periodo when 'meses' then p_meses || ' meses' else p_periodo end || ', ' || p_medio || ')' || coalesce(' · cupón ' || cup, ''), 'pago');
   return i;
 end $$;
 
 -- Precios públicos (para la portada, sin iniciar sesión).
 create or replace function public.cfx_precios() returns jsonb
 language sql stable security definer set search_path = '' as $$
-  select jsonb_build_object('negocio', valor -> 'negocio', 'cliente', valor -> 'cliente', 'comision_pct', valor -> 'comision_pct') from public.cfx_config where clave = 'pagos'
+  select jsonb_build_object('negocio', valor -> 'negocio', 'cliente', valor -> 'cliente', 'comision_pct', valor -> 'comision_pct',
+    'liberado_hasta', (select case when (l.valor ->> 'hasta')::timestamptz > now() then l.valor -> 'hasta' end from public.cfx_config l where l.clave = 'liberar'))
+  from public.cfx_config where clave = 'pagos'
 $$;
 revoke all on function public.cfx_precios() from public;
 grant execute on function public.cfx_precios() to anon, authenticated;
@@ -4502,12 +4532,13 @@ begin
   perform public.cfx_es_admin();
   if jsonb_typeof(p) <> 'object' then raise exception 'Datos no válidos'; end if;
   if coalesce(p ->> 'link', '') <> '' and (p ->> 'link') !~ '^https://[^ ]+$' then raise exception 'El link de pago debe empezar con https://'; end if;
-  if coalesce((p ->> 'comision_pct')::numeric, 0) not between 0 and 20 then raise exception 'La comisión va de 0 a 20 %%'; end if;
+  if coalesce((p ->> 'comision_pct')::numeric, 0) not between 0 and 20 or coalesce((p #>> '{tarjeta,comision_pct}')::numeric, 0) not between 0 and 20 then raise exception 'El cargo por pago online va de 0 a 20 %%'; end if;
+  if coalesce(p #>> '{tarjeta,link}', '') <> '' and (p #>> '{tarjeta,link}') !~ '^https://[^ ]+$' then raise exception 'El link de tarjeta debe empezar con https://'; end if;
   -- Al activar "bloquear hasta el primer pago", solo aplica a los negocios que se registren desde ahora.
   -- También cuando se configura la primera forma de pago (antes nadie podía pagar, así que nadie quedó obligado).
   if coalesce((p #>> '{negocio,exigir_inicio}')::boolean, false) and (not coalesce((v #>> '{negocio,exigir_inicio}')::boolean, false)
-     or (coalesce(v ->> 'link', '') = '' and coalesce(v #>> '{transferencia,numero}', '') = ''
-         and (coalesce(p ->> 'link', '') <> '' or coalesce(p #>> '{transferencia,numero}', '') <> ''))) then
+     or (coalesce(v ->> 'link', '') = '' and coalesce(v #>> '{transferencia,numero}', '') = '' and coalesce(v #>> '{tarjeta,link}', '') = ''
+         and (coalesce(p ->> 'link', '') <> '' or coalesce(p #>> '{transferencia,numero}', '') <> '' or coalesce(p #>> '{tarjeta,link}', '') <> ''))) then
     p := p || jsonb_build_object('inicio_desde', now());
   end if;
   v := v || (p - 'inicio_desde') || case when p ? 'inicio_desde' then jsonb_build_object('inicio_desde', p -> 'inicio_desde') else '{}'::jsonb end;
@@ -4520,7 +4551,8 @@ language plpgsql stable security definer set search_path = '' as $$
 begin
   perform public.cfx_es_admin();
   return (select coalesce(jsonb_agg(x order by x.creado desc), '[]') from (
-    select id, cuenta, email, nombre, rol, periodo, monto, medio, nota, estado, dias, motivo, creado, resuelto, comprobante is not null as con_comprobante,
+    select id, cuenta, email, nombre, rol, periodo, meses, monto, medio, nota, estado, dias, motivo, creado, resuelto, comprobante is not null as con_comprobante,
+      public.cfx_dias_sugeridos(g) as sugeridos,
       (select count(*) from public.cfx_pagos z where z.cuenta = g.cuenta and z.estado = 'aprobado') as aprobados
     from public.cfx_pagos g where p_estado = 'todos' or estado = p_estado order by creado desc limit 200) x);
 end $$;
@@ -4532,6 +4564,23 @@ begin
   return (select comprobante from public.cfx_pagos where id = p_id);
 end $$;
 
+-- Días que corresponden a un pago (siempre días enteros): mensual 30, anual 365, N meses = N × 30, primer pago lo configurado,
+-- y "otro monto" en proporción al precio mensual (sin contar el cargo por pago online).
+create or replace function public.cfx_dias_sugeridos(g public.cfx_pagos) returns int
+language plpgsql stable security definer set search_path = '' as $$
+declare c jsonb := (select valor from public.cfx_config where clave = 'pagos'); m numeric; pct numeric; neto numeric;
+begin
+  if g.periodo = 'inicio' then return coalesce((c #>> '{negocio,inicio_dias}')::int, 30); end if;
+  if g.periodo = 'mensual' then return 30; end if;
+  if g.periodo = 'anual' then return 365; end if;
+  if g.periodo = 'meses' then return 30 * coalesce(g.meses, 1); end if;
+  m := nullif((c #>> array[case when g.rol = 'cliente' then 'cliente' else 'negocio' end, 'mensual'])::numeric, 0);
+  pct := case g.medio when 'link' then coalesce((c ->> 'comision_pct')::numeric, 0) when 'tarjeta' then coalesce((c #>> '{tarjeta,comision_pct}')::numeric, 0) else 0 end;
+  neto := g.monto / (1 + pct / 100);
+  return case when m is null then 0 else least(3660, floor(neto * 30 / m))::int end;
+end $$;
+revoke all on function public.cfx_dias_sugeridos(public.cfx_pagos) from public, anon, authenticated;
+
 create or replace function public.cfx_pago_resolver(p_id uuid, p_aprobar boolean, p_dias int default null, p_motivo text default '') returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare g public.cfx_pagos; c jsonb := (select valor from public.cfx_config where clave = 'pagos'); d int; hasta timestamptz;
@@ -4539,7 +4588,7 @@ begin
   perform public.cfx_es_admin();
   select * into g from public.cfx_pagos where id = p_id and estado = 'pendiente' for update;
   if g.id is null then raise exception 'Pago no encontrado o ya resuelto'; end if;
-  d := coalesce(p_dias, case g.periodo when 'inicio' then coalesce((c #>> '{negocio,inicio_dias}')::int, 30) when 'anual' then 365 when 'mensual' then 30 else 0 end);
+  d := coalesce(p_dias, public.cfx_dias_sugeridos(g));
   if p_aprobar then
     if d < 0 or d > 3660 then raise exception 'Días no válidos'; end if;
     if d > 0 then hasta := public.cfx_dar_premium(g.cuenta, g.rol, d); end if;
@@ -4551,6 +4600,23 @@ begin
   end if;
   return jsonb_build_object('estado', case when p_aprobar then 'aprobado' else 'rechazado' end, 'dias', d, 'hasta', hasta);
 end $$;
+
+-- Liberar el registro por N días (0 = terminar ahora). Sin p_dias solo devuelve cómo está.
+create or replace function public.cfx_liberar(p_dias int default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare v jsonb := (select valor from public.cfx_config where clave = 'liberar');
+begin
+  perform public.cfx_es_admin();
+  if p_dias is not null then
+    if p_dias < 0 or p_dias > 90 then raise exception 'De 0 a 90 días'; end if;
+    v := case when p_dias = 0 then coalesce(v, '{}'::jsonb) || jsonb_build_object('hasta', least(coalesce((v ->> 'hasta')::timestamptz, now()), now()))
+         else jsonb_build_object('desde', case when (v ->> 'hasta')::timestamptz > now() then v -> 'desde' else to_jsonb(now()) end, 'hasta', now() + make_interval(days => p_dias)) end;
+    insert into public.cfx_config (clave, valor) values ('liberar', v) on conflict (clave) do update set valor = excluded.valor;
+  end if;
+  return jsonb_build_object('desde', v -> 'desde', 'hasta', v -> 'hasta', 'activo', coalesce((v ->> 'hasta')::timestamptz > now(), false));
+end $$;
+revoke all on function public.cfx_liberar(int) from public, anon;
+grant execute on function public.cfx_liberar(int) to authenticated;
 
 -- Cuentas que no pagan el inicio (por ejemplo, las que creas tú de regalo).
 create or replace function public.cfx_exento(p_cuenta uuid, p_si boolean, p_nota text default '') returns void
@@ -4574,9 +4640,9 @@ end $$;
 
 revoke all on function public.cfx_exento_email(text, boolean) from public, anon;
 grant execute on function public.cfx_exento_email(text, boolean) to authenticated;
-revoke all on function public.cfx_pago_estado(), public.cfx_pago_pedir(text, int, text, text, text, text), public.cfx_pagos_config(), public.cfx_pagos_config_guardar(jsonb),
+revoke all on function public.cfx_pago_estado(), public.cfx_pago_pedir(text, int, text, text, text, text, int), public.cfx_pagos_config(), public.cfx_pagos_config_guardar(jsonb),
   public.cfx_pagos_lista(text), public.cfx_pago_comprobante(uuid), public.cfx_pago_resolver(uuid, boolean, int, text), public.cfx_exento(uuid, boolean, text) from public, anon;
-grant execute on function public.cfx_pago_estado(), public.cfx_pago_pedir(text, int, text, text, text, text), public.cfx_pagos_config(), public.cfx_pagos_config_guardar(jsonb),
+grant execute on function public.cfx_pago_estado(), public.cfx_pago_pedir(text, int, text, text, text, text, int), public.cfx_pagos_config(), public.cfx_pagos_config_guardar(jsonb),
   public.cfx_pagos_lista(text), public.cfx_pago_comprobante(uuid), public.cfx_pago_resolver(uuid, boolean, int, text), public.cfx_exento(uuid, boolean, text) to authenticated;
 revoke all on function public.cfx_yo(), public.cfx_dar_premium(uuid, text, int), public.cfx_avisar(uuid, text, text), public.cfx_avisar_admin(text, text) from public, anon, authenticated;
 -- ---------------------------------------------------------------------
@@ -4843,12 +4909,168 @@ grant execute on function public.cfx_registro_lista(int), public.cfx_planes(), p
 revoke all on function public.cfx_planes_app(), public.cfx_plan_guardar_app(text, text, jsonb, jsonb), public.cfx_textos_app(), public.cfx_texto_guardar_app(text, text),
   public.cfx_destinatarios(text), public.cfx_marcar_verificado(uuid, boolean) from public, anon, authenticated;
 -- ---------------------------------------------------------------------
+-- CodeFix · Ayuda (igual en las 6 apps; lo reparte nucleo/sincronizar.py).
+--   1) Puente al Centro de Mando: los avisos importantes (pagos por revisar, mensajes de soporte) le llegan al tiro
+--      al Centro de Mando. El Centro de Mando vincula cada app solo (cfx_cm_vincular) al abrir Pagos o Mensajes.
+--   2) Chat de soporte: cada persona escribe desde su app y tú respondes desde el Centro de Mando → Mensajes.
+--   3) Guía para partir: lo que le falta configurar a cada negocio (cfx_guia_app() de cada app). No se marca
+--      como listo hasta que de verdad lo hace, y se le recuerda cada vez que entra.
+--   Cada app define antes: cfx_guia_app() → [{ k, t, d, ok, ir }].
+-- ---------------------------------------------------------------------
+
+-- ---------- 1) Puente al Centro de Mando ----------
+create or replace function public.cfx_cm_vincular(p_url text, p_key text, p_secreto text, p_app text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.cfx_es_admin();
+  if coalesce(p_url, '') !~ '^https://[a-z0-9.-]+$' or length(coalesce(p_key, '')) < 20 or length(coalesce(p_secreto, '')) < 24 or coalesce(p_app, '') !~ '^[a-z]{2,20}$' then
+    raise exception 'Datos de vínculo no válidos';
+  end if;
+  insert into public.cfx_config (clave, valor) values ('cm', jsonb_build_object('url', p_url, 'key', p_key, 'secreto', p_secreto, 'app', p_app, 'desde', now()))
+  on conflict (clave) do update set valor = excluded.valor;
+  return jsonb_build_object('vinculado', true, 'app', p_app);
+end $$;
+
+create or replace function public.cfx_cm_estado() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare v jsonb := (select valor from public.cfx_config where clave = 'cm');
+begin
+  perform public.cfx_es_admin();
+  return jsonb_build_object('vinculado', coalesce(v ->> 'secreto', '') <> '', 'app', v ->> 'app', 'url', v ->> 'url', 'desde', v -> 'desde');
+end $$;
+
+-- Avisa al Centro de Mando (si la app está vinculada); si no, al administrador de esta app. Nunca hace fallar lo que la llama.
+create or replace function public.cfx_al_cm(p_titulo text, p_cuerpo text, p_tipo text default 'aviso') returns void
+language plpgsql security definer set search_path = '' as $$
+declare v jsonb := (select valor from public.cfx_config where clave = 'cm');
+begin
+  if coalesce(v ->> 'secreto', '') = '' then
+    perform public.cfx_avisar_admin(p_titulo, p_cuerpo);
+    return;
+  end if;
+  begin
+    perform net.http_post(
+      url := (v ->> 'url') || '/rest/v1/rpc/cfx_aviso_externo',
+      body := jsonb_build_object('p_app', v ->> 'app', 'p_secreto', v ->> 'secreto', 'p_titulo', left(p_titulo, 90), 'p_cuerpo', left(coalesce(p_cuerpo, ''), 240), 'p_tipo', p_tipo),
+      headers := jsonb_build_object('apikey', v ->> 'key', 'Authorization', 'Bearer ' || (v ->> 'key'), 'Content-Type', 'application/json'));
+  exception when others then
+    begin perform public.cfx_avisar_admin(p_titulo, p_cuerpo); exception when others then null; end;
+  end;
+end $$;
+
+-- ---------- 2) Chat de soporte ----------
+create table if not exists public.cfx_chat (
+  id      bigserial primary key,
+  cuenta  uuid not null,
+  email   text not null default '',
+  nombre  text not null default '',
+  rol     text not null default '',
+  de      text not null check (de in ('persona', 'soporte')),
+  texto   text not null check (length(texto) between 1 and 1000),
+  leido   boolean not null default false,
+  creado  timestamptz not null default now()
+);
+create index if not exists cfx_chat_cuenta_idx on public.cfx_chat (cuenta, id);
+create index if not exists cfx_chat_sin_leer_idx on public.cfx_chat (de, leido) where not leido;
+alter table public.cfx_chat enable row level security;
+revoke all on public.cfx_chat from anon, authenticated;
+
+create or replace function public.cfx_chat_mio() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare y jsonb := public.cfx_yo(); u uuid := (y ->> 'id')::uuid;
+begin
+  if u is null then raise exception 'Inicia sesión'; end if;
+  update public.cfx_chat set leido = true where cuenta = u and de = 'soporte' and not leido;
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', id, 'de', de, 'texto', texto, 'creado', creado) order by id), '[]')
+          from (select * from public.cfx_chat where cuenta = u order by id desc limit 100) x);
+end $$;
+
+create or replace function public.cfx_chat_sin_leer() returns int
+language sql stable security definer set search_path = '' as $$
+  select count(*)::int from public.cfx_chat where cuenta = auth.uid() and de = 'soporte' and not leido
+$$;
+
+create or replace function public.cfx_chat_enviar(p_texto text) returns bigint
+language plpgsql security definer set search_path = '' as $$
+declare y jsonb := public.cfx_yo(); u uuid := (y ->> 'id')::uuid; t text := trim(coalesce(p_texto, '')); i bigint;
+begin
+  if u is null then raise exception 'Inicia sesión'; end if;
+  if t = '' then raise exception 'Escribe tu mensaje'; end if;
+  if length(t) > 1000 then raise exception 'Máximo 1000 letras'; end if;
+  if (select count(*) from public.cfx_chat where cuenta = u and de = 'persona' and creado > now() - interval '1 hour') >= 20 then
+    raise exception 'Muchos mensajes seguidos. Espera un poco y te respondemos.';
+  end if;
+  insert into public.cfx_chat (cuenta, email, nombre, rol, de, texto)
+  values (u, coalesce(y ->> 'email', ''), left(coalesce(y ->> 'nombre', ''), 80), coalesce(y ->> 'rol', ''), 'persona', t) returning id into i;
+  delete from public.cfx_chat where cuenta = u and creado < now() - interval '365 days';
+  perform public.cfx_al_cm('💬 ' || coalesce(nullif(y ->> 'nombre', ''), y ->> 'email', 'Mensaje'), left(t, 200), 'chat');
+  return i;
+end $$;
+
+-- Administrador: bandeja (una fila por persona), conversación y respuesta.
+create or replace function public.cfx_chat_bandeja() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  perform public.cfx_es_admin();
+  return (select coalesce(jsonb_agg(x order by x.ultimo desc), '[]') from (
+    select c.cuenta, max(c.email) as email, max(c.nombre) as nombre, max(c.rol) as rol, max(c.creado) as ultimo,
+      (array_agg(c.texto order by c.id desc))[1] as texto, (array_agg(c.de order by c.id desc))[1] as de,
+      count(*) filter (where c.de = 'persona' and not c.leido) as sin_leer
+    from public.cfx_chat c group by c.cuenta order by max(c.creado) desc limit 200) x);
+end $$;
+
+create or replace function public.cfx_chat_hilo(p_cuenta uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.cfx_es_admin();
+  update public.cfx_chat set leido = true where cuenta = p_cuenta and de = 'persona' and not leido;
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', id, 'de', de, 'texto', texto, 'creado', creado) order by id), '[]')
+          from (select * from public.cfx_chat where cuenta = p_cuenta order by id desc limit 200) x);
+end $$;
+
+create or replace function public.cfx_chat_responder(p_cuenta uuid, p_texto text) returns bigint
+language plpgsql security definer set search_path = '' as $$
+declare t text := trim(coalesce(p_texto, '')); i bigint; o public.cfx_chat;
+begin
+  perform public.cfx_es_admin();
+  if t = '' or length(t) > 1000 then raise exception 'Escribe la respuesta (máx. 1000 letras)'; end if;
+  select * into o from public.cfx_chat where cuenta = p_cuenta order by id desc limit 1;
+  if o.id is null then raise exception 'Conversación no encontrada'; end if;
+  insert into public.cfx_chat (cuenta, email, nombre, rol, de, texto, leido) values (p_cuenta, o.email, o.nombre, o.rol, 'soporte', t, false) returning id into i;
+  update public.cfx_chat set leido = true where cuenta = p_cuenta and de = 'persona' and not leido;
+  perform public.cfx_avisar(p_cuenta, '💬 Soporte te respondió', left(t, 200));
+  return i;
+end $$;
+
+-- ---------- 3) Guía para partir ----------
+-- Pendientes de configuración del negocio (los arma cada app) + verificar identidad. Solo para negocios.
+create or replace function public.cfx_guia() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare y jsonb := public.cfx_yo(); l jsonb;
+begin
+  if y is null or (y ->> 'id') is null then raise exception 'Inicia sesión'; end if;
+  if y ->> 'rol' <> 'negocio' then return jsonb_build_object('items', '[]'::jsonb, 'sin_leer', public.cfx_chat_sin_leer()); end if;
+  l := coalesce(public.cfx_guia_app(), '[]'::jsonb);
+  -- Sin guía propia (Centro de Mando): nada que mostrar.
+  if jsonb_array_length(l) > 0 and not exists (select 1 from jsonb_array_elements(l) e where e ->> 'k' = 'verificar') then l := l || jsonb_build_array(jsonb_build_object('k', 'verificar', 't', 'Verifica tu identidad',
+    'd', 'Tus clientes confían más en un negocio verificado. Toma 2 minutos.',
+    'ok', exists (select 1 from public.cfx_verificaciones v where v.cuenta = (y ->> 'id')::uuid and v.estado = 'aprobada'), 'ir', 'verificar')); end if;
+  return jsonb_build_object('items', l, 'sin_leer', public.cfx_chat_sin_leer());
+end $$;
+
+revoke all on function public.cfx_al_cm(text, text, text) from public, anon, authenticated;
+revoke all on function public.cfx_cm_vincular(text, text, text, text), public.cfx_cm_estado(), public.cfx_chat_mio(), public.cfx_chat_sin_leer(), public.cfx_chat_enviar(text),
+  public.cfx_chat_bandeja(), public.cfx_chat_hilo(uuid), public.cfx_chat_responder(uuid, text), public.cfx_guia() from public, anon;
+grant execute on function public.cfx_cm_vincular(text, text, text, text), public.cfx_cm_estado(), public.cfx_chat_mio(), public.cfx_chat_sin_leer(), public.cfx_chat_enviar(text),
+  public.cfx_chat_bandeja(), public.cfx_chat_hilo(uuid), public.cfx_chat_responder(uuid, text), public.cfx_guia() to authenticated;
+revoke all on function public.cfx_guia_app() from public, anon, authenticated;
+-- ---------------------------------------------------------------------
 -- CodeFix · Inventario (igual en las 6 apps; lo usa el Centro de Mando → Apps → Respaldo y limpieza).
 --   Muestra las tablas que esta versión ya NO usa (restos de versiones antiguas) con cuántas filas tienen.
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_config', 'public.cfx_cupones', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_pagos', 'public.cfx_registro', 'public.cfx_verificaciones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_cupones', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_pagos', 'public.cfx_registro', 'public.cfx_verificaciones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
