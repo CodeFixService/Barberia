@@ -725,8 +725,7 @@
     }).catch((e) => { h.q('[data-err]').textContent = e.message; });
   }
 
-  // Versión: actualizar = pegar 1 consulta en Supabase; al terminar se libera sola y les llega un aviso a todos.
-  const SQL_ACTUALIZAR = "create extension if not exists http with schema extensions;\ndo $$ begin\n  execute (select content from extensions.http_get('https://raw.githubusercontent.com/CodeFixService/Barberia/main/supabase/instalar.sql'));\nend $$;";
+  // Versión: la base de datos se actualiza sola (cada 10 min, desde GitHub). Tú pruebas la app y la liberas: a todos se les actualiza sola.
   async function secVersion() {
     const z = seccion('🔄 Versión y actualizaciones');
     let e = null, web = '';
@@ -734,23 +733,21 @@
     try { web = String((await (await fetch(C.raiz() + 'version.json', { cache: 'no-store' })).json()).version); } catch (err) { /* sin red */ }
     const db = e ? e.db_version : '—';
     const lib = (e && e.liberada) || ajustes.version_liberada || '—';
-    const pendienteBD = web && db !== web;
+    const pendienteBD = web && db !== web, porLiberar = web && !pendienteBD && lib !== web;
     z.innerHTML = '<div class="card">' +
       '<div class="det-fila"><span>📲 App en este celular</span><b>v' + C.version + '</b></div>' +
       '<div class="det-fila"><span>🌐 Publicada en la web</span><b>' + (web ? 'v' + esc(web) : '—') + '</b></div>' +
-      '<div class="det-fila"><span>🗄️ Base de datos</span><b>v' + esc(db) + (pendienteBD ? ' <span class="pill warn">falta actualizar</span>' : ' <span class="pill ok">al día</span>') + '</b></div>' +
+      '<div class="det-fila"><span>🗄️ Base de datos</span><b>v' + esc(db) + (pendienteBD ? ' <span class="pill warn">actualizándose sola</span>' : ' <span class="pill ok">al día</span>') + '</b></div>' +
       '<div class="det-fila"><span>📣 Liberada para todos</span><b>v' + esc(lib) + '</b></div>' +
-      (pendienteBD ? '<div class="banner alerta" style="margin-top:12px"><div class="grow"><b>🆕 Hay una versión nueva (v' + esc(web) + ')</b><br>' +
-        'Copia la consulta, pégala en Supabase → SQL Editor → Run. Al terminar se libera sola y le llega un aviso a todos para actualizar.</div></div>' : '') +
-      '<div class="btns"><button id="bCopiarSQL"' + (pendienteBD ? '' : ' class="gris"') + '>📋 Copiar consulta de actualización</button>' +
-      '<a class="btn gris" target="_blank" rel="noopener" href="https://supabase.com/dashboard/project/gxlabxuttnxvzkucckef/sql/new">🗄️ Abrir SQL Editor</a></div>' +
-      '<p class="muted chico">Es la misma consulta siempre. Si la corres sin versión nueva, no pasa nada.</p>' +
+      (pendienteBD ? '<p class="muted chico">La base se actualiza sola en máximo 10 minutos (no borra datos). Después pruebas la app y la liberas.</p>' : '') +
+      (porLiberar ? '<div class="banner alerta" style="margin-top:12px"><div class="grow"><b>🆕 La v' + esc(web) + ' está lista</b><br>Pruébala en tu celular y libérala: a todos se les actualiza sola y les llega un aviso.</div></div>' : '') +
+      '<div class="btns"><button id="bLiberar"' + (porLiberar ? '' : ' class="gris" disabled') + '>🚀 Liberar v' + esc(web || C.version) + ' para todos</button></div>' +
       (e && e.historial.length ? '<h3>Historial</h3><ul class="list">' + e.historial.map((x) => '<li><div class="grow"><b>v' + esc(x.version) + '</b> · ' + C.cuando(x.created_at) +
-        '<div class="sub">' + esc(x.notas || '') + '</div></div><span class="pill">' + x.avisados + ' avisados</span></li>').join('') + '</ul>' : '') +
-      '<details style="margin-top:10px"><summary class="muted chico">Liberar a mano (casos especiales)</summary>' +
-      '<div class="btns"><button class="small gris" id="bLiberar">Liberar v' + C.version + ' para todos</button></div></details></div>';
-    $('bCopiarSQL').onclick = () => C.copiar(SQL_ACTUALIZAR);
-    $('bLiberar').onclick = (ev) => C.accion(ev.target, async () => { await K.rpc('admin_ajuste', { p_key: 'version_liberada', p_value: C.version }); secVersion(); }, '🔄 Versión liberada');
+        '<div class="sub">' + esc(x.notas || '') + '</div></div><span class="pill">' + x.avisados + ' avisados</span></li>').join('') + '</ul>' : '') + '</div>';
+    $('bLiberar').onclick = (ev) => C.accion(ev.target, async () => {
+      try { await K.rpc('admin_liberar', { p_version: web || C.version }); } catch (err) { await K.rpc('admin_ajuste', { p_key: 'version_liberada', p_value: web || C.version }); }
+      secVersion();
+    }, '🔄 Versión liberada');
   }
 
   ruta();

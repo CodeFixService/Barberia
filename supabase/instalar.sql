@@ -18,11 +18,11 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.7'::text $$;
+language sql immutable as $$ select '2.8'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'Nueva barra de abajo: el botón + al centro para crear al tiro y Más a la derecha, igual en todas las apps CodeFix.'::text $$;
+language sql immutable as $$ select 'La app se actualiza sola. Barra nueva con el botón + al centro, fotos más nítidas en servicios y ofertas, y micrófono para dictar.'::text $$;
 
 -- Planes Free / Premium (v1.4): el admin los edita desde su panel. Estos son los valores de partida.
 create table if not exists public.planes (
@@ -4149,30 +4149,40 @@ end $$;
 grant execute on function public.admin_actualizacion_estado() to authenticated;
 revoke execute on function public.admin_actualizacion_estado() from public, anon;
 
-do $$
+-- Liberar una versión (botón del admin o del Centro de Mando): queda para todos y les llega el aviso por push.
+-- Ya no se libera sola al correr este archivo: la base se actualiza sola y tú liberas cuando la pruebes.
+create or replace function public.admin_liberar(p_version text default null) returns int
+language plpgsql security definer set search_path = '' as $$
 declare
   lib text := (select value from public.app_settings where key = 'version_liberada');
-  v text := public.db_version();
+  v text := coalesce(nullif(trim(p_version), ''), public.db_version());
   n int := 0;
 begin
+  if not public.is_admin() then raise exception 'Solo el administrador libera versiones'; end if;
+  if v !~ '^[0-9]+(\.[0-9]+){0,2}$' then raise exception 'Versión no válida'; end if;
   if lib is distinct from v then
     insert into public.app_settings (key, value) values ('version_liberada', v)
     on conflict (key) do update set value = excluded.value;
     -- Si ya hay gente usando la app, se les avisa por push (en una instalación nueva, no).
     if lib is not null or exists (select 1 from public.profiles where role <> 'admin') then
       insert into public.avisos (de, para, tipo, titulo, cuerpo, url)
-      select null, p.id, 'aviso', '💈 Nueva versión ' || v || ' de la app', public.notas_version() || ' Toca aquí para actualizar.', 'actualizar'
+      select null, p.id, 'aviso', '💈 Nueva versión ' || v || ' de la app', public.notas_version() || ' Se actualiza sola.', 'actualizar'
       from public.profiles p where not p.suspended;
       get diagnostics n = row_count;
     end if;
     insert into public.actualizaciones (version, notas, avisados) values (v, public.notas_version(), n);
   end if;
+  return n;
 end $$;
+revoke execute on function public.admin_liberar(text) from public, anon;
+grant execute on function public.admin_liberar(text) to authenticated;
+-- Instalación nueva (sin versión liberada aún): queda liberada la de este archivo.
+insert into public.app_settings (key, value) values ('version_liberada', public.db_version()) on conflict (key) do nothing;
 
 -- =====================================================================
 -- Actualización automática (núcleo CodeFix): cada 10 minutos la base revisa GitHub (rama main).
 --   · Si hay una base nueva (version.json), descarga y ejecuta este mismo instalar.sql (no borra datos).
---   · Si solo cambió la app, la libera para que los celulares se actualicen solos.
+--   · La app la liberas tú cuando la pruebes (Admin → Versión → Liberar, o desde el Centro de Mando).
 --   Si algo falla no cambia nada y lo reintenta en la siguiente vuelta. Hay que correr este archivo UNA vez.
 -- =====================================================================
 create or replace function public.auto_actualizar() returns text

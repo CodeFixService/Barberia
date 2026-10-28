@@ -306,7 +306,7 @@
     const d = document.createElement('div');
     d.className = 'banner oscuro'; d.id = 'bUpd';
     d.innerHTML = '<div class="grow"><b>🔄 Hay una versión nueva</b><br><span class="chico">Tienes la v' + C.version + ' · Nueva: v' + nueva +
-      (admin && (!lib || mayor(nueva, lib)) ? ' (solo tú la ves: falta actualizar la base de datos, ve a Ajustes → Versión)' : '') + '</span></div><button class="small">Actualizar</button>';
+      (admin && (!lib || mayor(nueva, lib)) ? ' (solo tú: pruébala y libérala en Ajustes → Versión)' : '') + '</span></div><button class="small">Actualizar</button>';
     d.querySelector('button').onclick = (ev) => actualizarAhora(ev.target);
     (document.querySelector('main') || document.body).prepend(d);
     // Llegó desde el push "Nueva versión": se actualiza sola.
