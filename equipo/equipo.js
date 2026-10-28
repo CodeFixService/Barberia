@@ -676,7 +676,7 @@
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbenos']
     ];
     el.innerHTML = '<div class="menu-grid">' + items.map((i) => '<button data-s="' + i[0] + '"><span>' + i[1] + '</span>' + i[2] + '<small>' + esc(i[3]) + '</small></button>').join('') + '</div>';
-    el.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { history.replaceState(null, '', '#' + b.dataset.s); abrirSeccion(b.dataset.s); });
+    el.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { history.pushState(null, '', '#' + b.dataset.s); abrirSeccion(b.dataset.s); });
   }
   // Respaldo de la barbería en Excel (núcleo: respaldo.js).
   function secRespaldo() {
@@ -690,6 +690,7 @@
     const el = $('v-mas');
     el.innerHTML = '<div class="flex" style="margin-bottom:12px"><button class="icono" id="bVolver" aria-label="Volver">←</button><h2 style="margin:0;font-size:19px">' + titulo + '</h2></div><div id="secZona"></div>';
     $('bVolver').onclick = () => { history.replaceState(null, '', '#mas'); mas(); };
+    $('bVolver').dataset.sinAtras = '';  // este Volver ya sabe a dónde ir
     scrollTo(0, 0);
     return $('secZona');
   }
