@@ -18,11 +18,11 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.6'::text $$;
+language sql immutable as $$ select '2.7'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'Detalles visuales: los íconos ya no quedan pegados al texto en los avisos.'::text $$;
+language sql immutable as $$ select 'Nueva barra de abajo: el botón + al centro para crear al tiro y Más a la derecha, igual en todas las apps CodeFix.'::text $$;
 
 -- Planes Free / Premium (v1.4): el admin los edita desde su panel. Estos son los valores de partida.
 create table if not exists public.planes (
