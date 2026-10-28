@@ -166,8 +166,12 @@
 
   function menu(id, info) {
     const h = C.hoja('<h2>' + esc(info.nombre || 'Opciones') + '</h2><div class="btns" style="flex-direction:column">' +
-      '<button class="gris" data-b>🚫 Bloquear conversación</button><button class="gris" data-d>✅ Desbloquear</button></div>' +
-      '<p class="muted chico">Para reportar un mensaje, mantenlo presionado.</p>');
+      '<button class="gris" data-b>🚫 Bloquear conversación</button><button class="gris" data-d>✅ Desbloquear</button><button class="gris" data-x>🗑️ Borrar chat</button></div>' +
+      '<p class="muted chico">Para reportar un mensaje, mantenlo presionado. Los mensajes se borran solos a los 30 días.</p>');
+    h.q('[data-x]').onclick = async () => {
+      if (!await C.confirmar('Se borra toda la conversación, para los dos.', { titulo: '🗑️ Borrar chat', si: 'Borrar' })) return;
+      try { await K.rpc('chat_borrar', { p_other: id }); C.toast('🗑️ Chat borrado'); h.cerrar(); history.replaceState(null, '', location.pathname + '#chat'); lista(); } catch (e) { C.toast('⚠️ ' + e.message); }
+    };
     h.q('[data-b]').onclick = async () => { await K.rpc('bloquear_contacto', { p_other: id, p_bloquear: true }); C.toast('Bloqueado'); h.cerrar(); };
     h.q('[data-d]').onclick = async () => { await K.rpc('bloquear_contacto', { p_other: id, p_bloquear: false }); C.toast('Desbloqueado'); h.cerrar(); };
   }

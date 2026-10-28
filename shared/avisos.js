@@ -53,7 +53,7 @@
     const h = C.hoja('<h2>🔔 Avisos</h2><div class="seg" style="margin-bottom:10px"><button class="on" data-t="r">Recibidos</button>' +
       '<button data-t="e">Enviados</button></div><div data-lista><p class="muted">Cargando…</p></div>' +
       '<div class="btns"><button class="gris small" data-todo>✓ Marcar todo como visto</button><button class="gris small" data-limpiar>🗑️ Limpiar</button></div>' +
-      '<p class="muted chico" data-nota>Los avisos se borran solos a los 7 días.</p>');
+      '<p class="muted chico" data-nota>Los avisos y mensajes se borran solos a los 30 días.</p>');
     const lista = h.q('[data-lista]');
     const recibidos = async () => {
       h.q('[data-todo]').classList.remove('hidden');
@@ -65,8 +65,9 @@
         '<li class="aviso tap' + (x.visto_at ? '' : ' nuevo') + '" data-id="' + x.id + '" data-url="' + esc(x.url || '') + '">' +
         '<span class="ico">' + (ICONOS[x.tipo] || '🔔') + '</span><div class="grow"><b>' + esc(x.titulo) + '</b>' +
         '<div class="sub">' + esc(x.cuerpo) + '</div><div class="sub chico">' + esc(x.de) + ' · ' + C.hace(x.created_at) +
-        (x.visto_at ? ' · <span class="ticks visto">✓✓</span> visto' : '') + '</div></div></li>').join('') + '</ul>';
-      lista.querySelectorAll('li').forEach((li) => li.onclick = async () => {
+        (x.visto_at ? ' · <span class="ticks visto">✓✓</span> visto' : '') + '</div></div><button class="small gris" data-ocultar aria-label="Borrar aviso" style="flex:none;padding:2px 9px">✕</button></li>').join('') + '</ul>';
+      lista.querySelectorAll('li').forEach((li) => li.onclick = async (ev) => {
+        if (ev.target.closest('[data-ocultar]')) { li.remove(); try { await K.rpc('ocultar_aviso', { p_id: li.dataset.id }); } catch (e) { /* nada */ } actualizar(); return; }
         try { await K.rpc('marcar_vistos', { p_ids: [li.dataset.id] }); } catch (e) { /* nada */ }
         actualizar();
         if (li.dataset.url) { h.cerrar(); K.irA(li.dataset.url); } else { li.classList.remove('nuevo'); }

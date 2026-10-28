@@ -55,7 +55,7 @@
     if (v === 'agenda' && q.get('r')) { mostrar('agenda'); abrirReserva(q.get('r'), true); return; }
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
-    if (['plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink'].includes(v)) {
+    if (['plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo'].includes(v)) {
       mostrar('mas'); abrirSeccion(v === 'ajustes' ? 'negocio' : v); return;
     }
     mostrar(VISTAS[v] ? v : 'hoy');
@@ -660,6 +660,7 @@
       ['enlace', '🔗', 'Enlace y QR', 'Para que tus clientes reserven'],
       ['invitar', '🤝', 'Invita una barbería', K.regla('dias_referido') ? 'Gana ' + K.regla('dias_referido') + ' días de Premium' : 'Comparte la app'],
       ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
+      ['respaldo', '💾', 'Respaldo', 'Descarga todo en Excel'],
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbenos']
     ] : [
@@ -674,6 +675,14 @@
     el.innerHTML = '<div class="menu-grid">' + items.map((i) => '<button data-s="' + i[0] + '"><span>' + i[1] + '</span>' + i[2] + '<small>' + esc(i[3]) + '</small></button>').join('') + '</div>';
     el.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { history.replaceState(null, '', '#' + b.dataset.s); abrirSeccion(b.dataset.s); });
   }
+  // Respaldo de la barbería en Excel (núcleo: respaldo.js).
+  function secRespaldo() {
+    const z = seccion('💾 Respaldo');
+    z.innerHTML = '<div class="card"><p>Descarga en Excel tus clientes, horas, servicios, caja, ofertas y calificaciones. Guárdalo donde quieras.</p>' +
+      '<p class="muted chico">Los avisos y mensajes se borran solos a los 30 días (te avisamos antes). Tus horas, clientes y caja no.</p>' +
+      '<div class="btns"><button id="bRespaldo">⬇️ Descargar respaldo (Excel)</button></div></div>';
+    $('bRespaldo').onclick = () => C.accion($('bRespaldo'), async () => CFX_RESPALDO.excel('respaldo-' + bar().nombre, await K.rpc('mi_respaldo')), '💾 Respaldo descargado');
+  }
   function seccion(titulo) {
     const el = $('v-mas');
     el.innerHTML = '<div class="flex" style="margin-bottom:12px"><button class="icono" id="bVolver" aria-label="Volver">←</button><h2 style="margin:0;font-size:19px">' + titulo + '</h2></div><div id="secZona"></div>';
@@ -687,11 +696,11 @@
       mostrar('chat'); if (adminId) Chat.abrir(adminId, { nombre: 'CodeFix (soporte)', rol: 'admin', avatar: '🛟' }); return;
     }
     if (s === 'clientes') { mostrar('clientes'); return; }
-    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'resumen', 'invitar'];
+    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'resumen', 'invitar', 'respaldo'];
     if (!dueno() && soloDueno.includes(s)) { mas(); return; }
     if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); }
     const F = { equipo: secEquipo, servicios: secServicios, ofertas: secOfertas, estadisticas: secEstadisticas, negocio: secNegocio, horario: secHorario, links: secLinks,
-      caja, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
+      respaldo: secRespaldo, caja, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
       milink: () => P.compartir({ el: seccion('🔳 Mi link y QR'), link: K.linkBarberia(bar().codigo, yo.id), archivo: 'qr-' + primerNombre(yo.nombre),
         texto: 'Con este link o QR tus clientes reservan <b>directo contigo</b> en ' + esc(bar().nombre) + ' (sin cuenta o con su cuenta).',
         mensaje: '💈 Reserva tu hora conmigo en ' + bar().nombre }), plan: () => P.plan(seccion('💎 Mi plan')),
