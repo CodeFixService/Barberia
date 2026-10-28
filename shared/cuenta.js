@@ -300,6 +300,8 @@
     const lib = s.version_liberada || '';
     const admin = !!(cuenta && cuenta.is_admin);
     if (!admin && (!lib || mayor(nueva, lib))) return;
+    // Núcleo: si ya está liberada, se instala sola (sin botón). El admin ve el aviso solo mientras no la libera.
+    if (lib && !mayor(nueva, lib) && global.CodeFixAuto) { global.CodeFixAuto(nueva, () => actualizarAhora()); return; }
     if (document.getElementById('bUpd')) return;
     const d = document.createElement('div');
     d.className = 'banner oscuro'; d.id = 'bUpd';

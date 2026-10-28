@@ -4169,6 +4169,41 @@ begin
   end if;
 end $$;
 
+-- =====================================================================
+-- Actualización automática (núcleo CodeFix): cada 10 minutos la base revisa GitHub (rama main).
+--   · Si hay una base nueva (version.json), descarga y ejecuta este mismo instalar.sql (no borra datos).
+--   · Si solo cambió la app, la libera para que los celulares se actualicen solos.
+--   Si algo falla no cambia nada y lo reintenta en la siguiente vuelta. Hay que correr este archivo UNA vez.
+-- =====================================================================
+create or replace function public.auto_actualizar() returns text
+language plpgsql security definer set search_path = '' as $f$
+declare
+  base constant text := 'https://raw.githubusercontent.com/CodeFixService/Barberia/main/';
+  marca text := '?t=' || extract(epoch from now())::bigint; j jsonb; v_bd text; v_app text; codigo text; lib text;
+  re constant text := '^[0-9]+(\.[0-9]+)*$';
+begin
+  execute 'select content from extensions.http_get($1)' into codigo using base || 'version.json' || marca;
+  j := codigo::jsonb; v_bd := j ->> 'version'; v_app := j ->> 'version';
+  if v_bd ~ re and coalesce((public.db_version())::text, '0') ~ re and string_to_array(v_bd, '.')::int[] > string_to_array(coalesce((public.db_version())::text, '0'), '.')::int[] then
+    execute 'select content from extensions.http_get($1)' into codigo using base || 'supabase/instalar.sql' || marca;
+    if codigo is null or length(codigo) < 1000 then return 'instalar.sql no disponible'; end if;
+    execute codigo;
+    return 'base actualizada a ' || (public.db_version())::text;
+  end if;
+  return 'al día';
+exception when others then
+  return 'sin cambios: ' || sqlerrm;
+end $f$;
+revoke execute on function public.auto_actualizar() from public, anon, authenticated;
+do $$
+begin
+  create extension if not exists http with schema extensions;
+  perform cron.unschedule(jobid) from cron.job where jobname = 'cfx-auto';
+  perform cron.schedule('cfx-auto', '*/10 * * * *', 'select public.auto_actualizar()');
+exception when others then
+  raise notice 'Actualización automática no activada (%). Activa pg_cron en Supabase y vuelve a correr este archivo.', sqlerrm;
+end $$;
+
 select 'Barbería instalada ✅ versión ' || public.db_version() ||
        ' · liberada y avisada a ' || coalesce((select avisados from public.actualizaciones where version = public.db_version()
                                                order by created_at desc limit 1), 0) || ' persona(s)' as resultado;
