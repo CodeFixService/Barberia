@@ -675,7 +675,7 @@
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbenos']
     ];
-    el.innerHTML = '<div class="menu-grid">' + items.map((i) => '<button data-s="' + i[0] + '"><span>' + i[1] + '</span>' + i[2] + '<small>' + esc(i[3]) + '</small></button>').join('') + '</div>';
+    el.innerHTML = '<div class="menu-grid cfx-grilla cfx-aj">' + items.map((i) => '<button data-s="' + i[0] + '"><span>' + i[1] + '</span>' + i[2] + '<small>' + esc(i[3]) + '</small></button>').join('') + '</div>';
     el.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { history.pushState(null, '', '#' + b.dataset.s); abrirSeccion(b.dataset.s); });
   }
   // Respaldo de la barbería en Excel (núcleo: respaldo.js).
@@ -695,10 +695,7 @@
     return $('secZona');
   }
   async function abrirSeccion(s) {
-    if (s === 'soporte') {
-      const adminId = await K.rpc('mis_contactos').then((l) => (l.find((c) => c.rol === 'admin') || {}).id).catch(() => null);
-      mostrar('chat'); if (adminId) Chat.abrir(adminId, { nombre: 'CodeFix (soporte)', rol: 'admin', avatar: '🛟' }); return;
-    }
+    if (s === 'soporte') { if (window.CFX_AYUDA) window.CFX_AYUDA.chat(); return; }  // chat común de soporte (llega al Centro de Mando)
     if (s === 'clientes') { mostrar('clientes'); return; }
     if (s === 'verificar') { CFX_VERIFICAR.abrir({ rpc: K.rpc }); return; }
     const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'resumen', 'invitar', 'respaldo'];

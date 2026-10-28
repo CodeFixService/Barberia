@@ -1,4 +1,5 @@
-/* Panel del super admin (Josué): resumen y servidor, barberías, pagos con comprobante, mensajes y ajustes (precios, planes, reglas, textos…). */
+/* Panel del super admin (Josué): resumen y servidor, barberías, mensajes y ajustes propios (socios, reglas, notificaciones…).
+   Precios, planes, textos, avisos a todos, pagos Premium y versiones se manejan en el Centro de Mando. */
 (async function () {
   'use strict';
   const C = Core, K = Cuenta, A = Agenda, P = Perfil;
@@ -10,7 +11,6 @@
   const esAdmin = !!yo.is_admin;
   const permiso = (k) => esAdmin || !!(yo.permisos || {})[k];
   Avisos.montar({ titulo: 'CodeFix · Barberías', sub: esAdmin ? 'Administrador general' : 'Socio CodeFix' });
-  if (!permiso('pagos')) { const t = document.querySelector('nav.tabs [data-v="pagos"]'); if (t) t.remove(); }
   C.marca();
   let barberias = [];
   let ajustes = await K.ajustes();
@@ -18,7 +18,7 @@
 
   /* ---------- Navegación ---------- */
   let vistaActual = 'resumen';
-  const VISTAS = { resumen, barberias: pintarBarberias, pagos, chat: () => Chat.montar($('v-chat')), ajustes: pintarAjustes };
+  const VISTAS = { resumen, barberias: pintarBarberias, chat: () => Chat.montar($('v-chat')), ajustes: pintarAjustes };
   function mostrar(v) {
     vistaActual = v;
     document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-' + v));
@@ -34,11 +34,11 @@
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
     if (v === 'admin') { mostrar('resumen'); return; }
-    if (v === 'registro') { mostrar('ajustes'); abrirAjuste('registro'); return; }
+    if (v === 'registro' || v === 'cuenta') { zona = null; abrirAjuste(v); return; }
     mostrar(VISTAS[v] ? v : 'resumen');
   }
   addEventListener('hashchange', ruta);
-  Avisos.alCambiar((r, antes) => { if (antes.cargado && r.pendientes !== antes.pendientes) { if (vistaActual === 'pagos') pagos(); if (vistaActual === 'resumen') resumen(); } });
+  Avisos.alCambiar((r, antes) => { if (antes.cargado && r.pendientes !== antes.pendientes) { if (vistaActual === 'resumen') resumen(); } });
 
   const flecha = (a, b) => {
     if (!b && !a) return '';
@@ -76,14 +76,12 @@
     let s, rep, uso, web = '';
     try {
       [s, rep, barberias, uso] = await Promise.all([K.rpc('admin_resumen'), K.rpc('admin_reportes'), K.rpc('admin_barberias'), K.rpc('admin_uso')]);
-    } catch (e) { el.innerHTML = '<div class="card err">' + esc(e.message) + '<br><span class="muted">¿Corriste la consulta de actualización en Supabase? (Ajustes → Versión)</span></div>'; return; }
+    } catch (e) { el.innerHTML = '<div class="card err">' + esc(e.message) + '<br><span class="muted">La base de datos se actualiza sola en máximo 10 minutos.</span></div>'; return; }
     try { web = String((await (await fetch(C.raiz() + 'version.json', { cache: 'no-store' })).json()).version); } catch (e) { /* sin red */ }
     let html = '';
     if (web && s.db_version && s.db_version !== web) html += '<div class="banner alerta"><div class="grow"><b>🗄️ La base de datos es la versión ' + esc(s.db_version) + ' y la app la ' + esc(web) + '</b><br>' +
-      '<span class="chico">Copia la consulta en Ajustes → Versión y córrela en Supabase.</span></div><button class="small" id="bIrVer">Ver</button></div>';
+      '<span class="chico">Se actualiza sola en máximo 10 minutos (no borra datos).</span></div></div>';
     if (!(await K.pushActivo())) html += '<div class="banner marca"><div class="grow"><b>🔔 Activa las notificaciones</b><br><span class="chico">Para enterarte al tiro de los pagos por revisar.</span></div><button class="small" id="bPush">Activar</button></div>';
-    if (s.pagos_por_revisar && permiso('pagos')) html += '<div class="card urgente tap" id="cPagos"><div class="flex"><span style="font-size:28px">💰</span><div class="grow"><b>' + s.pagos_por_revisar + ' pago(s) Premium por revisar</b>' +
-      '<div class="sub muted">Revisa el comprobante y apruébalo o recházalo con motivo.</div></div><span>›</span></div></div>';
     const pct = Math.round(uso.db_bytes / uso.limite * 100);
     html += '<div class="stats">' +
       '<div class="card"><small>Barberías</small><b>' + s.barberias + '</b><small>⭐ ' + s.barberias_premium + ' Premium</small></div>' +
@@ -119,8 +117,6 @@
       '<div class="reco"><span style="font-size:20px">' + r[0] + '</span><div class="grow"><b>' + esc(b.nombre) + '</b>: ' + esc(r[1]) + '</div><button class="small alt" data-reco="' + i + '">Enviar tip</button></div>').join('') + '</div>';
     el.innerHTML = html;
     if ($('bPush')) $('bPush').onclick = (ev) => C.accion(ev.target, async () => { await K.activarPush(); resumen(); }, '🔔 Activadas');
-    if ($('bIrVer')) $('bIrVer').onclick = () => { mostrar('ajustes'); abrirAjuste('version'); };
-    if ($('cPagos')) $('cPagos').onclick = () => mostrar('pagos');
     $('cQrReg').onclick = qrRegistro;
     porVencer();
     el.querySelectorAll('[data-limpiar]').forEach((b) => b.onclick = async (ev) => {
@@ -354,195 +350,30 @@
     };
   }
 
-  /* ---------- Pagos de Premium (barberías y clientes → Josué) ---------- */
-  let estadoPagos = 'en_revision';
-  async function pagos() {
-    const el = $('v-pagos');
-    if (!permiso('pagos')) { el.innerHTML = '<div class="card empty"><span class="ico">🔒</span>No tienes permiso para ver los pagos.</div>'; return; }
-    el.innerHTML = '<div class="card" style="padding:12px"><div class="seg"><button data-e="en_revision">🧾 Por revisar</button><button data-e="aprobado">✅ Aprobados</button><button data-e="rechazado">❌ Rechazados</button></div></div><div id="lPagos"><p class="muted centro">Cargando…</p></div>';
-    el.querySelectorAll('[data-e]').forEach((b) => { b.classList.toggle('on', b.dataset.e === estadoPagos); b.onclick = () => { estadoPagos = b.dataset.e; pagos(); }; });
-    let l = [];
-    try { l = await K.rpc('admin_pagos', { p_estado: estadoPagos }); } catch (e) { if ($('lPagos')) $('lPagos').innerHTML = '<div class="card err">' + esc(e.message) + '</div>'; return; }
-    if (!$('lPagos')) return;
-    const total = l.reduce((t, g) => t + g.monto, 0);
-    $('lPagos').innerHTML = (estadoPagos === 'aprobado' && l.length ? '<p class="muted chico">' + l.length + ' pago(s) aprobado(s) · ' + C.plata(total) + '</p>' : '') +
-      (l.length ? l.map((g) => '<div class="card ' + (g.estado === 'en_revision' ? 'urgente' : '') + '"><div class="flex"><div class="grow"><b>' + esc(g.nombre || g.email) + '</b> <span class="pill">' + (g.tipo === 'barberia' ? '💈 Barbería' : '👤 Cliente') + '</span>' +
-        '<div class="sub muted">' + esc(g.barberia || '') + ' · ' + esc(g.email) + ' · ' + C.cuando(g.created_at) + '</div>' +
-        '<div class="sub">' + C.plata(g.monto) + ' · ' + g.dias + ' días' + (g.premium ? ' · Premium hasta ' + P.fechaCorta(g.premium_until) : '') + '</div>' +
-        (g.nota ? '<div class="sub">📝 ' + esc(g.nota) + '</div>' : '') + (g.motivo ? '<div class="sub" style="color:var(--bad)">Motivo: ' + esc(g.motivo) + '</div>' : '') + '</div></div>' +
-        '<div class="btns">' + (g.tiene_comprobante ? '<button class="small gris" data-ver="' + g.id + '">🧾 Ver comprobante</button>' : '<span class="muted chico">' + (g.nota && /antiguo/.test(g.nota) ? 'Aviso antiguo sin comprobante' : 'Comprobante borrado') + '</span>') +
-        (g.estado === 'en_revision' ? '<button class="ok small" data-ap="' + g.id + '">✅ Aprobar</button><button class="small danger" data-re="' + g.id + '">Rechazar</button>' : '') +
-        (g.telefono ? '<a class="btn small wsp" target="_blank" rel="noopener" href="' + C.wa(g.telefono, 'Hola ' + (g.nombre || '').split(' ')[0] + ' 👋') + '">WhatsApp</a>' : '') + '</div></div>').join('')
-        : '<div class="card empty"><span class="ico">💰</span>' + (estadoPagos === 'en_revision' ? 'No hay pagos por revisar. Te llega un push cuando alguien sube su comprobante.' : 'Nada por aquí.') + '</div>');
-    $('lPagos').querySelectorAll('[data-ver]').forEach((b) => b.onclick = async () => {
-      try {
-        const img = await K.rpc('admin_pago_comprobante', { p_id: b.dataset.ver });
-        if (!img) return C.toast('El comprobante ya no está');
-        const h = C.hoja('<h2>🧾 Comprobante</h2><img src="' + img + '" alt="Comprobante" class="comp-img"><div class="btns"><a class="btn gris" download="comprobante.jpg" href="' + img + '">⬇️ Descargar</a></div>');
-        h.q('.panel').style.maxWidth = '720px';
-      } catch (e) { C.toast('⚠️ ' + e.message); }
-    });
-    $('lPagos').querySelectorAll('[data-ap]').forEach((b) => b.onclick = (ev) => C.accion(ev.target, async () => {
-      await K.rpc('admin_pago_resolver', { p_id: b.dataset.ap, p_aprobar: true, p_motivo: null }); K.despertarEnvios(); Avisos.actualizar(); pagos();
-    }, '⭐ Aprobado: Premium activado'));
-    $('lPagos').querySelectorAll('[data-re]').forEach((b) => b.onclick = async () => {
-      const m = await C.pedir('❌ Rechazar pago', { texto: 'La persona verá este motivo y podrá volver a subir su comprobante.', placeholder: 'Ej: No llegó la transferencia' });
-      if (m === null) return;
-      if (!m) return C.toast('Escribe el motivo');
-      try { await K.rpc('admin_pago_resolver', { p_id: b.dataset.re, p_aprobar: false, p_motivo: m }); K.despertarEnvios(); Avisos.actualizar(); pagos(); } catch (e) { C.toast('⚠️ ' + e.message); }
-    });
-  }
-
-  /* ---------- Ajustes ---------- */
+  /* ---------- Ajustes (cuadrícula del núcleo: solo lo propio de Barbería) ---------- */
   const SECCIONES = [
     ['socios', '🤝', 'Socios', 'Quién te ayuda y qué puede hacer'],
     ['qr', '🔳', 'QR para barberías', 'Registro abierto con regalo'],
-    ['links', '💳', 'Precios y links', 'Premium barbería y cliente'],
-    ['planes', '⚙️', 'Planes', 'Free y Premium, límites y beneficios'],
     ['reglas', '⚖️', 'Reglas', 'Minutos, horas y días'],
-    ['textos', '✏️', 'Textos', 'Lo que lee la gente'],
-    ['avisos', '📣', 'Avisos masivos', 'A barberías o clientes'],
     ['push', '🔔', 'Notificaciones', 'Claves push y servidor'],
     ['calificaciones', '⭐', 'Calificaciones', 'Revisar y borrar'],
     ['registro', '📜', 'Registro de cambios', 'Lo que se hizo en el panel'],
-    ['version', '🔄', 'Versión', 'Actualizar la base de datos'],
     ['cuenta', '👤', 'Mi cuenta', 'Clave y preferencias']
   ];
+  let AJ = null, zona = null;
   function pintarAjustes() {
-    const el = $('v-ajustes');
-    // v2.1: el socio ve solo lo que sus permisos le dejan (nunca socios, notificaciones ni versión).
-    const PERM = { socios: 'admin', links: 'ajustes', planes: 'ajustes', reglas: 'ajustes', textos: 'ajustes', avisos: 'avisos', push: 'admin', version: 'admin' };
+    // v2.1: el socio ve solo lo que sus permisos le dejan (nunca socios ni notificaciones).
+    const PERM = { socios: 'admin', reglas: 'ajustes', push: 'admin' };
     const ve = (s) => !PERM[s[0]] || (PERM[s[0]] === 'admin' ? esAdmin : permiso(PERM[s[0]]));
-    el.innerHTML = '<div class="menu-grid">' + SECCIONES.filter(ve).map((s) => '<button data-s="' + s[0] + '"><span>' + s[1] + '</span>' + s[2] + '<small>' + s[3] + '</small></button>').join('') + '</div>';
-    el.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => abrirAjuste(b.dataset.s));
+    AJ = window.CFX_AJUSTES.montar($('v-ajustes'), SECCIONES.filter(ve).map((s) => ({ k: s[0], ico: s[1], t: s[2], d: s[3], abrir: (z) => { zona = z; return abrirAjuste(s[0]); } })),
+      { arriba: '<p class="muted chico" style="margin:0 0 10px">Precios, planes, textos, avisos a todos, pagos Premium y versiones se manejan en el Centro de Mando.</p>' });
   }
-  function seccion(titulo) {
-    const el = $('v-ajustes');
-    el.innerHTML = '<div class="flex" style="margin-bottom:12px"><button class="icono" id="bVolver" aria-label="Volver">←</button><h2 style="margin:0;font-size:19px">' + titulo + '</h2></div><div id="secZona"></div>';
-    $('bVolver').onclick = pintarAjustes;
-    scrollTo(0, 0);
-    return $('secZona');
-  }
+  const seccion = () => zona;
   async function abrirAjuste(s) {
+    if (!zona || !zona.isConnected) { mostrar('ajustes'); return AJ.abrir(s); }
     ajustes = await K.ajustes();
-    ({ socios: secSocios, qr: () => { pintarAjustes(); qrRegistro(); }, links: secLinks, planes: secPlanes, reglas: secReglas, textos: secTextos, avisos: secAvisos, push: secPush, calificaciones: secCalif, registro: secRegistro, version: secVersion,
-      cuenta: () => P.perfil(seccion('👤 Mi cuenta'), { tour: () => {} }) })[s]();
-  }
-
-  // Precios y links: 2 espacios por plan, uno activo. El precio publicado es el del espacio activo.
-  function secLinks() {
-    const z = seccion('💳 Precios y links');
-    z.innerHTML = '<div class="card"><p>⭐ Precios, links de pago y datos de transferencia del Premium ahora se configuran una sola vez para las 6 apps en el Centro de Mando → Pagos. Aquí ya no hace falta tocar nada.</p></div>'; if (z) return;  // centralizado en el Centro de Mando
-    const L = ajustes.links_premium || {};
-    const bloque = (g, titulo) => {
-      const x = L[g] || { activo: 1 };
-      return '<div class="card" data-g="' + g + '"><h2>' + titulo + '</h2><p class="muted chico" style="margin-top:-6px">El precio que ve la gente es el del espacio activo. Para cambiar el precio, edita el monto y su link, o activa el otro espacio.</p>' +
-        [1, 2].map((n) => {
-          const s = x['s' + n] || {};
-          const act = (x.activo || 1) === n;
-          return '<div class="card" style="box-shadow:none;margin:10px 0 0;padding:12px' + (act ? ';border-color:var(--brand)' : '') + '" data-n="' + n + '">' +
-            '<label class="check" style="margin:0"><input type="radio" name="act_' + g + '" value="' + n + '"' + (act ? ' checked' : '') + '> <b>Espacio ' + n + (act ? ' · activo' : '') + '</b></label>' +
-            '<div class="row"><div><label>Precio</label><input data-m type="number" inputmode="numeric" min="0" placeholder="$" value="' + (s.monto == null ? '' : s.monto) + '"></div>' +
-            '<div style="flex:2"><label>Link de pago</label><input data-u placeholder="https://mpago.la/…" value="' + esc(s.url || '') + '"></div></div>' +
-            '<label>Texto <span class="opc">(ej. "Precio de lanzamiento")</span></label><input data-t maxlength="300" value="' + esc(s.texto || '') + '"></div>';
-        }).join('') +
-        '<div class="card" style="box-shadow:none;margin:10px 0 0;padding:12px" data-tri><b>📦 3 meses por adelantado</b><div class="muted chico">Precio: 3 × el activo con ' + K.regla('descuento_3meses') +
-        '% de descuento (Reglas). Pon un link con ese monto o deja vacío para que paguen por transferencia.</div>' +
-        '<label>Link de pago (3 meses)</label><input data-tu placeholder="https://mpago.la/…" value="' + esc((x.trimestral || {}).url || '') + '">' +
-        '<label>Texto <span class="opc">(opcional)</span></label><input data-tt maxlength="300" value="' + esc((x.trimestral || {}).texto || '') + '"></div></div>';
-    };
-    z.innerHTML = bloque('barberia', '💈 Premium para barberías') + bloque('cliente', '👤 Premium para clientes') +
-      '<div class="card"><h2>🏦 Otros datos</h2><label>Datos de transferencia <span class="opc">(opcional, para quien no use el link)</span></label><textarea id="aTransf" maxlength="300">' + esc(ajustes.datos_transferencia || '') + '</textarea>' +
-      '<label>Tu WhatsApp de contacto</label><input id="aWsp" inputmode="tel" value="' + esc(ajustes.whatsapp_admin || '') + '"></div>' +
-      '<div class="btns"><button class="grande full" id="bGuardar">Guardar</button></div>';
-    $('bGuardar').onclick = (ev) => C.accion(ev.target, async () => {
-      const p = {};
-      z.querySelectorAll('[data-g]').forEach((c) => {
-        const g = c.dataset.g;
-        p[g] = { activo: +((c.querySelector('input[name="act_' + g + '"]:checked') || {}).value || 1) };
-        c.querySelectorAll('[data-n]').forEach((s) => { p[g]['s' + s.dataset.n] = { monto: s.querySelector('[data-m]').value, url: s.querySelector('[data-u]').value, texto: s.querySelector('[data-t]').value }; });
-        p[g].trimestral = { url: c.querySelector('[data-tu]').value, texto: c.querySelector('[data-tt]').value };
-      });
-      await K.rpc('admin_guardar_links', { p });
-      await K.rpc('admin_ajuste', { p_key: 'datos_transferencia', p_value: $('aTransf').value });
-      await K.rpc('admin_ajuste', { p_key: 'whatsapp_admin', p_value: $('aWsp').value });
-      ajustes = await K.ajustes();
-      secLinks();
-    }, '✅ Precios y links guardados');
-  }
-
-  // Planes: nombre, descripción, beneficios, duración, límites numéricos y opciones sí/no.
-  const FILAS_PLAN = [
-    ['barberia', 'barberos', '💈 Barberos (contando al dueño)'],
-    ['barberia', 'clientes', '👥 Clientes con cuenta'],
-    ['barberia', 'servicios', '✂️ Servicios (100 o más = ilimitados)'],
-    ['barberia', 'ofertas', '🏷️ Ofertas activas (50 o más = ilimitadas)'],
-    ['barberia', 'estadisticas', '📊 Estadísticas', 'si'],
-    ['barberia', 'recordatorios', '⏰ Recordatorios automáticos a sus clientes', 'si'],
-    ['barberia', 'caja_reportes', '💵 Reportes de caja y caja de todo el equipo', 'si'],
-    ['barberia', 'colores', '🎨 Colores y portada', 'si'],
-    ['barberia', 'ofertas_vip', '⭐ Ofertas VIP', 'si'],
-    ['barberia', 'sellos', '🎟️ Tarjeta de sellos', 'si'],
-    ['barberia', 'horario_barbero', '🕐 Horario propio por barbero', 'si'],
-    ['barberia', 'vista_todos', '📅 Agenda "Todos" y vista Año', 'si'],
-    ['barberia', 'fotos_servicios', '📷 Fotos de los servicios', 'si'],
-    ['barberia', 'servicios_barbero', '✂️ Qué barbero hace cada servicio', 'si'],
-    ['barberia', 'editar_barberos', '✏️ Editar el perfil de sus barberos', 'si'],
-    ['barberia', 'comisiones', '💈 Comisión por barbero y sellos', 'si'],
-    ['barberia', 'resumen_mes', '📈 Resumen del mes con ganancias (Free lo ve borroso)', 'si'],
-    ['barberia', 'recuperar', '👋 Clientes que no vuelven (Free ve solo cuántos)', 'si'],
-    ['barberia', 'recordar_wsp', '📲 Recordatorio por WhatsApp en 1 toque', 'si'],
-    ['barberia', 'cumpleanos', '🎂 Regalo de cumpleaños automático', 'si'],
-    ['cliente', 'prueba_dias', '🎁 Días de prueba gratis (0 = sin prueba)', 'prem'],
-    ['cliente', 'dias', '📅 Días hacia adelante para reservar'],
-    ['cliente', 'activas', '🗓️ Horas activas a la vez'],
-    ['cliente', 'mensajes', '💬 Mensajes seguidos sin respuesta (0 = sin límite)'],
-    ['cliente', 'lista_espera', '🔔 Lista de espera', 'si'],
-    ['cliente', 'favorito', '❤️ Barbero favorito', 'si'],
-    ['cliente', 'recordatorios', '⏰ Recordatorios de su hora', 'si'],
-    ['cliente', 'ofertas_vip', '⭐ Ofertas VIP', 'si'],
-    ['cliente', 'colores', '🎨 Todos los colores y foto', 'si'],
-    ['cliente', 'prioridad', '🔥 Prioridad: viernes y sábados lejanos (Reglas)', 'si']
-  ];
-  function secPlanes() {
-    const z = seccion('⚙️ Planes Free y Premium');
-    const celda = (g, c, t, tipo) => {
-      if (tipo === 'prem' && t === 'free') return '—';
-      const v = K.plan(g, c, t === 'premium');
-      return tipo === 'si' ? '<input type="checkbox" data-pg="' + g + '.' + c + '.' + t + '"' + (v > 0 ? ' checked' : '') + '>'
-        : '<input data-pg="' + g + '.' + c + '.' + t + '" type="number" min="0" inputmode="numeric" value="' + v + '" style="width:90px;padding:8px">';
-    };
-    const info = (g, n) => {
-      const i = K.planInfo(g, n);
-      return '<div class="card" style="box-shadow:none;margin:8px 0;padding:12px" data-info="' + g + '.' + n + '"><b>' + (n === 'free' ? 'Free' : '⭐ Premium') + '</b>' +
-        '<div class="row"><div><label>Nombre</label><input data-i="nombre" maxlength="40" value="' + esc(i.nombre || '') + '"></div>' +
-        (n === 'premium' ? '<div><label>Duración (días)</label><input data-i="duracion_dias" type="number" min="1" max="3650" value="' + (i.duracion_dias || 30) + '"></div>' : '') + '</div>' +
-        '<label>Descripción</label><input data-i="descripcion" maxlength="300" value="' + esc(i.descripcion || '') + '">' +
-        (n === 'premium' ? '<label>Beneficios <span class="opc">(uno por línea; vacío = se arman solos con los límites)</span></label><textarea data-i="beneficios" rows="4">' + esc((i.beneficios || []).join('\n')) + '</textarea>' : '') + '</div>';
-    };
-    const tabla = (g, tit) => '<div class="card"><h2>' + tit + '</h2>' + info(g, 'free') + info(g, 'premium') +
-      '<div class="scroll-x"><table class="tabla"><tr><th></th><th class="n">Free</th><th class="n">⭐ Premium</th></tr>' +
-      FILAS_PLAN.filter((f) => f[0] === g).map(([gg, c, t, tipo]) => '<tr><td>' + t + '</td><td class="n">' + celda(gg, c, 'free', tipo) + '</td><td class="n">' + celda(gg, c, 'premium', tipo) + '</td></tr>').join('') +
-      '</table></div></div>';
-    z.innerHTML = '<p class="muted chico">Cambia lo que quieras: se aplica al tiro para todos. Si bajas un límite, nadie pierde lo que ya tiene; solo no puede agregar más. El precio se cambia en Precios y links.</p>' +
-      tabla('barberia', '💈 Barberías') + tabla('cliente', '👤 Clientes') + '<div class="btns"><button class="grande full" id="bGuardar">Guardar planes</button></div>';
-    $('bGuardar').onclick = (ev) => C.accion(ev.target, async () => {
-      const p = { barberia: {}, cliente: {}, info: { barberia: {}, cliente: {} } };
-      z.querySelectorAll('[data-pg]').forEach((i) => {
-        const [g, c, t] = i.dataset.pg.split('.');
-        p[g][c] = p[g][c] || {};
-        p[g][c][t] = i.type === 'checkbox' ? (i.checked ? 1 : 0) : (i.value === '' ? 0 : +i.value);
-      });
-      z.querySelectorAll('[data-info]').forEach((c) => {
-        const [g, n] = c.dataset.info.split('.');
-        const o = {};
-        c.querySelectorAll('[data-i]').forEach((i) => { o[i.dataset.i] = i.dataset.i === 'beneficios' ? i.value.split('\n').map((x) => x.trim()).filter(Boolean) : i.value; });
-        p.info[g][n] = o;
-      });
-      await K.rpc('admin_guardar_planes', { p });
-      ajustes = await K.ajustes();
-      secPlanes();
-    }, '✅ Planes guardados');
+    ({ socios: secSocios, qr: () => { pintarAjustes(); qrRegistro(); }, reglas: secReglas, push: secPush, calificaciones: secCalif, registro: secRegistro,
+      cuenta: () => P.perfil(seccion(), { tour: () => {} }) })[s]();
   }
 
   const REGLAS = [
@@ -583,50 +414,6 @@
     premium_barberia_texto: 'Descripción de Premium para barberías', premium_cliente_texto: 'Descripción de Premium para clientes',
     bienvenida_barberia: 'Bienvenida para una barbería nueva (lo que le falta configurar)', terminos: 'Aviso de privacidad al reservar'
   };
-  function secTextos() {
-    const z = seccion('✏️ Textos');
-    const t = ajustes.textos || {};
-    z.innerHTML = '<div class="card">' + Object.keys(TEXTOS).map((k) => '<label>' + esc(TEXTOS[k]) + '</label><textarea data-x="' + k + '" rows="2" maxlength="1000">' + esc(t[k] || '') + '</textarea>').join('') +
-      '<div class="btns"><button class="full" id="bGuardar">Guardar textos</button></div></div>';
-    $('bGuardar').onclick = (ev) => C.accion(ev.target, async () => {
-      const p = {};
-      z.querySelectorAll('[data-x]').forEach((i) => { p[i.dataset.x] = i.value; });
-      await K.rpc('admin_guardar_textos', { p });
-      ajustes = await K.ajustes();
-    }, '✅ Textos guardados');
-  }
-
-  async function secAvisos() {
-    const z = seccion('📣 Avisos masivos');
-    if (!barberias.length) { try { barberias = await K.rpc('admin_barberias'); } catch (e) { /* nada */ } }
-    z.innerHTML = '<div class="card"><p class="muted chico" style="margin-top:0">Llega a la campanita de la app y como notificación al celular (a quienes tienen cuenta).</p><label>Para</label><select id="dPara"><option value="barberias">Todas las barberías (dueños)</option><option value="equipos">Dueños y barberos</option>' +
-      '<option value="barberias_free">Barberías Free</option><option value="barberias_premium">Barberías Premium</option><option value="clientes">Todos los clientes con cuenta</option><option value="todos">Todos</option>' +
-      barberias.map((b) => '<option value="barberia:' + b.id + '">Solo ' + esc(b.nombre) + ' (equipo y clientes)</option>').join('') + '</select>' +
-      '<label>Título</label><input id="dTit" maxlength="90"><label>Mensaje</label><textarea id="dCuerpo" maxlength="300"></textarea>' +
-      '<div class="btns"><button id="bDifundir">📣 Enviar</button></div></div><div class="card"><div id="lDif"><p class="muted">Cargando…</p></div></div>';
-    $('bDifundir').onclick = (ev) => C.accion(ev.target, async () => {
-      const n = await K.rpc('admin_difundir', { p_titulo: $('dTit').value, p_cuerpo: $('dCuerpo').value, p_para: $('dPara').value });
-      K.despertarEnvios();
-      C.toast('📣 Enviado a ' + n + ' persona' + (n === 1 ? '' : 's'));
-      $('dTit').value = $('dCuerpo').value = '';
-      difusiones();
-    });
-    difusiones();
-  }
-  async function difusiones() {
-    let l = [];
-    try { l = await K.rpc('admin_difusiones'); } catch (e) { return; }
-    const z = $('lDif');
-    if (!z) return;
-    z.innerHTML = l.length ? '<h3 style="margin-top:0">Enviados (7 días)</h3><ul class="list">' + l.map((d, i) => '<li class="tap" data-d="' + i + '"><div class="grow"><b>' + esc(d.titulo) + '</b><div class="sub">' + C.hace(d.created_at) + ' · ' + d.total + ' destinatarios</div></div>' +
-      '<span class="chico" style="text-align:right"><span class="ticks">✓✓</span> ' + d.recibidos + '<br><span class="ticks visto">✓✓</span> ' + d.vistos + ' vistos</span></li>').join('') + '</ul>' : '<p class="muted" style="margin:0">Aún no envías avisos.</p>';
-    z.querySelectorAll('[data-d]').forEach((li) => li.onclick = () => {
-      const d = l[+li.dataset.d];
-      C.hoja('<h2>📣 ' + esc(d.titulo) + '</h2><p class="muted">' + esc(d.cuerpo) + '</p><ul class="list">' + d.detalle.map((x) => '<li><span class="grow">' + esc(x.nombre) + '</span>' +
-        (x.visto_at ? '<span class="chico"><span class="ticks visto">✓✓</span> ' + C.cuando(x.visto_at) + '</span>' : '<span class="muted chico">no lo ha visto</span>') + '</li>').join('') + '</ul>');
-    });
-  }
-
   async function secPush() {
     const z = seccion('🔔 Notificaciones');
     let sec = {};
@@ -727,30 +514,6 @@
   }
 
   // Versión: la base de datos se actualiza sola (cada 10 min, desde GitHub). Tú pruebas la app y la liberas: a todos se les actualiza sola.
-  async function secVersion() {
-    const z = seccion('🔄 Versión y actualizaciones');
-    let e = null, web = '';
-    try { e = await K.rpc('admin_actualizacion_estado'); } catch (err) { /* base antigua */ }
-    try { web = String((await (await fetch(C.raiz() + 'version.json', { cache: 'no-store' })).json()).version); } catch (err) { /* sin red */ }
-    const db = e ? e.db_version : '—';
-    const lib = (e && e.liberada) || ajustes.version_liberada || '—';
-    const pendienteBD = web && db !== web, porLiberar = web && !pendienteBD && lib !== web;
-    z.innerHTML = '<div class="card">' +
-      '<div class="det-fila"><span>📲 App en este celular</span><b>v' + C.version + '</b></div>' +
-      '<div class="det-fila"><span>🌐 Publicada en la web</span><b>' + (web ? 'v' + esc(web) : '—') + '</b></div>' +
-      '<div class="det-fila"><span>🗄️ Base de datos</span><b>v' + esc(db) + (pendienteBD ? ' <span class="pill warn">actualizándose sola</span>' : ' <span class="pill ok">al día</span>') + '</b></div>' +
-      '<div class="det-fila"><span>📣 Liberada para todos</span><b>v' + esc(lib) + '</b></div>' +
-      (pendienteBD ? '<p class="muted chico">La base se actualiza sola en máximo 10 minutos (no borra datos). Después pruebas la app y la liberas.</p>' : '') +
-      (porLiberar ? '<div class="banner alerta" style="margin-top:12px"><div class="grow"><b>🆕 La v' + esc(web) + ' está lista</b><br>Pruébala en tu celular y libérala: a todos se les actualiza sola y les llega un aviso.</div></div>' : '') +
-      '<div class="btns"><button id="bLiberar"' + (porLiberar ? '' : ' class="gris" disabled') + '>🚀 Liberar v' + esc(web || C.version) + ' para todos</button></div>' +
-      (e && e.historial.length ? '<h3>Historial</h3><ul class="list">' + e.historial.map((x) => '<li><div class="grow"><b>v' + esc(x.version) + '</b> · ' + C.cuando(x.created_at) +
-        '<div class="sub">' + esc(x.notas || '') + '</div></div><span class="pill">' + x.avisados + ' avisados</span></li>').join('') + '</ul>' : '') + '</div>';
-    $('bLiberar').onclick = (ev) => C.accion(ev.target, async () => {
-      try { await K.rpc('admin_liberar', { p_version: web || C.version }); } catch (err) { await K.rpc('admin_ajuste', { p_key: 'version_liberada', p_value: web || C.version }); }
-      secVersion();
-    }, '🔄 Versión liberada');
-  }
-
   ruta();
   K.revisarActualizacion();
 })();

@@ -86,8 +86,12 @@
       return new Promise(() => {});
     }
     sincronizarPush();
-    // Núcleo (premium.js): con Premium la app se ve dorada y la primera vez saluda.
-    if (a.role === 'owner' || a.role === 'client') (window.CFX_PREMIUM ? Promise.resolve() : new Promise((r) => addEventListener('load', r))).then(() => window.CFX_PREMIUM && (window.CFX_AYUDA_PEND = { rpc: rpc, app: 'barberia' }, window.CFX_AYUDA && CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND), true) && CFX_PREMIUM.marcar({ premium: !!a.is_premium, id: a.id, hasta: a.premium_until }));
+    // Núcleo (ayuda.js): cabecera común [campana][FREE/PRO][foto], menú de la cuenta, ayuda y sensación Premium.
+    const adm = a.role === 'admin' || a.role === 'socio';
+    window.CFX_AYUDA_PEND = Object.assign(window.CFX_AYUDA_PEND || {}, { rpc, app: 'barberia', admin: adm, premium: !!a.is_premium, id: a.id, hasta: a.premium_until,
+      nombre: a.nombre, email: a.email, foto: a.foto || null, cuenta: adm ? '#cuenta' : '#perfil', panel: adm && !/\/admin\//.test(location.pathname) ? C.raiz() + 'admin/' : null,
+      salir: async () => { await salir(); location.replace(C.raiz()); } });
+    if (window.CFX_AYUDA) window.CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND);
     return a;
   }
 
