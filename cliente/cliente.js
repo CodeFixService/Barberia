@@ -413,7 +413,7 @@
     if (h.q('[data-tr]')) h.q('[data-tr]').onclick = () => { medio = 'transferencia'; h.q('[data-trd]').classList.toggle('hidden'); };
     if (h.q('[data-copiar]')) h.q('[data-copiar]').onclick = () => C.copiar(b.datos_transferencia + '\nMonto: ' + C.plata(hr.abono || b.abono));
     h.q('[data-foto]').onclick = async () => {
-      const img = await C.elegirImagen(1000, 0.6);
+      const img = await C.elegirImagen('comprobante');
       if (!img) return;
       comprobante = img;
       const p = h.q('[data-prev]'); p.src = img; p.classList.remove('hidden');

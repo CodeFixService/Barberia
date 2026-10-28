@@ -137,7 +137,7 @@
     if (q('[data-tr]')) q('[data-tr]').onclick = () => { medio = 'transferencia'; q('[data-trd]').classList.toggle('hidden'); };
     if (q('[data-copiar]')) q('[data-copiar]').onclick = () => C.copiar(b.datos_transferencia + '\nMonto: ' + C.plata(R.abono));
     if (q('[data-foto]')) q('[data-foto]').onclick = async () => {
-      const img = await C.elegirImagen(1000, 0.6);
+      const img = await C.elegirImagen('comprobante');
       if (!img) return;
       foto = img;
       q('[data-prev]').src = img; q('[data-prev]').classList.remove('hidden');

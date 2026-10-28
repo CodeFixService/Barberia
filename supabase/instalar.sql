@@ -2931,7 +2931,7 @@ begin
   if me.role <> 'owner' then raise exception 'Solo el dueño'; end if;
   prem := public.is_premium(me.id);
   if p ? 'horario' and not public.horario_valido(p -> 'horario') then raise exception 'Horario no válido'; end if;
-  if not public.img_ok(p ->> 'logo', 30000) or not public.img_ok(p ->> 'portada', 150000) then raise exception 'Imagen muy pesada'; end if;
+  if not public.img_ok(p ->> 'logo', 30000) or not public.img_ok(p ->> 'portada', 420000) then raise exception 'Imagen muy pesada'; end if;
   if coalesce(p ->> 'link_pago', '') <> '' and p ->> 'link_pago' !~* '^https://' then raise exception 'El link de pago debe empezar con https://'; end if;
   -- v1.4: dos links de pago; el activo pasa a ser el abono y el link que ven los clientes.
   if p ? 'pagos' then
@@ -3079,7 +3079,7 @@ begin
   if coalesce(trim(p ->> 'nombre'), '') = '' then raise exception 'Falta el nombre'; end if;
   if coalesce((p ->> 'duracion')::int, 0) not between 5 and 480 then raise exception 'Duración entre 5 y 480 minutos'; end if;
   if coalesce(p ->> 'foto', '') <> '' and not public.tiene('barberia', 'fotos_servicios', prem) then raise exception 'Fotos de servicios son Premium ⭐'; end if;
-  if not public.img_ok(p ->> 'foto', 60000) then raise exception 'Foto muy pesada'; end if;
+  if not public.img_ok(p ->> 'foto', 320000) then raise exception 'Foto muy pesada'; end if; -- vitrina (núcleo fotos.js)
   if jsonb_typeof(p -> 'barberos') = 'array' and jsonb_array_length(p -> 'barberos') > 0 then
     if not public.tiene('barberia', 'servicios_barbero', prem) then raise exception 'Elegir qué barbero hace cada servicio es Premium ⭐'; end if;
     select array_agg(x::uuid) into bars from jsonb_array_elements_text(p -> 'barberos') x
@@ -3122,7 +3122,7 @@ begin
   prem := public.is_premium(me.id);
   if coalesce(trim(p ->> 'titulo'), '') = '' then raise exception 'Falta el título'; end if;
   if coalesce((p ->> 'vip')::boolean, false) and not public.tiene('barberia', 'ofertas_vip', prem) then raise exception 'Ofertas VIP son Premium ⭐'; end if;
-  if not public.img_ok(p ->> 'imagen', 120000) then raise exception 'Imagen muy pesada'; end if;
+  if not public.img_ok(p ->> 'imagen', 320000) then raise exception 'Imagen muy pesada'; end if; -- vitrina (núcleo fotos.js)
   if oid is null then
     if (select count(*) from public.ofertas where barberia_id = me.barberia_id and activa
         and (hasta is null or hasta >= current_date)) >= public.limite('ofertas', prem) then

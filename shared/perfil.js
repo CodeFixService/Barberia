@@ -137,7 +137,7 @@
       if (q('[data-tri-txt]')) q('[data-tri-txt]').classList.toggle('hidden', meses !== 3);
     });
     if (q('[data-foto]')) q('[data-foto]').onclick = async () => {
-      const img = await C.elegirImagen(1000, 0.6);
+      const img = await C.elegirImagen('comprobante');
       if (!img) return;
       foto = img;
       q('[data-prev]').src = img; q('[data-prev]').classList.remove('hidden');

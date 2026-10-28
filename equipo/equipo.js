@@ -961,7 +961,7 @@
     h.qa('[data-dur]').forEach((b) => b.onclick = () => { h.q('[data-d]').value = b.dataset.dur; });
     if (!tiene('fotos_servicios')) P.bloquear(h.q('[data-foto]'), 'Fotos de servicios');
     if (!tiene('servicios_barbero') && h.q('#sBarb')) P.bloquear(h.q('#sBarb'), 'Qué barbero hace cada servicio');
-    h.q('[data-foto]').onclick = async () => { foto = await C.elegirImagen(500, 0.7); if (foto) C.toast('📷 Foto lista'); };
+    h.q('[data-foto]').onclick = async () => { foto = await C.elegirImagen('vitrina'); if (foto) C.toast('📷 Foto lista'); };
     h.q('[data-g]').onclick = (ev) => C.accion(ev.target, async () => {
       const p = { id: s ? s.id : '', nombre: h.q('[data-n]').value, precio: +h.q('[data-p]').value || 0, duracion: +h.q('[data-d]').value,
         categoria: h.q('[data-c]').value, descripcion: h.q('[data-desc]').value, visible: h.q('[data-v]').checked, orden: s ? s.orden : null,
@@ -1002,7 +1002,7 @@
       '<div class="btns"><button class="full" data-g>' + (o ? 'Guardar' : 'Publicar') + '</button>' + (o ? '<button class="danger" data-del>Borrar</button>' : '') + '</div>');
     let img;
     if (!tiene('ofertas_vip')) P.bloquear(h.q('#oVip'), 'Ofertas VIP');
-    h.q('[data-img]').onclick = async () => { img = await C.elegirImagen(700, 0.7); if (img) C.toast('🖼️ Imagen lista'); };
+    h.q('[data-img]').onclick = async () => { img = await C.elegirImagen('vitrina'); if (img) C.toast('🖼️ Imagen lista'); };
     h.q('[data-g]').onclick = (ev) => C.accion(ev.target, async () => {
       const p = { id: o ? o.id : '', titulo: h.q('[data-t]').value, detalle: h.q('[data-d]').value, precio: h.q('[data-p]').value, hasta: h.q('[data-h]').value,
         vip: tiene('ofertas_vip') && h.q('[data-vip]').checked };
@@ -1079,7 +1079,7 @@
     if ($('bSinLogo')) $('bSinLogo').onclick = () => { logo = ''; $('aLogo').style.cssText = ''; $('aLogo').textContent = '💈'; };
     $('sw').innerHTML = C.COLORES.map(([n, c]) => '<button type="button" title="' + n + '" style="background:' + c + '" class="' + (c === color ? 'on' : '') + '" data-c="' + c + '"></button>').join('');
     $('sw').querySelectorAll('button').forEach((x) => x.onclick = () => { color = x.dataset.c; $('sw').querySelectorAll('button').forEach((y) => y.classList.toggle('on', y === x)); C.aplicarColor(color); });
-    $('bPortada').onclick = async () => { const f = await C.elegirImagen(1100, 0.65); if (f) { portada = f; C.toast('🖼️ Portada lista, toca Guardar'); } };
+    $('bPortada').onclick = async () => { const f = await C.elegirImagen('portada'); if (f) { portada = f; C.toast('🖼️ Portada lista, toca Guardar'); } };
     if ($('bSinPortada')) $('bSinPortada').onclick = () => { portada = ''; C.toast('Portada quitada, toca Guardar'); };
     if (!colores) P.bloquear($('cPrem'), 'Colores y portada');
     if (!tiene('comisiones')) P.bloquear($('cCom'), 'Comisiones y sellos');

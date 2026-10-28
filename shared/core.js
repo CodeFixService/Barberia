@@ -163,8 +163,10 @@
   }
   const wa = (n, txt) => 'https://wa.me/' + numeroWsp(n) + (txt ? '?text=' + encodeURIComponent(txt) : '');
 
+  // Calidad de fotos según su uso: viene del núcleo (fotos.js); estos valores son el respaldo.
+  const FOTO = (k) => (global.CFX_FOTO && global.CFX_FOTO[k]) || { comprobante: { lado: 1000, calidad: 0.6, kb: 110 }, documento: { lado: 1400, calidad: 0.72, kb: 300 }, vitrina: { lado: 1080, calidad: 0.8, kb: 220 }, portada: { lado: 1280, calidad: 0.8, kb: 300 }, perfil: { lado: 400, calidad: 0.8, kb: 45 }, logo: { lado: 256, calidad: 0.85, kb: 30 } }[k];
   /* ---------- Imágenes livianas ---------- */
-  function imagen(file, maxLado, calidad) {
+  function imagen(file, maxLado, calidad, maxLargo) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
@@ -176,7 +178,9 @@
         g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
         g.drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(img.src);
-        resolve(c.toDataURL('image/jpeg', calidad || 0.7));
+        let q = calidad || 0.7, d = c.toDataURL('image/jpeg', q);
+        while (maxLargo && d.length > maxLargo && q > 0.35) { q -= 0.08; d = c.toDataURL('image/jpeg', q); } // que quepa en el servidor
+        resolve(d);
       };
       img.onerror = () => reject(new Error('No se pudo leer la imagen'));
       img.src = URL.createObjectURL(file);
@@ -184,11 +188,13 @@
   }
   // Abre la cámara/galería y devuelve la imagen comprimida.
   function elegirImagen(maxLado, calidad, camara) {
+    let maxLargo = 0;
+    if (typeof maxLado === 'string') { const f = FOTO(maxLado); maxLado = f.lado; calidad = f.calidad; maxLargo = f.kb * 1400; } // elegirImagen('vitrina')
     return new Promise((ok) => {
       const i = document.createElement('input');
       i.type = 'file'; i.accept = 'image/*';
       if (camara) i.capture = 'environment';
-      i.onchange = async () => { if (!i.files[0]) return ok(null); try { ok(await imagen(i.files[0], maxLado, calidad)); } catch (e) { toast(errorTxt(e)); ok(null); } };
+      i.onchange = async () => { if (!i.files[0]) return ok(null); try { ok(await imagen(i.files[0], maxLado, calidad, maxLargo)); } catch (e) { toast(errorTxt(e)); ok(null); } };
       i.click();
     });
   }
