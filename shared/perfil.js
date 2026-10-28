@@ -44,7 +44,10 @@
     const b = h.q('[data-ir]');
     if (b) b.onclick = () => { h.cerrar(); K.irA('plan'); };
   }
-  const precio = () => K.linkPremium(K.grupoDe((K.cuenta || {}).role)).monto;
+  // Precio mensual: el mismo de las 6 apps (núcleo: cfx_precios); si aún no carga, el de la barbería.
+  let PRECIOS = null;
+  K.rpc('cfx_precios').then((x) => { PRECIOS = x; }).catch(() => {});
+  const precio = () => { const g = (K.cuenta || {}).role === 'owner' ? 'negocio' : 'cliente'; return (PRECIOS && PRECIOS[g] && PRECIOS[g].mensual) || K.linkPremium(K.grupoDe((K.cuenta || {}).role)).monto; };
   // Marca un elemento como Premium bloqueado (plateado con candado).
   function bloquear(el, que) {
     if (!el) return;
@@ -75,46 +78,34 @@
     const a = await K.refrescar() || K.cuenta;
     const s = await K.ajustes();
     const grupo = K.grupoDe(a.role);
-    const lk = K.linkPremium(grupo);
-    const tri = K.linkTrimestral(grupo);
     const info = K.planInfo(grupo, 'premium');
-    const dur = info.duracion_dias || 30;
     const prueba = grupo === 'cliente' ? K.plan('cliente', 'prueba_dias', true) : 0;
     const esDueno = a.role === 'owner';
     const prem = a.is_premium;
-    let pago = null;
-    try { pago = await K.rpc('mi_pago'); } catch (e) { /* sin red */ }
+    // Precios y pago: los mismos de las 6 apps (núcleo: cfx_pago_estado y pagos.js; se editan en el Centro de Mando → Pagos).
+    let cx = null;
+    try { cx = await K.rpc('cfx_pago_estado'); } catch (e) { /* sin red */ }
+    const pr = (cx && cx.config && cx.config[esDueno ? 'negocio' : 'cliente']) || {}, u = cx && cx.ultimo;
     const nombre = info.nombre || 'Premium';
     let html = '<div class="card ' + (prem ? 'oro-marco' : 'upsell') + '"><h2>' + (prem ? '⭐ Eres ' + esc(nombre) : '💎 Hazte ' + esc(nombre)) + '</h2>';
     if (prem && a.premium_until) {
       const q = diasQuedan(a.premium_until);
       html += '<p style="margin:0">Tu ' + esc(nombre) + ' dura hasta el <b>' + fechaCorta(a.premium_until) + '</b><br><span class="' + (q <= K.regla('dias_aviso') ? 'pill warn' : 'muted') + '">' +
         (q === 0 ? 'Vence hoy' : 'Quedan ' + q + ' día' + (q === 1 ? '' : 's')) + '</span></p>';
-    } else if (!prem) {
-      html += '<div class="precio">' + C.plata(lk.monto) + ' <small>/ ' + (dur === 30 ? 'mes' : dur + ' días') + '</small></div>' +
+    } else if (!prem && pr.mensual) {
+      html += '<div class="precio">' + C.plata(pr.mensual) + ' <small>/ mes</small>' + (pr.anual ? ' · ' + C.plata(pr.anual) + ' <small>/ año</small>' : '') + '</div>' +
         '<p class="muted" style="margin:2px 0 0">' + esc(info.descripcion || K.texto(esDueno ? 'premium_barberia_texto' : 'premium_cliente_texto')) + '</p>';
     }
     html += '<ul class="feat">' + beneficios(esDueno ? 'owner' : 'client').map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul>';
-    if (pago && pago.estado === 'en_revision') {
-      html += '<div class="banner alerta" style="margin-top:12px"><div class="grow"><b>🧾 Tu comprobante está en revisión</b><br><span class="chico">Lo enviaste ' + C.hace(pago.created_at) +
+    if (u && u.estado === 'pendiente') {
+      html += '<div class="banner alerta" style="margin-top:12px"><div class="grow"><b>🧾 Tu comprobante está en revisión</b><br><span class="chico">Lo enviaste ' + C.hace(u.creado) +
         '. Te llega un aviso 🔔 apenas CodeFix lo apruebe.</span></div></div>';
     } else {
-      if (pago && pago.estado === 'rechazado' && Date.now() - new Date(pago.resuelto_at) < 14 * 864e5) {
-        html += '<div class="banner alerta" style="margin-top:12px"><div class="grow"><b>❌ Tu último pago fue rechazado</b><br><span class="chico">' + esc(pago.motivo || '') + '</span></div></div>';
+      if (u && u.estado === 'rechazado' && Date.now() - new Date(u.resuelto) < 14 * 864e5) {
+        html += '<div class="banner alerta" style="margin-top:12px"><div class="grow"><b>❌ Tu último pago fue rechazado</b><br><span class="chico">' + esc(u.motivo || '') + '</span></div></div>';
       }
-      html += '<h3>' + (prem ? 'Renovar (se suma desde tu fecha de término)' : '¿Cómo lo activo?') + '</h3>' +
-        '<p class="muted chico" style="margin-top:0">' + esc(K.texto('pago_instrucciones')) + '</p>' +
-        '<div class="pasos-reserva"><div class="on"><i>1</i>Paga ' + C.plata(lk.monto) + (lk.texto ? ' · ' + esc(lk.texto) : '') + '</div><div class="on"><i>2</i>Sube la foto del comprobante</div><div><i>3</i>Te avisamos cuando se apruebe</div></div>' +
-        (tri ? '<label>¿Cuánto tiempo?</label><div class="seg" data-meses><button class="on" data-m="1">1 mes · ' + C.plata(lk.monto) + '</button>' +
-          '<button data-m="3">3 meses · ' + C.plata(tri.monto) + ' <span class="pill ok">-' + tri.descuento + '%</span></button></div>' +
-          '<p class="muted chico hidden" data-tri-txt>Pagas ' + C.plata(tri.monto) + ' en vez de ' + C.plata(lk.monto * 3) + (tri.texto ? ' · ' + esc(tri.texto) : '') +
-          (tri.url ? '' : '. Paga por transferencia y sube el comprobante.') + '</p>' : '') +
-        '<div class="btns" style="flex-direction:column">' +
-        (lk.url ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(lk.url) + '" data-pagar1>💳 Pagar ' + C.plata(lk.monto) + '</a>' : '') +
-        (tri && tri.url ? '<a class="btn oro full hidden" target="_blank" rel="noopener" href="' + esc(tri.url) + '" data-pagar3>💳 Pagar 3 meses · ' + C.plata(tri.monto) + '</a>' : '') +
-        (s.datos_transferencia ? '<button class="gris full" data-transf>🏦 Ver datos de transferencia</button>' : '') +
-        '<button class="alt full" data-foto>📷 Subir comprobante</button><img class="comp-img hidden" data-prev alt="Comprobante">' +
-        '<button class="full ok hidden" data-enviar>✅ Enviar comprobante</button></div>';
+      if (a.role === 'owner' || a.role === 'client') html += '<div class="btns" style="flex-direction:column"><button class="oro full" data-pagar>💳 ' + (prem ? 'Renovar' : 'Pagar') + '</button></div>' +
+        '<p class="muted chico">Paga con link o transferencia y sube la foto del comprobante. ' + (prem ? 'Se suma desde tu fecha de término.' : 'Se activa apenas lo revisemos.') + '</p>';
     }
     html += '<div class="btns" style="flex-direction:column">' +
       (!a.trial_used && !prem && prueba > 0 ? '<button class="ok full" data-prueba>🎁 Probar ' + prueba + ' días gratis</button>' : '') +
@@ -122,33 +113,7 @@
       '</div></div>';
     el.innerHTML = html;
     const q = (x) => el.querySelector(x);
-    if (q('[data-transf]')) q('[data-transf]').onclick = () => {
-      const monto = meses === 3 && tri ? tri.monto : lk.monto;
-      const h = C.hoja('<h2>🏦 Transferencia</h2><p style="white-space:pre-line">' + esc(s.datos_transferencia) + '</p><p class="muted">Monto: <b>' + C.plata(monto) + '</b></p>' +
-        '<div class="btns"><button data-c class="full">📋 Copiar datos</button></div>');
-      h.q('[data-c]').onclick = () => C.copiar(s.datos_transferencia + '\nMonto: ' + C.plata(monto));
-    };
-    let foto = null, meses = 1;
-    el.querySelectorAll('[data-meses] [data-m]').forEach((b) => b.onclick = () => {
-      meses = +b.dataset.m;
-      el.querySelectorAll('[data-meses] [data-m]').forEach((x) => x.classList.toggle('on', x === b));
-      if (q('[data-pagar1]')) q('[data-pagar1]').classList.toggle('hidden', meses === 3);
-      if (q('[data-pagar3]')) q('[data-pagar3]').classList.toggle('hidden', meses !== 3);
-      if (q('[data-tri-txt]')) q('[data-tri-txt]').classList.toggle('hidden', meses !== 3);
-    });
-    if (q('[data-foto]')) q('[data-foto]').onclick = async () => {
-      const img = await C.elegirImagen('comprobante');
-      if (!img) return;
-      foto = img;
-      q('[data-prev]').src = img; q('[data-prev]').classList.remove('hidden');
-      q('[data-enviar]').classList.remove('hidden');
-      q('[data-foto]').textContent = '📷 Cambiar foto';
-    };
-    if (q('[data-enviar]')) q('[data-enviar]').onclick = (ev) => C.accion(ev.target, async () => {
-      await K.rpc('premium_pagar', { p_imagen: foto, p_nota: null, p_meses: meses });
-      K.despertarEnvios();
-      plan(el);
-    }, '🧾 Comprobante enviado. Te avisamos al aprobarlo');
+    if (q('[data-pagar]')) q('[data-pagar]').onclick = () => CFX_PAGOS.abrir({ rpc: K.rpc, alPagar: () => plan(el) });
     if (q('[data-prueba]')) q('[data-prueba]').onclick = (ev) => C.accion(ev.target, async () => {
       await K.rpc('probar_premium');
       C.toast('🎁 ¡' + prueba + ' días de Premium activados!');

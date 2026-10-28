@@ -16,6 +16,8 @@
   Avisos.montar({ sub: dueno() ? (premium() ? '⭐ Premium · Dueño' : 'Free · Dueño') : 'Barbero' });
   Avisos.alCambiar((r, antes) => { if (antes.cargado && (r.pendientes !== antes.pendientes || r.avisos > antes.avisos)) { rango = ''; refrescarVista(); } });
   C.marca(premium());
+  // Núcleo (pagos.js): barbería nueva que debe su primer pago → pantalla de activación.
+  if (dueno()) { const ir = () => CFX_PAGOS.revisar({ rpc: K.rpc, salir: () => K.salir() }); if (window.CFX_PAGOS) ir(); else addEventListener('load', ir); }
 
   const barbero = (id) => B.barberos.find((b) => b.id === id);
   const horarios = () => Object.fromEntries(B.barberos.map((b) => [b.id, b.horario]));
