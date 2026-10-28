@@ -663,6 +663,7 @@
       ['invitar', '🤝', 'Invita una barbería', K.regla('dias_referido') ? 'Gana ' + K.regla('dias_referido') + ' días de Premium' : 'Comparte la app'],
       ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
       ['respaldo', '💾', 'Respaldo', 'Descarga todo en Excel'],
+      ['verificar', '🪪', 'Verificar identidad', 'Tus clientes confían más'],
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbenos']
     ] : [
@@ -698,6 +699,7 @@
       mostrar('chat'); if (adminId) Chat.abrir(adminId, { nombre: 'CodeFix (soporte)', rol: 'admin', avatar: '🛟' }); return;
     }
     if (s === 'clientes') { mostrar('clientes'); return; }
+    if (s === 'verificar') { CFX_VERIFICAR.abrir({ rpc: K.rpc }); return; }
     const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'resumen', 'invitar', 'respaldo'];
     if (!dueno() && soloDueno.includes(s)) { mas(); return; }
     if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); }
