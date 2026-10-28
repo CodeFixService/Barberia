@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.12'::text $$;
+language sql immutable as $$ select '2.13'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -4448,7 +4448,9 @@ begin
   pagado := exists (select 1 from public.cfx_pagos where cuenta = (y ->> 'id')::uuid and estado = 'aprobado')
     or exists (select 1 from public.cfx_exentos where cuenta = (y ->> 'id')::uuid);
   -- debe_inicio: cuenta nueva (desde que activaste la regla) sin primer pago. bloqueado: además es un negocio.
+  -- Solo si ya hay una forma de pago configurada (si no, nadie podría pagar).
   debe := coalesce((c #>> '{negocio,exigir_inicio}')::boolean, false) and not pagado
+     and (coalesce(c ->> 'link', '') <> '' or coalesce(c #>> '{transferencia,numero}', '') <> '')
      and (y ->> 'creado')::timestamptz > coalesce((c ->> 'inicio_desde')::timestamptz, now());
   bloq := debe and y ->> 'rol' = 'negocio';
   return jsonb_build_object('config', c - 'inicio_desde', 'yo', y, 'pagado', pagado, 'bloqueado', bloq, 'debe_inicio', debe,
@@ -4502,7 +4504,10 @@ begin
   if coalesce(p ->> 'link', '') <> '' and (p ->> 'link') !~ '^https://[^ ]+$' then raise exception 'El link de pago debe empezar con https://'; end if;
   if coalesce((p ->> 'comision_pct')::numeric, 0) not between 0 and 20 then raise exception 'La comisión va de 0 a 20 %%'; end if;
   -- Al activar "bloquear hasta el primer pago", solo aplica a los negocios que se registren desde ahora.
-  if coalesce((p #>> '{negocio,exigir_inicio}')::boolean, false) and not coalesce((v #>> '{negocio,exigir_inicio}')::boolean, false) then
+  -- También cuando se configura la primera forma de pago (antes nadie podía pagar, así que nadie quedó obligado).
+  if coalesce((p #>> '{negocio,exigir_inicio}')::boolean, false) and (not coalesce((v #>> '{negocio,exigir_inicio}')::boolean, false)
+     or (coalesce(v ->> 'link', '') = '' and coalesce(v #>> '{transferencia,numero}', '') = ''
+         and (coalesce(p ->> 'link', '') <> '' or coalesce(p #>> '{transferencia,numero}', '') <> ''))) then
     p := p || jsonb_build_object('inicio_desde', now());
   end if;
   v := v || (p - 'inicio_desde') || case when p ? 'inicio_desde' then jsonb_build_object('inicio_desde', p -> 'inicio_desde') else '{}'::jsonb end;

@@ -7,7 +7,7 @@ begin
   if not coalesce(c, false) then raise exception 'FALLO: %', msg; end if;
   raise notice 'OK: %', msg;
 end $$;
-select pg_temp.ok(public.db_version() = '2.12', 'base en versión 2.12');
+select pg_temp.ok(public.db_version() = '2.13', 'base en versión 2.13');
 select pg_temp.ok((select count(*) from public.barberias) >= 1 and (select count(*) from public.reservas) >= 5, 'barberías y horas se conservan');
 select pg_temp.ok((select count(*) from public.calificaciones) >= 1 and (select count(*) from public.pagos) >= 1, 'calificaciones y pagos se conservan');
 select pg_temp.ok(not exists (select 1 from public.barberias where registro_solo or referida_por is not null), 'las barberías antiguas no quedan como registradas solas');
@@ -20,4 +20,4 @@ select pg_temp.ok(public.no_vuelven() ? 'total', 'el dueño ve los clientes que 
 select pg_temp.ok(jsonb_typeof(public.mis_pendientes() -> 'devoluciones') = 'array', 'Inicio de la barbería funciona');
 reset role;
 \o
-select '✅ ACTUALIZACIÓN 2.0 → 2.12 SIN PÉRDIDAS' as resultado;
+select '✅ ACTUALIZACIÓN 2.0 → 2.13 SIN PÉRDIDAS' as resultado;
