@@ -432,6 +432,7 @@
   // Precios y links: 2 espacios por plan, uno activo. El precio publicado es el del espacio activo.
   function secLinks() {
     const z = seccion('💳 Precios y links');
+    z.innerHTML = '<div class="card"><p>⭐ Precios, links de pago y datos de transferencia del Premium ahora se configuran una sola vez para las 6 apps en el Centro de Mando → Pagos. Aquí ya no hace falta tocar nada.</p></div>'; if (z) return;  // centralizado en el Centro de Mando
     const L = ajustes.links_premium || {};
     const bloque = (g, titulo) => {
       const x = L[g] || { activo: 1 };

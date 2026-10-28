@@ -18,11 +18,11 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.14'::text $$;
+language sql immutable as $$ select '2.15'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
-language sql immutable as $$ select 'Nuevo: guía para partir, chat con soporte y términos en el botón 🛟; pagos más claros (copias cada dato) y con tarjeta.'::text $$;
+language sql immutable as $$ select 'Se ve bien en computador (menú lateral) y en celular; precios y links de Premium se manejan desde un solo lugar.'::text $$;
 
 -- Planes Free / Premium (v1.4): el admin los edita desde su panel. Estos son los valores de partida.
 create table if not exists public.planes (
