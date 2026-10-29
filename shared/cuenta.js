@@ -88,7 +88,7 @@
     sincronizarPush();
     // Núcleo (ayuda.js): cabecera común [campana][FREE/PRO][foto], menú de la cuenta, ayuda y sensación Premium.
     const adm = a.role === 'admin' || a.role === 'socio';
-    window.CFX_AYUDA_PEND = Object.assign(window.CFX_AYUDA_PEND || {}, { rpc, app: 'barberia', admin: adm, premium: !!a.is_premium, id: a.id, hasta: a.premium_until,
+    window.CFX_AYUDA_PEND = Object.assign(window.CFX_AYUDA_PEND || {}, { rpc, app: 'barberia', admin: adm, socio: a.role === 'socio', premium: !!a.is_premium, id: a.id, hasta: a.premium_until,
       nombre: a.nombre, email: a.email, foto: a.foto || null, cuenta: adm ? '#cuenta' : '#perfil', panel: adm && !/\/admin\//.test(location.pathname) ? C.raiz() + 'admin/' : null,
       salir: async () => { await salir(); location.replace(C.raiz()); } });
     if (window.CFX_AYUDA) window.CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND);
