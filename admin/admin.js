@@ -18,7 +18,7 @@
 
   /* ---------- Navegación ---------- */
   let vistaActual = 'resumen';
-  const VISTAS = { resumen, barberias: pintarBarberias, chat: () => Chat.montar($('v-chat')), ajustes: pintarAjustes };
+  const VISTAS = { resumen, barberias: pintarBarberias, ajustes: pintarAjustes };
   function mostrar(v) {
     vistaActual = v;
     document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-' + v));
@@ -31,7 +31,6 @@
     const h = decodeURIComponent(location.hash.slice(1));
     const [v, qs] = h.split('?');
     const q = new URLSearchParams(qs || '');
-    if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
     if (v === 'admin') { mostrar('resumen'); return; }
     if (v === 'registro' || v === 'cuenta') { zona = null; abrirAjuste(v); return; }
@@ -153,7 +152,8 @@
   async function enviarTip(b, texto) {
     const t = await C.pedir('💬 Mensaje para ' + b.nombre, { largo: true, valor: texto, si: 'Enviar', max: 1000 });
     if (!t) return;
-    try { await K.rpc('enviar_mensaje', { p_to: b.owner_id, p_body: t }); K.despertarEnvios(); C.toast('💬 Enviado al chat de ' + b.nombre); } catch (e) { C.toast('⚠️ ' + e.message); }
+    // Va al chat de soporte de la barbería (🛟) y queda en Centro de Mando → Mensajes.
+    try { await K.rpc('cfx_chat_iniciar', { p_cuenta: b.owner_id, p_texto: t, p_nombre: (b.dueno ? b.dueno + ' · ' : '') + b.nombre, p_rol: 'negocio' }); K.despertarEnvios(); C.toast('💬 Enviado al soporte de ' + b.nombre); } catch (e) { C.toast('⚠️ ' + e.message); }
   }
 
   /* ---------- Barberías (y clientes / barberos) ---------- */
@@ -266,7 +266,7 @@
     const rec = recomendaciones(b);
     h.q('[data-recos]').innerHTML = rec.length ? '<h3>💡 Recomendaciones</h3>' + rec.map((r, i) => '<div class="reco"><span style="font-size:20px">' + r[0] + '</span><div class="grow">' + esc(r[1]) + '</div><button class="small alt" data-r="' + i + '">Enviar</button></div>').join('') : '';
     h.qa('[data-r]').forEach((x) => x.onclick = () => enviarTip(b, rec[+x.dataset.r][2]));
-    h.q('[data-chat]').onclick = () => { h.cerrar(); mostrar('chat'); Chat.abrir(b.owner_id, { nombre: b.dueno + ' · ' + b.nombre, rol: 'owner' }); };
+    h.q('[data-chat]').onclick = () => { h.cerrar(); enviarTip(b, ''); };
     if (h.q('[data-sus]')) h.q('[data-sus]').onclick = async () => {
       if (!await C.confirmar(b.suspended ? 'Reactivar la barbería y su equipo.' : 'Nadie de esta barbería (equipo y clientes) podrá usar la app ni su link hasta que la reactives.', { si: b.suspended ? 'Reactivar' : 'Suspender', peligro: !b.suspended })) return;
       await K.rpc('admin_suspender', { p_user: b.owner_id, p_suspender: !b.suspended }); h.cerrar(); pintarBarberias();
@@ -466,6 +466,7 @@
         '<div class="sub">por ' + esc(a.quien) + (a.rol === 'socio' ? ' <span class="pill">socio</span>' : '') + '</div></div><span class="sub">' + C.cuando(a.created_at) + '</span></li>').join('') ||
         '<li class="muted">Nada por aquí.</li>') + '</ul></div>';
       z.querySelectorAll('[data-f]').forEach((b) => { b.classList.toggle('on', b.dataset.f === filtroReg); b.onclick = () => { filtroReg = b.dataset.f; pintar(); }; });
+      if (esAdmin) window.CFX_AJUSTES.registro(z, K.rpc, { recargar: () => abrirAjuste('registro') });
     };
     pintar();
   }

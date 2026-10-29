@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.17'::text $$;
+language sql immutable as $$ select '2.18'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -3278,8 +3278,7 @@ language sql stable security definer set search_path = '' as $$
   select a <> b and exists (
     select 1 from public.profiles pa, public.profiles pb
     where pa.id = a and pb.id = b and not pa.suspended and not pb.suspended
-      and ((pa.role in ('admin', 'socio') and pb.role in ('owner', 'barber')) or (pb.role in ('admin', 'socio') and pa.role in ('owner', 'barber'))
-           or (pa.role in ('admin', 'socio') and pb.role in ('admin', 'socio'))
+      and ((pa.role in ('admin', 'socio') and pb.role in ('admin', 'socio'))
            or (pa.barberia_id = pb.barberia_id and pa.role not in ('admin', 'socio') and pb.role not in ('admin', 'socio')
                and not (pa.role = 'client' and pb.role = 'client'))))
 $$;
@@ -4683,6 +4682,25 @@ begin
 end $$;
 
 -- ---------- Planes: [{grupo, clave, free, premium}] (números o sí/no) ----------
+-- Borrar el registro de cambios (el común y el propio de la app, si tiene): lo de más de N días, o todo con 0. Solo el administrador.
+create or replace function public.cfx_registro_borrar(p_dias int default 30) returns int
+language plpgsql security definer set search_path = '' as $$
+declare n int := 0; k int; col text; desde timestamptz := case when coalesce(p_dias, 0) <= 0 then 'infinity'::timestamptz else now() - make_interval(days => p_dias) end;
+begin
+  perform public.cfx_es_admin();
+  delete from public.cfx_registro where creado < desde; get diagnostics n = row_count;
+  if to_regclass('public.auditoria') is not null then
+    select c.column_name into col from information_schema.columns c where c.table_schema = 'public' and c.table_name = 'auditoria'
+      and c.column_name in ('created_at', 'at', 'creado', 'fecha') and c.data_type like 'timestamp%' order by c.ordinal_position limit 1;
+    if col is not null then execute format('delete from public.auditoria where %I < $1', col) using desde; get diagnostics k = row_count; n := n + k; end if;
+  end if;
+  insert into public.cfx_registro (quien, accion, detalle) values (coalesce((select email from auth.users where id = auth.uid()), 'sistema'), 'registro borrado',
+    case when coalesce(p_dias, 0) <= 0 then 'todo' else 'más de ' || p_dias || ' días' end || ' (' || n || ' filas)');
+  return n;
+end $$;
+revoke all on function public.cfx_registro_borrar(int) from public, anon;
+grant execute on function public.cfx_registro_borrar(int) to authenticated;
+
 create or replace function public.cfx_planes() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 begin
@@ -5041,6 +5059,23 @@ begin
   perform public.cfx_avisar(p_cuenta, '💬 Soporte te respondió', left(t, 200));
   return i;
 end $$;
+
+-- El administrador escribe primero a una cuenta (consejos o recomendaciones): queda en su chat de soporte (🛟) y en CM → Mensajes.
+create or replace function public.cfx_chat_iniciar(p_cuenta uuid, p_texto text, p_email text default '', p_nombre text default '', p_rol text default 'negocio') returns bigint
+language plpgsql security definer set search_path = '' as $$
+declare t text := trim(coalesce(p_texto, '')); i bigint; o public.cfx_chat;
+begin
+  perform public.cfx_es_admin();
+  if t = '' or length(t) > 1000 then raise exception 'Escribe el mensaje (máx. 1000 letras)'; end if;
+  select * into o from public.cfx_chat where cuenta = p_cuenta order by id desc limit 1;
+  insert into public.cfx_chat (cuenta, email, nombre, rol, de, texto, leido)
+  values (p_cuenta, coalesce(o.email, left(coalesce(p_email, ''), 200)), coalesce(o.nombre, left(coalesce(p_nombre, ''), 120)), coalesce(o.rol, left(coalesce(p_rol, 'negocio'), 20)), 'soporte', t, false)
+  returning id into i;
+  perform public.cfx_avisar(p_cuenta, '💬 Soporte te escribió', left(t, 200));
+  return i;
+end $$;
+revoke all on function public.cfx_chat_iniciar(uuid, text, text, text, text) from public, anon;
+grant execute on function public.cfx_chat_iniciar(uuid, text, text, text, text) to authenticated;
 
 -- ---------- 3) Guía para partir ----------
 -- Pendientes de configuración del negocio (los arma cada app) + verificar identidad. Solo para negocios.

@@ -498,7 +498,7 @@ select pg_temp.ok((select x ->> 'quien' = 'Sofía · CodeFix' and x ->> 'rol' = 
   'la limpieza del socio queda en el registro con su nombre');
 select pg_temp.debe_fallar($$select public.admin_socios()$$, 'Solo el administrador');
 select pg_temp.debe_fallar($$select public.admin_ajuste('version_liberada', '9.9')$$, 'libera versiones');
-select pg_temp.ok(public.puede_hablar(auth.uid(), prueba.id('dueno@test.cl')), 'el socio puede escribirle a las barberías');
+select pg_temp.ok(not public.puede_hablar(auth.uid(), prueba.id('dueno@test.cl')), 'socio y admin escriben a las barberías por el soporte común (cfx_chat), no por el chat de la app');
 reset role;
 select pg_temp.crear('socio@test.cl', 'b9@test.cl', 'B9', 'owner', 'Barbería del Socio 2');
 select pg_temp.ok(prueba.si($q$(select socio_id = prueba.id('socio@test.cl') from public.barberias where nombre = 'Barbería del Socio 2')$q$)
