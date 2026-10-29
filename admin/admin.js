@@ -18,7 +18,7 @@
 
   /* ---------- Navegación ---------- */
   let vistaActual = 'resumen';
-  const VISTAS = { resumen, barberias: pintarBarberias, ajustes: pintarAjustes };
+  const VISTAS = { resumen, barberias: pintarBarberias, usuarios: pintarBarberias, ajustes: pintarAjustes };
   function mostrar(v) {
     vistaActual = v;
     document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-' + v));
@@ -80,7 +80,7 @@
     let html = '';
     if (web && s.db_version && s.db_version !== web) html += '<div class="banner alerta"><div class="grow"><b>🗄️ La base de datos es la versión ' + esc(s.db_version) + ' y la app la ' + esc(web) + '</b><br>' +
       '<span class="chico">Se actualiza sola en máximo 10 minutos (no borra datos).</span></div></div>';
-    if (!(await K.pushActivo())) html += '<div class="banner marca"><div class="grow"><b>🔔 Activa las notificaciones</b><br><span class="chico">Para enterarte al tiro de los pagos por revisar.</span></div><button class="small" id="bPush">Activar</button></div>';
+    if (!(await K.pushActivo())) html += '<div class="banner marca" data-cfx-push><div class="grow"><b>🔔 Activa las notificaciones</b><br><span class="chico">Para enterarte al tiro de los pagos por revisar.</span></div><button class="small" id="bPush">Activar</button></div>';
     const pct = Math.round(uso.db_bytes / uso.limite * 100);
     html += '<div class="stats">' +
       '<div class="card"><small>Barberías</small><b>' + s.barberias + '</b><small>⭐ ' + s.barberias_premium + ' Premium</small></div>' +
@@ -165,16 +165,19 @@
     solas: (b) => b.registro_solo, mias: (b) => b.socio_id === yo.id
   };
   async function pintarBarberias() {
-    const el = $('v-barberias');
-    el.innerHTML = '<div class="card" style="padding:12px"><div class="seg"><button data-m="barberias">💈 Barberías</button><button data-m="clientes">👥 Clientes</button><button data-m="equipo">✂️ Barberos</button></div>' +
-      '<div class="flex" style="margin-top:10px"><input id="fB" placeholder="🔎 Buscar…" class="grow">' + (permiso('crear') ? '<button id="bNuevaB">+ Barbería</button>' : '<button class="gris" id="bNuevaB">🔳 QR</button>') + '</div>' +
+    // Barberías (4º botón aparte: Usuarios = clientes y barberos). Solo una de las dos vistas tiene la lista (mismos id).
+    const us = vistaActual === 'usuarios', el = $(us ? 'v-usuarios' : 'v-barberias');
+    $(us ? 'v-barberias' : 'v-usuarios').innerHTML = '';
+    if (us === (modoLista === 'barberias')) modoLista = us ? 'clientes' : 'barberias';
+    el.innerHTML = '<div class="card" style="padding:12px">' + (us ? '<div class="seg"><button data-m="clientes">👥 Clientes</button><button data-m="equipo">✂️ Barberos</button></div>' : '') +
+      '<div class="flex"' + (us ? ' style="margin-top:10px"' : '') + '><input id="fB" placeholder="🔎 Buscar…" class="grow">' + (us ? '' : permiso('crear') ? '<button id="bNuevaB">+ Barbería</button>' : '<button class="gris" id="bNuevaB">🔳 QR</button>') + '</div>' +
       (modoLista === 'barberias' ? '<div class="chips" style="margin-top:10px">' + [['todas', 'Todas'], ['premium', '⭐ Premium'], ['free', 'Free'], ['por_vencer', '⏳ Por vencer'], ['inactivas', '😴 Inactivas'], ['suspendidas', '⛔ Suspendidas'],
           ['solas', '✨ Se registraron solas']].concat(esAdmin ? [] : [['mias', '🤝 Mías']])
         .map(([k, t]) => '<button class="chip' + (filtro === k ? ' on' : '') + '" data-fl="' + k + '">' + t + '</button>').join('') + '</div>' : '') +
       '</div><div id="lB"><p class="muted centro">Cargando…</p></div>';
     el.querySelectorAll('[data-m]').forEach((b) => { b.classList.toggle('on', b.dataset.m === modoLista); b.onclick = () => { modoLista = b.dataset.m; pintarBarberias(); }; });
     el.querySelectorAll('[data-fl]').forEach((b) => b.onclick = () => { filtro = b.dataset.fl; pintarBarberias(); });
-    $('bNuevaB').onclick = permiso('crear') ? nuevaBarberia : qrRegistro;
+    if (!us) $('bNuevaB').onclick = permiso('crear') ? nuevaBarberia : qrRegistro;
     const z = $('lB');
     if (modoLista === 'barberias') {
       try { barberias = await K.rpc('admin_barberias'); } catch (e) { z.innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }

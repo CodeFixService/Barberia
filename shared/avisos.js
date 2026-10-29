@@ -108,7 +108,7 @@
     if (await K.pushActivo()) return;
     if (C.leer('pushNo', 0) > Date.now()) return;
     const d = document.createElement('div');
-    d.className = 'banner marca';
+    d.className = 'banner marca'; d.dataset.cfxPush = '';
     d.innerHTML = '<div class="grow"><b>🔔 Activa las notificaciones</b><br><span class="chico">' +
       (K.esIOS() && !K.instalada() ? 'En iPhone: Compartir → "Agregar a inicio" y abre la app desde ahí.' : 'Para saber al tiro cuando confirmen tu hora o te escriban.') +
       '</span></div><button class="small">Activar</button><button class="small gris" aria-label="Ahora no" style="background:transparent;color:inherit;border:0">✕</button>';
