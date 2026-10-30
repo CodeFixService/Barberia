@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.24'::text $$;
+language sql immutable as $$ select '2.25'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
