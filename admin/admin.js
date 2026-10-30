@@ -10,7 +10,7 @@
   // v2.1: el socio ve y gestiona como el admin según sus permisos, pero no crea ni borra.
   const esAdmin = !!yo.is_admin;
   const permiso = (k) => esAdmin || !!(yo.permisos || {})[k];
-  Avisos.montar({ titulo: 'CodeFix · Barberías', sub: esAdmin ? 'Administrador general' : 'Socio CodeFix' });
+  Avisos.montar({ titulo: 'Administración', sinLogo: true });  // admin y socios: solo "Administración", sin logo
   C.marca();
   let barberias = [];
   let ajustes = await K.ajustes();

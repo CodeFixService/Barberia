@@ -15,9 +15,9 @@
     const h = document.createElement('header');
     h.className = 'top';
     const logo = b.logo;
-    h.innerHTML =
-      '<span class="logo' + (logo ? ' img' : '') + '" style="' + C.fondo(logo) + '">' + (logo ? '' : '💈') + '</span>' +
-      '<div class="tit"><b>' + esc(opts.titulo || b.nombre || 'Barbería') + '</b><small>' + (opts.sub || '') + '</small></div>' +
+    h.innerHTML = (opts.sinLogo ? '' :
+      '<span class="logo' + (logo ? ' img' : '') + '" style="' + C.fondo(logo) + '">' + (logo ? '' : '💈') + '</span>') +
+      '<div class="tit"><b>' + esc(opts.titulo || b.nombre || 'Barbería') + '</b>' + (opts.sub ? '<small>' + opts.sub + '</small>' : '') + '</div>' +
       (opts.extra || '') +
       '<button class="icono" id="bCampana" aria-label="Avisos">🔔<span class="num" id="nAvisos"></span></button>';
     document.body.prepend(h);
