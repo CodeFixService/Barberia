@@ -39,7 +39,7 @@
       document.querySelectorAll('[data-num="pendientes"]').forEach((el) => setNum(el, r.pendientes));
       document.querySelectorAll('[data-num="avisos"]').forEach((el) => setNum(el, r.avisos));
       if (r.avisos > antes.avisos && antes !== null && antes.avisos !== undefined && document.visibilityState === 'visible' && antes.cargado) {
-        C.toast('🔔 Tienes un aviso nuevo');
+        if (window.CFX_ANIM) window.CFX_ANIM.emergente({ titulo: 'Tienes un aviso nuevo', cuerpo: 'Tócalo para verlo' }); else C.toast('🔔 Tienes un aviso nuevo');
       }
       ultimo.cargado = true;
       oyentes.forEach((f) => { try { f(r, antes); } catch (e) { /* nada */ } });
@@ -90,6 +90,7 @@
     h.q('[data-todo]').onclick = async () => { await K.rpc('marcar_vistos', { p_ids: null }); actualizar(); recibidos(); };
     h.q('[data-limpiar]').onclick = async (ev) => {
       if (!await C.confirmar('Se vacía tu campanita. Quien te envió los avisos igual ve que los recibiste.', { titulo: '🗑️ Limpiar avisos', si: 'Limpiar' })) return;
+      if (window.CFX_ANIM) await window.CFX_ANIM.salirTodos();
       try { await K.rpc('limpiar_avisos'); C.toast('🗑️ Campanita limpia'); actualizar(); recibidos(); } catch (e) { C.toast('⚠️ ' + e.message); }
     };
     recibidos();
