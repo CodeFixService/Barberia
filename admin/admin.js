@@ -98,10 +98,8 @@
       (esAdmin ? '' : '. Las que entren con tu link quedan a tu nombre') + (K.regla('registro_barberias') ? '' : ' · ⚠️ el registro está cerrado (Ajustes → Reglas)') + '.</div></div><span>›</span></div></div>';
     html += '<div id="cVencer"></div>';
     // Servidor
-    html += '<div class="card"><h2>🖥️ Servidor <span class="grow"></span><span class="pill ' + (pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : 'ok') + '">' + (pct >= 90 ? '🔴' : pct >= 70 ? '🟡' : '🟢') + ' ' + pct + '%</span></h2>' +
-      '<div class="sub muted">Base de datos: ' + MB(uso.db_bytes) + ' de ' + MB(uso.limite) + ' (plan gratis de Supabase) · versión ' + esc(s.db_version || '—') + '</div>' +
-      '<div class="barras" style="margin:10px 0"><div class="b"><span>Usado</span><span class="t"><i style="width:' + Math.min(100, pct) + '%"></i></span><span>' + pct + '%</span></div></div>' +
-      '<details><summary class="muted chico">Tamaño por tabla</summary><table class="tabla">' + uso.tablas.slice(0, 15).map((t) => '<tr><td>' + esc(t.tabla) + '</td><td class="n">' + (t.filas >= 0 ? t.filas : '') + ' filas</td><td class="n">' + MB(t.bytes) + '</td></tr>').join('') + '</table></details>' +
+    // El uso del servidor se ve en el Centro de Mando (carrusel de servidores); aquí queda la limpieza.
+    html += '<div class="card"><h2>🧹 Limpieza</h2>' +
       '<p class="muted chico">Fotos guardadas: ' + uso.comprobantes + ' comprobante(s) y ' + uso.fotos_chat + ' foto(s) del chat. Se borran solas a los ' + K.regla('dias_comprobantes') + ' días; nunca se borra un comprobante en revisión.</p>' +
       (permiso('eliminar') ? '<div class="btns"><button class="small gris" data-limpiar="comprobantes">🧾 Comprobantes de +7 días</button><button class="small gris" data-limpiar="fotos_chat">🖼️ Fotos del chat de +7 días</button>' +
       '<button class="small gris" data-limpiar="avisos">🔔 Avisos de +2 días</button><button class="small gris" data-limpiar="anuladas">❌ Horas anuladas de +7 días</button></div>' : '') + '</div>';
