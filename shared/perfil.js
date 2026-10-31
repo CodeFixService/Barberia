@@ -121,126 +121,61 @@
     });
   }
 
-  /* ---------- Mi perfil ---------- */
+  /* ---------- Mi perfil: el común del núcleo (ayuda.js → CFX_PERFIL); aquí solo cómo guarda Barbería ---------- */
+  const ROL = { admin: 'Administrador', socio: 'Socio CodeFix', owner: 'Dueño', barber: 'Barbero', client: 'Cliente' };
+  const premCli = () => K.cuenta.role !== 'client' || K.clienteTiene('colores');
+  let fotoNueva;
+  const guardarP = async (p) => { await K.rpc('guardar_perfil', { p }); await K.refrescar(); };
+  global.CFX_PERFIL_APP = {
+    nombre: () => K.cuenta.nombre, correo: () => K.cuenta.email,
+    sub: () => { const a = K.cuenta; return ROL[a.role] + (a.barberia ? ' · ' + a.barberia.nombre : '') + (a.is_premium ? ' · ⭐ Premium' : ''); },
+    foto: () => K.cuenta.foto || '',
+    guardarFoto: async (f) => { fotoNueva = f ? await C.imagen(f, 220, 0.75) : ''; },
+    iconos: C.EMOJIS, icono: () => K.cuenta.avatar,
+    campos: () => { const a = K.cuenta, cli = a.role === 'client'; return [{ k: 'telefono', t: 'WhatsApp', tipo: 'tel', ph: '+56 9 1234 5678', v: a.telefono || '' }]
+      .concat(cli ? [{ k: 'cumple', t: 'Cumpleaños (opcional, para saludos y promos)', tipo: 'date', v: a.cumple || '' }] : [])
+      .concat(!cli && a.role !== 'admin' ? [{ k: 'descripcion', t: 'Sobre mí (lo ven los clientes)', max: 200, ph: 'Ej: Especialista en degradados', v: a.descripcion || '' }] : []); },
+    guardar: async (d) => { const p = Object.assign({}, d, { avatar: d.icono }); delete p.icono; if (fotoNueva !== undefined) p.foto = fotoNueva; fotoNueva = undefined; await guardarP(p); },
+    colores: C.COLORES, libre: true, color: () => K.cuenta.color || C.COLORES[0][1],
+    guardarColor: async (c) => { C.aplicarColor(c); await guardarP({ color: c }); }, probarColor: C.aplicarColor,
+    modo: () => { let t = ''; try { t = localStorage.getItem('barb:tema') || ''; } catch (e) { /* sin acceso */ } return t === 'light' ? 'claro' : t === 'dark' ? 'oscuro' : 'auto'; },
+    guardarModo: (m) => { const t = m === 'claro' ? 'light' : m === 'oscuro' ? 'dark' : 'auto'; C.guardar('tema', t); try { localStorage.setItem('barb:tema', t); } catch (e) { /* nada */ } C.aplicarTema(t); },
+    pushActiva: () => K.pushActivo(),
+    activarPush: () => { if (K.esIOS() && !K.instalada()) throw new Error('En iPhone: instala la app (Compartir → Agregar a inicio)'); return K.activarPush(); },
+    clave: async (n) => { await K.cambiarClave(n); await K.refrescar(); },
+    // Íconos, foto y colores: los primeros son gratis; el resto, Premium para clientes.
+    bloqueo: (que, v) => {
+      if (que === 'foto' && !premCli()) return 'Tu foto de perfil';
+      if (que === 'icono' && !premCli() && C.EMOJIS.indexOf(v) >= C.EMOJIS_LIBRES) return 'Todos los íconos';
+      if ((que === 'color' && !C.COLORES_LIBRES.includes(v)) || que === 'libre') return K.colorPremium(K.cuenta) ? '' : que === 'libre' ? 'Color personalizado' : 'Todos los colores';
+      return '';
+    },
+    mejorar: upsell,
+    arriba: () => (K.cuenta.clave_temporal ? '<div class="banner alerta"><div class="grow"><b>🔑 Estás usando una clave temporal</b><br>Cámbiala en Avanzado por una que recuerdes.</div></div>' : ''),
+    eliminarTexto: 'Se borrarán tu cuenta y tus horas futuras. No se puede deshacer.',
+    puedeEliminar: () => K.cuenta.role === 'client',  // solo el cliente borra su cuenta desde la app
+    eliminar: async () => {
+      if (!await C.confirmar('Se borrarán tu cuenta y tus horas futuras. No se puede deshacer.', { titulo: 'Eliminar mi cuenta', si: 'Eliminar', peligro: true })) return;
+      await K.rpc('eliminar_mi_cuenta'); await K.salir(); location.replace(C.raiz());
+    }
+  };
+
   async function perfil(el, opts) {
     opts = opts || {};
     const a = K.cuenta;
     const esCliente = a.role === 'client';
-    const prem = esCliente ? K.clienteTiene('colores') : true;
-    const ROL = { admin: 'Administrador', socio: 'Socio CodeFix', owner: 'Dueño', barber: 'Barbero', client: 'Cliente' };
-    let tema = 'auto';
-    try { tema = localStorage.getItem('barb:tema') || 'auto'; } catch (e) { /* sin acceso */ }
-    if (!['auto', 'light', 'dark'].includes(tema)) tema = 'auto';
-    const premColor = K.colorPremium(a);
-    el.innerHTML =
-      (a.clave_temporal ? '<div class="banner alerta"><div class="grow"><b>🔑 Estás usando una clave temporal</b><br>Cámbiala abajo por una que recuerdes.</div></div>' : '') +
-      '<div class="card ' + (a.is_premium ? 'oro-marco' : '') + '"><div class="flex"><span data-av>' + C.avatar(a, 'lg' + (a.is_premium ? ' premium' : '')) + '</span>' +
-      '<div class="grow"><b style="font-size:19px">' + esc(a.nombre) + '</b><div class="muted">' + ROL[a.role] + (a.barberia ? ' · ' + esc(a.barberia.nombre) : '') + '</div>' +
-      '<div class="flex wrap" style="gap:6px;margin-top:4px">' + (a.is_premium ? '<span class="pill oro">⭐ Premium</span>' : (a.role === 'owner' || esCliente) ? '<span class="pill">Free</span>' : '') +
-      (esCliente && a.saldo ? '<span class="pill ok">Saldo a favor ' + C.plata(a.saldo) + '</span>' : '') + '</div></div></div>' +
-      '<label>Nombre</label><input data-k="nombre" maxlength="80" value="' + esc(a.nombre) + '">' +
-      '<label>WhatsApp</label><input data-k="telefono" inputmode="tel" placeholder="+56 9 1234 5678" value="' + esc(a.telefono || '') + '">' +
-      (esCliente ? '<label>Cumpleaños <span class="opc">(opcional, para saludos y promos)</span></label><input data-k="cumple" type="date" value="' + esc(a.cumple || '') + '">' : '') +
-      (!esCliente && a.role !== 'admin' ? '<label>Sobre mí <span class="opc">(lo ven los clientes)</span></label><input data-k="descripcion" maxlength="200" placeholder="Ej: Especialista en degradados" value="' + esc(a.descripcion || '') + '">' : '') +
-      '<label>Tu ícono</label><div class="emojis" data-emojis></div>' +
-      '<div class="btns"><button class="gris small" data-foto>📷 ' + (a.foto ? 'Cambiar foto' : 'Poner mi foto') + '</button>' + (a.foto ? '<button class="gris small" data-sinfoto>Quitar foto</button>' : '') + '</div>' +
-      '<label>Color de mi app <span class="opc">(' + (premColor ? 'todos los colores o uno a tu gusto' : '4 colores · ⭐ Premium: todos y uno a tu gusto') + ')</span></label>' +
-      '<div class="swatches" data-colores></div><div class="flex" style="margin-top:10px" data-propio-wrap><input type="color" data-propio value="' + esc(/^#[0-9a-f]{6}$/i.test(a.color || '') ? a.color : '#b07d2b') + '" style="width:64px;flex:none">' +
-      '<span class="muted chico">🎨 Color personalizado: fabrica el tono que quieras</span></div>' +
-      (opts.extraPerfil || '') +
-      '<div class="btns"><button data-guardar class="full">Guardar</button></div></div>' +
-      '<div class="card"><h2>⚙️ Preferencias</h2>' +
-      '<label>Apariencia</label><div class="seg" data-tema><button data-t="auto">Automática</button><button data-t="light">☀️ Clara</button><button data-t="dark">🌙 Oscura</button></div>' +
-      '<label>Notificaciones en este celular</label><div class="flex"><span class="grow muted" data-push>Revisando…</span><button class="small alt" data-activar>Activar</button></div></div>' +
-      '<div class="card"><h2>🔑 Cambiar mi clave</h2><input data-c1 type="password" autocomplete="new-password" placeholder="Nueva clave (mín. 6)">' +
-      '<input data-c2 type="password" autocomplete="new-password" placeholder="Repite la clave" style="margin-top:8px"><div class="btns"><button class="alt" data-clave>Cambiar clave</button></div></div>' +
+    const ad = { alGuardar: async () => { if (opts.alGuardar) await opts.alGuardar(); } };
+    el.innerHTML = '<div data-pf></div>' + (opts.extraPerfil ? '<div class="card">' + opts.extraPerfil + '</div>' : '') +
       ((a.role === 'owner' || esCliente) ? '<div data-plan></div>' : '') +
       '<div class="card"><h2>❓ Ayuda</h2><div class="btns" style="margin-top:0">' +
       (esCliente && a.barberia && a.barberia.whatsapp ? '<a class="btn wsp" target="_blank" rel="noopener" href="' + C.wa(a.barberia.whatsapp, 'Hola, tengo una consulta sobre la app') + '">💬 WhatsApp de la barbería</a>' : '') +
       '<button class="gris" data-tour>🧭 Ver el recorrido</button><a class="btn gris" href="' + C.raiz() + 'legal.html">📄 Términos y privacidad</a></div></div>' +
-      '<div class="card"><div class="btns" style="margin-top:0"><button class="gris" data-salir>🚪 Cerrar sesión</button>' +
-      (esCliente ? '<button class="danger" data-borrar>Eliminar mi cuenta</button>' : '') + '</div></div>';
+      '<div class="card"><div class="btns" style="margin-top:0"><button class="gris" data-salir>🚪 Cerrar sesión</button></div></div>';
     const q = (x) => el.querySelector(x);
-    let datos = { avatar: a.avatar, color: a.color };
-
-    // Íconos: los primeros son gratis; el resto, Premium para clientes.
-    q('[data-emojis]').innerHTML = C.EMOJIS.map((e, i) => {
-      const lock = esCliente && !prem && i >= C.EMOJIS_LIBRES;
-      return '<button type="button" class="' + (e === a.avatar ? 'on ' : '') + (lock ? 'plata' : '') + '" data-e="' + e + '">' + e + '</button>';
-    }).join('');
-    q('[data-emojis]').querySelectorAll('button').forEach((b) => b.onclick = () => {
-      if (b.classList.contains('plata')) return upsell('Todos los íconos');
-      datos.avatar = b.dataset.e;
-      q('[data-emojis]').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
-      q('[data-av]').innerHTML = C.avatar({ avatar: datos.avatar, foto: datos.foto === undefined ? a.foto : datos.foto }, 'lg');
-    });
-    q('[data-foto]').onclick = async () => {
-      if (esCliente && !prem) return upsell('Tu foto de perfil');
-      const img = await C.elegirImagen(220, 0.75);
-      if (!img) return;
-      datos.foto = img;
-      q('[data-av]').innerHTML = C.avatar({ foto: img }, 'lg');
-    };
-    if (q('[data-sinfoto]')) q('[data-sinfoto]').onclick = () => { datos.foto = ''; q('[data-av]').innerHTML = C.avatar({ avatar: datos.avatar }, 'lg'); };
-    const colores = q('[data-colores]');
-    if (colores) {
-      colores.innerHTML = C.COLORES.map(([n, c]) => {
-        const lock = !premColor && !C.COLORES_LIBRES.includes(c);
-        return '<button type="button" title="' + n + '" class="' + (c === a.color ? 'on ' : '') + (lock ? 'plata' : '') + '" style="background:' + c + '" data-c="' + c + '"></button>';
-      }).join('');
-      colores.querySelectorAll('button').forEach((b) => b.onclick = () => {
-        if (b.classList.contains('plata')) return upsell('Todos los colores');
-        datos.color = b.dataset.c;
-        colores.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
-        C.aplicarColor(b.dataset.c);
-      });
-      const propio = q('[data-propio]');
-      if (!premColor) { propio.disabled = true; bloquear(q('[data-propio-wrap]'), 'Color personalizado'); }
-      else propio.oninput = () => {
-        datos.color = propio.value;
-        colores.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
-        C.aplicarColor(propio.value);
-      };
-    }
-    q('[data-guardar]').onclick = (ev) => C.accion(ev.target, async () => {
-      const p = { avatar: datos.avatar, color: datos.color || '' };
-      if (datos.foto !== undefined) p.foto = datos.foto;
-      el.querySelectorAll('[data-k]').forEach((i) => { p[i.dataset.k] = i.value; });
-      await K.rpc('guardar_perfil', { p });
-      await K.refrescar();
-      if (opts.alGuardar) opts.alGuardar();
-    }, '✅ Perfil guardado');
-
-    // Preferencias
-    q('[data-tema]').querySelectorAll('button').forEach((b) => {
-      b.classList.toggle('on', b.dataset.t === tema);
-      b.onclick = () => {
-        C.guardar('tema', b.dataset.t);
-        try { localStorage.setItem('barb:tema', b.dataset.t); } catch (e) { /* nada */ }
-        C.aplicarTema(b.dataset.t);
-        q('[data-tema]').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
-      };
-    });
-    const pushTxt = async () => {
-      const on = await K.pushActivo();
-      q('[data-push]').textContent = on ? '✅ Activas en este celular' : (K.esIOS() && !K.instalada() ? 'En iPhone: instala la app (Compartir → Agregar a inicio)' : 'Desactivadas');
-      q('[data-activar]').textContent = on ? 'Reactivar' : 'Activar';
-    };
-    pushTxt();
-    q('[data-activar]').onclick = (ev) => C.accion(ev.target, async () => { await K.activarPush(); await pushTxt(); }, '🔔 Notificaciones activadas');
-
-    q('[data-clave]').onclick = (ev) => {
-      const c1 = q('[data-c1]').value, c2 = q('[data-c2]').value;
-      if (c1 !== c2) return C.toast('Las claves no coinciden');
-      C.accion(ev.target, async () => { await K.cambiarClave(c1); await K.refrescar(); q('[data-c1]').value = q('[data-c2]').value = ''; perfil(el, opts); }, '🔑 Clave cambiada');
-    };
+    if (global.CFX_PERFIL) global.CFX_PERFIL.montar(q('[data-pf]'), ad);
     if (q('[data-plan]')) plan(q('[data-plan]'));
     q('[data-tour]').onclick = () => opts.tour && opts.tour(true);
     q('[data-salir]').onclick = async () => { if (await C.confirmar('¿Cerrar sesión en este celular?', { si: 'Cerrar sesión' })) { await K.salir(); location.replace(C.raiz()); } };
-    if (q('[data-borrar]')) q('[data-borrar]').onclick = async () => {
-      if (!await C.confirmar('Se borrarán tu cuenta y tus horas futuras. No se puede deshacer.', { titulo: 'Eliminar mi cuenta', si: 'Eliminar', peligro: true })) return;
-      try { await K.rpc('eliminar_mi_cuenta'); await K.salir(); location.replace(C.raiz()); } catch (e) { C.toast('⚠️ ' + e.message); }
-    };
   }
 
   /* ---------- Recorrido inicial ---------- */
