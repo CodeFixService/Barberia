@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.36'::text $$;
+language sql immutable as $$ select '2.37'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -4162,13 +4162,8 @@ begin
   if lib is distinct from v then
     insert into public.app_settings (key, value) values ('version_liberada', v)
     on conflict (key) do update set value = excluded.value;
-    -- Si ya hay gente usando la app, se les avisa por push (en una instalación nueva, no).
-    if lib is not null or exists (select 1 from public.profiles where role <> 'admin') then
-      insert into public.avisos (de, para, tipo, titulo, cuerpo, url)
-      select null, p.id, 'aviso', '💈 Nueva versión ' || v || ' de la app', public.notas_version() || ' Se actualiza sola.', 'actualizar'
-      from public.profiles p where not p.suspended;
-      get diagnostics n = row_count;
-    end if;
+    -- El aviso "🚀 Nueva versión disponible" lo manda cfx_avisar_version (núcleo) con las notas que se escriben al liberar
+    -- en el Centro de Mando (una sola vez por versión, igual en las 7 apps).
     insert into public.actualizaciones (version, notas, avisados) values (v, public.notas_version(), n);
   end if;
   return n;
@@ -4747,6 +4742,28 @@ begin
   return n;
 end $$;
 
+-- ---------- Nueva versión disponible: push a todos al liberar (una sola vez por versión) ----------
+-- La llama el Centro de Mando después de liberar (Apps → Liberar) con las notas que se escriben ahí.
+create table if not exists public.cfx_versiones (version text primary key, notas text not null default '', avisados int not null default 0, creado timestamptz not null default now());
+alter table public.cfx_versiones enable row level security;
+create or replace function public.cfx_avisar_version(p_version text, p_notas text default '', p_app text default '') returns int
+language plpgsql security definer set search_path = '' as $$
+declare u uuid; n int := 0; v text := trim(coalesce(p_version, '')); nt text := left(trim(coalesce(p_notas, '')), 140);
+begin
+  perform public.cfx_es_admin();
+  if v !~ '^[0-9]+(\.[0-9]+){0,3}$' then raise exception 'Versión no válida'; end if;
+  if exists (select 1 from public.cfx_versiones where version = v) then return 0; end if;
+  for u in select * from public.cfx_destinatarios('todos') loop
+    perform public.cfx_avisar(u, '🚀 Nueva versión disponible', left(coalesce(nullif(trim(p_app), '') || ' ', '') || 'v' || v || case when nt <> '' then ' · ' || nt else '' end || '. Se actualiza sola al abrirla.', 240));
+    n := n + 1;
+  end loop;
+  insert into public.cfx_versiones (version, notas, avisados) values (v, nt, n);
+  perform public.cfx_anotar('version', 'v' || v || ' avisada a ' || n);
+  return n;
+end $$;
+revoke execute on function public.cfx_avisar_version(text, text, text) from public, anon;
+grant execute on function public.cfx_avisar_version(text, text, text) to authenticated;
+
 -- ---------- Keys de Premium (de un solo uso). Se guardan cifradas: el código completo solo se ve al crearlas. ----------
 create or replace function public.cfx_keys_crear(p_n int, p_rol text, p_dias int, p_nota text default '') returns jsonb
 language plpgsql security definer set search_path = '' as $$
@@ -5282,7 +5299,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_cupones', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_pagos', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_cupones', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_pagos', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;

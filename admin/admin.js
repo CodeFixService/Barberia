@@ -80,7 +80,7 @@
     let html = '';
     if (web && s.db_version && s.db_version !== web) html += '<div class="banner alerta"><div class="grow"><b>🗄️ La base de datos es la versión ' + esc(s.db_version) + ' y la app la ' + esc(web) + '</b><br>' +
       '<span class="chico">Se actualiza sola en máximo 10 minutos (no borra datos).</span></div></div>';
-    if (!(await K.pushActivo())) html += '<div class="banner marca" data-cfx-push><div class="grow"><b>🔔 Activa las notificaciones</b><br><span class="chico">Para enterarte al tiro de los pagos por revisar.</span></div><button class="small" id="bPush">Activar</button></div>';
+    if (!(await K.pushActivo())) html += '<div class="cfx-av-tarj no-ico" data-cfx-push style="--cfx-color:var(--brand,var(--marca,#b8862b))"><span class="cfx-av-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21a2 2 0 0 0 4 0"/></svg></span><div><b>Activa los avisos</b><small>Para enterarte al tiro de los pagos por revisar.</small></div><button type="button" class="cfx-av-si" id="bPush">Activar</button></div>';
     const pct = Math.round(uso.db_bytes / uso.limite * 100);
     html += '<div class="stats">' +
       '<div class="card"><small>Barberías</small><b>' + s.barberias + '</b><small>⭐ ' + s.barberias_premium + ' Premium</small></div>' +

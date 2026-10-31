@@ -109,10 +109,11 @@
     if (await K.pushActivo()) return;
     if (C.leer('pushNo', 0) > Date.now()) return;
     const d = document.createElement('div');
-    d.className = 'banner marca'; d.dataset.cfxPush = '';
-    d.innerHTML = '<div class="grow"><b>🔔 Activa las notificaciones</b><br><span class="chico">' +
-      (K.esIOS() && !K.instalada() ? 'En iPhone: Compartir → "Agregar a inicio" y abre la app desde ahí.' : 'Para saber al tiro cuando confirmen tu hora o te escriban.') +
-      '</span></div><button class="small">Activar</button><button class="small gris" aria-label="Ahora no" style="background:transparent;color:inherit;border:0">✕</button>';
+    // Tarjeta chica y descartable (la misma del núcleo): ícono, texto, Activar y ✕.
+    d.className = 'cfx-av-tarj no-ico'; d.dataset.cfxPush = ''; d.style.setProperty('--cfx-color', 'var(--brand, var(--marca, #b8862b))');
+    d.innerHTML = '<span class="cfx-av-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21a2 2 0 0 0 4 0"/></svg></span>' +
+      '<div><b>Activa los avisos</b><small>' + (K.esIOS() && !K.instalada() ? 'En iPhone: Compartir → "Agregar a inicio" y abre la app desde ahí.' : 'Para saber al tiro cuando confirmen tu hora o te escriban.') + '</small></div>' +
+      '<button type="button" class="cfx-av-si">Activar</button><button type="button" class="cfx-av-x" aria-label="Ahora no"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>';
     const [bOn, bNo] = d.querySelectorAll('button');
     bOn.onclick = () => C.accion(bOn, async () => { await K.activarPush(); d.remove(); }, '🔔 Notificaciones activadas');
     bNo.onclick = () => { C.guardar('pushNo', Date.now() + 3 * 864e5); d.remove(); };
