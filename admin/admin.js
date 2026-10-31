@@ -366,15 +366,17 @@
     // v2.1: el socio ve solo lo que sus permisos le dejan (nunca socios ni notificaciones).
     const PERM = { socios: 'admin', reglas: 'ajustes', push: 'admin' };
     const ve = (s) => !PERM[s[0]] || (PERM[s[0]] === 'admin' ? esAdmin : permiso(PERM[s[0]]));
-    AJ = window.CFX_AJUSTES.montar($('v-ajustes'), SECCIONES.filter(ve).map((s) => ({ k: s[0], ico: s[1], t: s[2], d: s[3], abrir: (z) => { zona = z; return abrirAjuste(s[0]); } })),
+    // QR para barberías abre su propia ventana (no una hoja vacía debajo).
+    AJ = window.CFX_AJUSTES.montar($('v-ajustes'), SECCIONES.filter(ve).map((s) => (s[0] === 'qr' ? { k: 'qr', ico: s[1], t: s[2], d: s[3], accion: () => qrRegistro() }
+      : { k: s[0], ico: s[1], t: s[2], d: s[3], abrir: (z) => { zona = z; return abrirAjuste(s[0]); } })),
       { arriba: '<p class="muted chico" style="margin:0 0 10px">Precios, planes, textos, avisos a todos, pagos Premium y versiones se manejan en el Centro de Mando.</p>' });
   }
   const seccion = () => zona;
   async function abrirAjuste(s) {
     if (!zona || !zona.isConnected) { mostrar('ajustes'); return AJ.abrir(s); }
     ajustes = await K.ajustes();
-    ({ socios: secSocios, qr: () => { pintarAjustes(); qrRegistro(); }, reglas: secReglas, push: secPush, calificaciones: secCalif, registro: secRegistro,
-      cuenta: () => P.perfil(seccion(), { tour: () => {} }) })[s]();
+    ({ socios: secSocios, qr: () => qrRegistro(), reglas: secReglas, push: secPush, calificaciones: secCalif, registro: secRegistro,
+      cuenta: () => window.CFX_PERFIL.montar(seccion()) })[s]();
   }
 
   const REGLAS = [

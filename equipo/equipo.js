@@ -675,8 +675,16 @@
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbenos']
     ];
-    el.innerHTML = '<div class="menu-grid cfx-grilla cfx-aj">' + items.map((i) => '<button data-s="' + i[0] + '"><span>' + i[1] + '</span>' + i[2] + '<small>' + esc(i[3]) + '</small></button>').join('') + '</div>';
-    el.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { history.pushState(null, '', '#' + b.dataset.s); abrirSeccion(b.dataset.s); });
+    // Menú Más común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (seccion()).
+    // Mi cuenta (perfil) y Soporte ya vienen en el menú común (Configuración y Cuenta y ayuda).
+    const G = dueno() ? { negocio: 'Tu barbería', horario: 'Tu barbería', tiempos: 'Tu barbería', servicios: 'Tu barbería', links: 'Tu barbería', ofertas: 'Tu barbería', equipo: 'Tu barbería', enlace: 'Tu barbería',
+      caja: 'Ventas y clientes', estadisticas: 'Ventas y clientes', resumen: 'Ventas y clientes', volver: 'Ventas y clientes', calificaciones: 'Ventas y clientes',
+      plan: 'Tu plan', invitar: 'Tu plan', verificar: 'Tu plan', respaldo: 'Configuración' } : {};
+    const K2 = { plan: 'premium', invitar: 'invitar' };
+    const L = items.filter((i) => i[0] !== 'perfil' && i[0] !== 'soporte').map((i) => ({ k: K2[i[0]] || i[0], ico: i[1], t: i[2], d: i[3], grupo: G[i[0]] || 'Tu trabajo', accion: () => abrirSeccion(i[0]) }))
+      .concat([{ k: 'tour', ico: '🧭', t: 'Ver el recorrido', grupo: 'Cuenta y ayuda', accion: () => P.tour(pasos(), true) }]);
+    if (!el.querySelector('.cfx-aj-w')) el.innerHTML = '';
+    window.CFX_MENU.montar(el, L, { perfil: { alGuardar: () => { yo = K.cuenta; } } });
   }
   // Respaldo de la barbería en Excel (núcleo: respaldo.js).
   function secRespaldo() {
@@ -686,13 +694,14 @@
       '<div class="btns"><button id="bRespaldo">⬇️ Descargar respaldo (Excel)</button></div></div>';
     $('bRespaldo').onclick = () => C.accion($('bRespaldo'), async () => CFX_RESPALDO.excel('respaldo-' + bar().nombre, await K.rpc('mi_respaldo')), '💾 Respaldo descargado');
   }
+  // Cada sección se abre en una hoja desde abajo (núcleo), encima del menú Más, que no se mueve.
+  // Si la sección se vuelve a dibujar (p. ej. después de guardar), usa la misma hoja.
+  let hojaSec = null;
   function seccion(titulo) {
-    const el = $('v-mas');
-    el.innerHTML = '<div class="flex" style="margin-bottom:12px"><button class="icono" id="bVolver" aria-label="Volver">←</button><h2 style="margin:0;font-size:19px">' + titulo + '</h2></div><div id="secZona"></div>';
-    $('bVolver').onclick = () => { history.replaceState(null, '', '#mas'); mas(); };
-    $('bVolver').dataset.sinAtras = '';  // este Volver ya sabe a dónde ir
-    scrollTo(0, 0);
-    return $('secZona');
+    if (hojaSec && hojaSec.titulo === titulo && hojaSec.h.d.isConnected) { hojaSec.h.zona.innerHTML = ''; return hojaSec.h.zona; }
+    const h = window.CFX_MENU.hoja(titulo);
+    hojaSec = { titulo, h };
+    return h.zona;
   }
   async function abrirSeccion(s) {
     if (s === 'soporte') { if (window.CFX_AYUDA) window.CFX_AYUDA.chat(); return; }  // chat común de soporte (llega al Centro de Mando)
@@ -700,13 +709,13 @@
     if (s === 'verificar') { CFX_VERIFICAR.abrir({ rpc: K.rpc }); return; }
     const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'resumen', 'invitar', 'respaldo'];
     if (!dueno() && soloDueno.includes(s)) { mas(); return; }
-    if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); }
+    if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); mas(); }
     const F = { equipo: secEquipo, servicios: secServicios, ofertas: secOfertas, estadisticas: secEstadisticas, negocio: secNegocio, horario: secHorario, links: secLinks,
       respaldo: secRespaldo, caja, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
       milink: () => P.compartir({ el: seccion('🔳 Mi link y QR'), link: K.linkBarberia(bar().codigo, yo.id), archivo: 'qr-' + primerNombre(yo.nombre),
         texto: 'Con este link o QR tus clientes reservan <b>directo contigo</b> en ' + esc(bar().nombre) + ' (sin cuenta o con su cuenta).',
         mensaje: '💈 Reserva tu hora conmigo en ' + bar().nombre }), plan: () => P.plan(seccion('💎 Mi plan')),
-      perfil: () => P.perfil(seccion('👤 Mi cuenta'), { tour: (f) => P.tour(pasos(), f), alGuardar: () => { yo = K.cuenta; } }) };
+      perfil: () => window.CFX_PERFIL.abrir() };
     if (F[s]) F[s]();
   }
 

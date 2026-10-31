@@ -130,7 +130,7 @@
     nombre: () => K.cuenta.nombre, correo: () => K.cuenta.email,
     sub: () => { const a = K.cuenta; return ROL[a.role] + (a.barberia ? ' · ' + a.barberia.nombre : '') + (a.is_premium ? ' · ⭐ Premium' : ''); },
     foto: () => K.cuenta.foto || '',
-    guardarFoto: async (f) => { fotoNueva = f ? await C.imagen(f, 220, 0.75) : ''; },
+    guardarFoto: async (f) => { fotoNueva = f ? await C.imagen(f, 360, 0.82, 38000) : ''; },
     iconos: C.EMOJIS, icono: () => K.cuenta.avatar,
     campos: () => { const a = K.cuenta, cli = a.role === 'client'; return [{ k: 'telefono', t: 'WhatsApp', tipo: 'tel', ph: '+56 9 1234 5678', v: a.telefono || '' }]
       .concat(cli ? [{ k: 'cumple', t: 'Cumpleaños (opcional, para saludos y promos)', tipo: 'date', v: a.cumple || '' }] : [])
@@ -160,22 +160,25 @@
     }
   };
 
+  // Página Perfil = menú Más común del núcleo (CFX_MENU): perfil arriba, opciones en lista que se abren en una hoja desde abajo.
   async function perfil(el, opts) {
     opts = opts || {};
     const a = K.cuenta;
     const esCliente = a.role === 'client';
-    const ad = { alGuardar: async () => { if (opts.alGuardar) await opts.alGuardar(); } };
-    el.innerHTML = '<div data-pf></div>' + (opts.extraPerfil ? '<div class="card">' + opts.extraPerfil + '</div>' : '') +
-      ((a.role === 'owner' || esCliente) ? '<div data-plan></div>' : '') +
-      '<div class="card"><h2>❓ Ayuda</h2><div class="btns" style="margin-top:0">' +
-      (esCliente && a.barberia && a.barberia.whatsapp ? '<a class="btn wsp" target="_blank" rel="noopener" href="' + C.wa(a.barberia.whatsapp, 'Hola, tengo una consulta sobre la app') + '">💬 WhatsApp de la barbería</a>' : '') +
-      '<button class="gris" data-tour>🧭 Ver el recorrido</button><a class="btn gris" href="' + C.raiz() + 'legal.html">📄 Términos y privacidad</a></div></div>' +
-      '<div class="card"><div class="btns" style="margin-top:0"><button class="gris" data-salir>🚪 Cerrar sesión</button></div></div>';
+    // Lo propio de Barbería queda escondido en la página y se muestra dentro de su hoja (favorito y plan siguen funcionando igual).
+    el.innerHTML = '<div data-menu></div>' + (opts.extraPerfil ? '<div class="card cfx-oc" data-fav>' + opts.extraPerfil + '</div>' : '') +
+      ((a.role === 'owner' || esCliente) ? '<div class="cfx-oc" data-plan></div>' : '');
     const q = (x) => el.querySelector(x);
-    if (global.CFX_PERFIL) global.CFX_PERFIL.montar(q('[data-pf]'), ad);
     if (q('[data-plan]')) plan(q('[data-plan]'));
-    q('[data-tour]').onclick = () => opts.tour && opts.tour(true);
-    q('[data-salir]').onclick = async () => { if (await C.confirmar('¿Cerrar sesión en este celular?', { si: 'Cerrar sesión' })) { await K.salir(); location.replace(C.raiz()); } };
+    const wsp = esCliente && a.barberia && a.barberia.whatsapp;
+    const items = [
+      q('[data-fav]') && { k: 'favorito', ico: '❤️', t: 'Barbero favorito', d: 'Se elige solo al agendar', grupo: 'Configuración', nodo: q('[data-fav]') },
+      q('[data-plan]') && { k: 'premium', ico: '⭐', t: a.is_premium ? 'Mi plan Premium' : 'Hazte Premium', dato: a.is_premium ? 'Premium' : 'Free', grupo: 'Tu plan', nodo: q('[data-plan]') },
+      wsp && { k: 'wsp', ico: '💬', t: 'WhatsApp de la barbería', grupo: 'Cuenta y ayuda', accion: () => window.open(C.wa(a.barberia.whatsapp, 'Hola, tengo una consulta sobre la app'), '_blank', 'noopener') },
+      { k: 'tour', ico: '🧭', t: 'Ver el recorrido', grupo: 'Cuenta y ayuda', accion: () => opts.tour && opts.tour(true) },
+      { k: 'terminos', ico: '📄', t: 'Términos y privacidad', grupo: 'Cuenta y ayuda', ir: C.raiz() + 'legal.html' }
+    ];
+    if (global.CFX_MENU) global.CFX_MENU.montar(q('[data-menu]'), items, { perfil: { alGuardar: async () => { if (opts.alGuardar) await opts.alGuardar(); } } });
   }
 
   /* ---------- Recorrido inicial ---------- */
