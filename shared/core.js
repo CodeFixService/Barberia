@@ -8,7 +8,7 @@
     location.replace(cfg.SITIO + location.pathname.replace(/^\/Barberia\//i, '') + location.search + location.hash);
   }
   const ZONA = cfg.ZONA || 'America/Santiago';
-  const VERSION = '2.33';
+  const VERSION = '2.34';
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
