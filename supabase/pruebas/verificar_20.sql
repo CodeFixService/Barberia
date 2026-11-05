@@ -7,7 +7,7 @@ begin
   if not coalesce(c, false) then raise exception 'FALLO: %', msg; end if;
   raise notice 'OK: %', msg;
 end $$;
-select pg_temp.ok(public.db_version() = '2.51', 'base en versión 2.36');
+select pg_temp.ok(public.db_version() = '2.52', 'base en versión 2.36');
 select pg_temp.ok((select count(*) from public.barberias) >= 1 and (select count(*) from public.reservas) >= 5, 'barberías y horas se conservan');
 select pg_temp.ok((select count(*) from public.calificaciones) >= 1 and (select count(*) from public.pagos) >= 1, 'calificaciones y pagos se conservan');
 select pg_temp.ok(not exists (select 1 from public.barberias where registro_solo or referida_por is not null), 'las barberías antiguas no quedan como registradas solas');
