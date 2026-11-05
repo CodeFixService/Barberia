@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.48'::text $$;
+language sql immutable as $$ select '2.49'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -4981,6 +4981,34 @@ begin
 end $$;
 revoke all on function public.cfx_servidor() from public, anon;
 grant execute on function public.cfx_servidor() to authenticated;
+
+-- ---------- Actualizar la base ahora (núcleo 2.31, igual en las 7 apps) ----------
+-- El Centro de Mando lo usa cuando una base quedó atrás ("se está actualizando sola" que no avanza).
+-- Programa una tarea de un solo uso (en máx. 1 minuto, sin el límite de tiempo de la app) que corre auto_actualizar() y anota
+-- su resultado en cfx_registro ('auto'): así se ve la causa real si falla (la tarea de cada 10 min siempre figura "ok").
+drop function if exists public.cfx_actualizar_ahora();
+create or replace function public.cfx_actualizar_ahora(p_programar boolean default true) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare prog text := 'ok'; t jsonb := '[]'; ult jsonb;
+begin
+  perform public.cfx_es_admin();
+  if p_programar then begin
+    execute $q$ select cron.schedule('cfx-ahora', '* * * * *', $c$do $d$ declare r text; begin r := public.auto_actualizar(); perform public.cfx_anotar('auto', r); end $d$; select cron.unschedule('cfx-ahora')$c$) $q$;
+  exception when others then prog := sqlerrm;
+  end; else prog := ''; end if;
+  begin
+    execute $q$ select coalesce(jsonb_agg(jsonb_build_object('nombre', j.jobname, 'activa', j.active, 'cada', j.schedule, 'ultima', r.end_time, 'ok', r.status = 'succeeded', 'error', left(r.return_message, 160)) order by j.jobname), '[]')
+      from cron.job j left join lateral (select end_time, status, return_message from cron.job_run_details d where d.jobid = j.jobid order by d.runid desc limit 1) r on true
+      where j.jobname ~ 'auto|ahora' $q$ into t;
+  exception when others then t := '[]';
+  end;
+  select coalesce(jsonb_agg(jsonb_build_object('detalle', detalle, 'creado', creado) order by id desc), '[]') into ult
+    from (select * from public.cfx_registro where accion = 'auto' order by id desc limit 3) q;
+  if p_programar then perform public.cfx_anotar('version', 'Actualizar base ahora: ' || left(prog, 200)); end if;
+  return jsonb_build_object('programada', prog, 'tareas', t, 'ultimos', ult, 'hora', now());
+end $$;
+revoke all on function public.cfx_actualizar_ahora(boolean) from public, anon;
+grant execute on function public.cfx_actualizar_ahora(boolean) to authenticated;
 -- ---------------------------------------------------------------------
 -- CodeFix · Ayuda (igual en las 6 apps; lo reparte nucleo/sincronizar.py).
 --   1) Puente al Centro de Mando: los avisos importantes (pagos por revisar, mensajes de soporte) le llegan al tiro
