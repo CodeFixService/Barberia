@@ -24,7 +24,7 @@ select pg_temp.ok((select revoked from public.licenses where key = 'BARB-SIN-USA
 select pg_temp.ok((select premium_until > now() + interval '20 days' from public.profiles where email = 'dueno@b.cl'), 'el Premium vigente se conserva');
 select pg_temp.ok((select count(*) from public.pagos where comprobante is null and nota like '%antiguo%') = 1, 'el "Ya pagué" pendiente pasó a Pagos');
 select pg_temp.ok((public.ajustes_publicos() -> 'links_premium' -> 'cliente' -> 's1' ->> 'url') = 'https://mpago.la/cliente', 'el link de Premium cliente pasó a Precios y links');
-select pg_temp.ok(public.db_version() = '2.54', 'base en versión 2.36');
+select pg_temp.ok(public.db_version() = '2.55', 'base en versión 2.36');
 -- Las funciones nuevas funcionan con los datos antiguos
 select set_config('request.jwt.claim.sub', (select id::text from public.profiles where email = 'dueno@b.cl'), false);
 set role authenticated;
