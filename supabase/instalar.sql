@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.66'::text $$;
+language sql immutable as $$ select '2.67'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -5659,7 +5659,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_brechas', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_mensajes', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -5776,6 +5776,254 @@ begin
 end $$;
 revoke all on function public.cfx_errores_borrar(bigint) from public, anon;
 grant execute on function public.cfx_errores_borrar(bigint) to authenticated;
+-- ---------- Módulos enchufables (C19): se prenden y apagan desde el Centro de Mando → Mis aplicaciones → 🧩 Módulos ----------
+-- Cada app dice qué módulos tiene con el gancho cfx_modulos_app() → text[] (si no lo tiene: ninguno). Por defecto quedan prendidos.
+insert into public.cfx_config (clave, valor) values ('modulos', '{}') on conflict (clave) do nothing;
+
+create or replace function public.cfx_modulos_de_app() returns text[]
+language plpgsql stable security definer set search_path = '' as $$
+declare r text[];
+begin
+  if to_regprocedure('public.cfx_modulos_app()') is null then return '{}'; end if;
+  execute 'select public.cfx_modulos_app()' into r;
+  return coalesce(r, '{}');
+end $$;
+
+create or replace function public.cfx_modulo(p_clave text) returns boolean
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  return p_clave = any(public.cfx_modulos_de_app())
+    and coalesce(((select valor from public.cfx_config where clave = 'modulos') ->> p_clave)::boolean, true);
+end $$;
+
+-- Para la app (esconde lo apagado): {"chat": true, ...}
+create or replace function public.cfx_modulos() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  return coalesce((select jsonb_object_agg(k, public.cfx_modulo(k)) from unnest(public.cfx_modulos_de_app()) k), '{}');
+end $$;
+
+-- Para el Centro de Mando: con nombre y para qué sirve.
+create or replace function public.cfx_modulos_admin() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  perform public.cfx_es_admin();
+  return coalesce((select jsonb_agg(jsonb_build_object('clave', k, 'nombre', coalesce(c.nombre, k), 'detalle', coalesce(c.detalle, ''),
+      'activo', public.cfx_modulo(k)) order by o)
+    from unnest(public.cfx_modulos_de_app()) with ordinality u(k, o)
+    left join (values ('chat', '💬 Chat', 'Mensajes entre personas: 3 seguidos sin respuesta, 100 al día, bloquear y reportar.'),
+                      ('calificaciones', '⭐ Calificaciones', 'El cliente califica al negocio y el negocio al cliente.'),
+                      ('cupones', '🏷️ Cupones', 'Códigos de descuento del negocio para sus clientes.'),
+                      ('sellos', '🎟️ Tarjeta de sellos', 'Cada compra suma un sello; al completar la meta, premio.')) c(clave, nombre, detalle) on c.clave = k), '[]');
+end $$;
+
+create or replace function public.cfx_modulo_guardar(p_clave text, p_activo boolean) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.cfx_es_admin();
+  if not coalesce(p_clave = any(public.cfx_modulos_de_app()), false) then raise exception 'Esta app no tiene ese módulo'; end if;
+  insert into public.cfx_config (clave, valor) values ('modulos', jsonb_build_object(p_clave, coalesce(p_activo, true)))
+  on conflict (clave) do update set valor = public.cfx_config.valor || excluded.valor;
+  perform public.cfx_anotar('módulo', p_clave || case when coalesce(p_activo, true) then ' prendido' else ' apagado' end);
+  return public.cfx_modulos_admin();
+end $$;
+
+revoke all on function public.cfx_modulos_de_app(), public.cfx_modulo(text) from public, anon, authenticated;
+revoke all on function public.cfx_modulos(), public.cfx_modulos_admin(), public.cfx_modulo_guardar(text, boolean) from public, anon;
+grant execute on function public.cfx_modulos() to anon, authenticated;
+grant execute on function public.cfx_modulos_admin(), public.cfx_modulo_guardar(text, boolean) to authenticated;
+-- ---------- Chat entre personas (C14): las mismas reglas en todas las apps (módulo 'chat') ----------
+-- Reglas: hasta N mensajes seguidos sin respuesta (el gancho decide N; null = sin límite, p. ej. el admin), 100 al día,
+-- bloquear (ninguno de los dos escribe), reportar (le llega al admin) y borrar la conversación (para los dos).
+-- Ganchos que pone cada app que usa el chat (y 'chat' en cfx_modulos_app()):
+--   cfx_chat_puede(a, b) boolean         ¿a puede escribirle a b?
+--   cfx_chat_seguidos(a, b) int          mensajes seguidos sin respuesta (null = sin límite)
+--   cfx_chat_quien(u) jsonb              {"nombre": ..., "rol": ...} para la lista y los reportes
+--   cfx_chat_aviso(para, de, texto) void push al que recibe (con el link a la conversación)
+--   cfx_chat_suspender(u) void           el admin suspende una cuenta reportada
+create table if not exists public.cfx_mensajes (
+  id      uuid primary key default gen_random_uuid(),
+  de      uuid not null references auth.users (id) on delete cascade,
+  para    uuid not null references auth.users (id) on delete cascade,
+  texto   text not null check (char_length(texto) between 1 and 1000),
+  creado  timestamptz not null default now(),
+  leido   timestamptz
+);
+create index if not exists cfx_mensajes_par_idx on public.cfx_mensajes (least(de, para), greatest(de, para), creado desc);
+create index if not exists cfx_mensajes_para_idx on public.cfx_mensajes (para) where leido is null;
+create index if not exists cfx_mensajes_de_idx on public.cfx_mensajes (de, creado);
+create index if not exists cfx_mensajes_creado_idx on public.cfx_mensajes (creado);
+create table if not exists public.cfx_bloqueos (
+  quien   uuid not null references auth.users (id) on delete cascade,
+  a       uuid not null references auth.users (id) on delete cascade,
+  creado  timestamptz not null default now(),
+  primary key (quien, a)
+);
+create table if not exists public.cfx_reportes (
+  id        uuid primary key default gen_random_uuid(),
+  quien     uuid not null references auth.users (id) on delete cascade,
+  a         uuid not null references auth.users (id) on delete cascade,
+  mensaje   uuid references public.cfx_mensajes (id) on delete set null,
+  motivo    text not null,
+  extracto  text not null default '',
+  resuelto  boolean not null default false,
+  creado    timestamptz not null default now()
+);
+alter table public.cfx_mensajes enable row level security;
+alter table public.cfx_bloqueos enable row level security;
+alter table public.cfx_reportes enable row level security;
+revoke all on public.cfx_mensajes, public.cfx_bloqueos, public.cfx_reportes from anon, authenticated;
+
+create or replace function public.cfx_msg_listo() returns uuid
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then raise exception 'Inicia sesión primero'; end if;
+  if not public.cfx_modulo('chat') then raise exception 'El chat no está disponible en esta app'; end if;
+  return auth.uid();
+end $$;
+
+create or replace function public.cfx_msg_bloqueado(p_uno uuid, p_otro uuid) returns boolean
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  return exists (select 1 from public.cfx_bloqueos x where (x.quien = p_uno and x.a = p_otro) or (x.quien = p_otro and x.a = p_uno));
+end $$;
+
+-- Cuántos me quedan seguidos con "otro": {"restantes": n, "limite": n} (null = sin límite).
+create or replace function public.cfx_msg_restantes(p_otro uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare u uuid := public.cfx_msg_listo(); lim int := public.cfx_chat_seguidos(u, p_otro); n int;
+begin
+  if lim is null then return jsonb_build_object('restantes', null, 'limite', null); end if;
+  select count(*) into n from public.cfx_mensajes m where m.de = u and m.para = p_otro
+    and m.creado > coalesce((select max(x.creado) from public.cfx_mensajes x where x.de = p_otro and x.para = u), '-infinity');
+  return jsonb_build_object('restantes', greatest(0, lim - n), 'limite', lim);
+end $$;
+
+-- Enviar: {"ok": true, "id", "restantes"} o {"ok": false, "error"}.
+create or replace function public.cfx_msg_enviar(p_para uuid, p_texto text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare u uuid := public.cfx_msg_listo(); t text := trim(coalesce(p_texto, '')); lim int; r jsonb; i uuid;
+begin
+  if t = '' then return jsonb_build_object('ok', false, 'error', 'Escribe un mensaje'); end if;
+  if char_length(t) > 1000 then return jsonb_build_object('ok', false, 'error', 'Máximo 1000 caracteres por mensaje'); end if;
+  if p_para is null or not coalesce(public.cfx_chat_puede(u, p_para), false) then
+    return jsonb_build_object('ok', false, 'error', 'No puedes escribirle a esta cuenta');
+  end if;
+  lim := public.cfx_chat_seguidos(u, p_para);
+  if lim is not null then
+    if public.cfx_msg_bloqueado(u, p_para) then return jsonb_build_object('ok', false, 'error', 'La conversación está bloqueada'); end if;
+    if (public.cfx_msg_restantes(p_para) ->> 'restantes')::int <= 0 then
+      return jsonb_build_object('ok', false, 'error', case when lim = 1
+        then 'Envías 1 mensaje a la vez. Espera la respuesta para escribir de nuevo.'
+        else 'Ya enviaste ' || lim || ' mensajes seguidos. Espera la respuesta para escribir de nuevo.' end);
+    end if;
+    if (select count(*) from public.cfx_mensajes where de = u and creado > now() - interval '1 day') >= 100 then
+      return jsonb_build_object('ok', false, 'error', 'Llegaste al máximo de 100 mensajes por día');
+    end if;
+  end if;
+  insert into public.cfx_mensajes (de, para, texto) values (u, p_para, t) returning id into i;
+  perform public.cfx_chat_aviso(p_para, u, t);
+  r := public.cfx_msg_restantes(p_para);
+  return jsonb_build_object('ok', true, 'id', i, 'restantes', r -> 'restantes');
+end $$;
+
+-- Mis conversaciones: [{otro, nombre, rol, ultimo, ultimo_at, mio, no_leidos, bloqueado}] (las 100 más recientes).
+create or replace function public.cfx_msg_lista() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare u uuid := public.cfx_msg_listo();
+begin
+  return coalesce((with z as (select case when m.de = u then m.para else m.de end as otro, m.texto, m.creado, m.de = u as mio
+                               from public.cfx_mensajes m where m.de = u or m.para = u),
+                          l as (select distinct on (otro) * from z order by otro, creado desc),
+                          t as (select * from l order by creado desc limit 100)
+    select jsonb_agg(jsonb_build_object('otro', t.otro, 'nombre', coalesce(q.v ->> 'nombre', 'Cuenta'), 'rol', coalesce(q.v ->> 'rol', ''),
+      'ultimo', t.texto, 'ultimo_at', t.creado, 'mio', t.mio,
+      'no_leidos', (select count(*) from public.cfx_mensajes x where x.de = t.otro and x.para = u and x.leido is null),
+      'bloqueado', exists (select 1 from public.cfx_bloqueos b where b.quien = u and b.a = t.otro)) order by t.creado desc)
+    from t cross join lateral (select public.cfx_chat_quien(t.otro) as v) q), '[]');
+end $$;
+
+create or replace function public.cfx_msg_sin_leer() returns int
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if auth.uid() is null or not public.cfx_modulo('chat') then return 0; end if;
+  return (select count(*)::int from public.cfx_mensajes where para = auth.uid() and leido is null);
+end $$;
+
+-- Una conversación (las últimas 200; marca como leídos los recibidos): [{id, mio, texto, creado, leido}].
+create or replace function public.cfx_msg_hilo(p_otro uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare u uuid := public.cfx_msg_listo();
+begin
+  update public.cfx_mensajes set leido = now() where de = p_otro and para = u and leido is null;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'mio', m.de = u, 'texto', m.texto, 'creado', m.creado, 'leido', m.leido) order by m.creado)
+    from (select * from public.cfx_mensajes x where (x.de = u and x.para = p_otro) or (x.de = p_otro and x.para = u)
+          order by x.creado desc limit 200) m), '[]');
+end $$;
+
+create or replace function public.cfx_msg_bloquear(p_otro uuid, p_bloquear boolean) returns void
+language plpgsql security definer set search_path = '' as $$
+declare u uuid := public.cfx_msg_listo();
+begin
+  if p_otro is null or p_otro = u then raise exception 'Cuenta no válida'; end if;
+  if p_bloquear then insert into public.cfx_bloqueos (quien, a) values (u, p_otro) on conflict do nothing;
+  else delete from public.cfx_bloqueos where quien = u and a = p_otro; end if;
+end $$;
+
+create or replace function public.cfx_msg_reportar(p_mensaje uuid, p_motivo text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare u uuid := public.cfx_msg_listo(); m public.cfx_mensajes;
+begin
+  select * into m from public.cfx_mensajes where id = p_mensaje and para = u;
+  if m.id is null then return jsonb_build_object('ok', false, 'error', 'Mensaje no encontrado'); end if;
+  if (select count(*) from public.cfx_reportes where quien = u and creado > now() - interval '1 day') >= 10 then
+    return jsonb_build_object('ok', false, 'error', 'Máximo 10 reportes por día');
+  end if;
+  insert into public.cfx_reportes (quien, a, mensaje, motivo, extracto)
+  values (u, m.de, m.id, left(coalesce(nullif(trim(p_motivo), ''), 'Sin motivo'), 300), left(m.texto, 300));
+  perform public.cfx_avisar_admin('🚩 Nuevo reporte en el chat', left(m.texto, 100));
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- Borra la conversación completa (para los dos).
+create or replace function public.cfx_msg_borrar(p_otro uuid) returns int
+language plpgsql security definer set search_path = '' as $$
+declare u uuid := public.cfx_msg_listo(); n int;
+begin
+  delete from public.cfx_mensajes where (de = u and para = p_otro) or (de = p_otro and para = u);
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+-- Administrador: reportes sin resolver y resolverlos (descartar o suspender a la cuenta reportada).
+create or replace function public.cfx_msg_reportes() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  perform public.cfx_es_admin();
+  return coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'motivo', r.motivo, 'extracto', r.extracto, 'creado', r.creado,
+      'quien', coalesce(public.cfx_chat_quien(r.quien) ->> 'nombre', ''), 'a', coalesce(public.cfx_chat_quien(r.a) ->> 'nombre', ''),
+      'quien_email', (select email from auth.users where id = r.quien), 'a_email', (select email from auth.users where id = r.a)) order by r.creado desc)
+    from public.cfx_reportes r where not r.resuelto), '[]');
+end $$;
+
+create or replace function public.cfx_msg_resolver(p_id uuid, p_suspender boolean) returns void
+language plpgsql security definer set search_path = '' as $$
+declare r public.cfx_reportes;
+begin
+  perform public.cfx_es_admin();
+  update public.cfx_reportes set resuelto = true where id = p_id and not resuelto returning * into r;
+  if r.id is null then raise exception 'El reporte ya fue atendido'; end if;
+  if p_suspender then perform public.cfx_chat_suspender(r.a); end if;
+  perform public.cfx_anotar('reporte chat', case when p_suspender then 'suspendida ' else 'descartado ' end || coalesce((select email from auth.users where id = r.a), ''));
+end $$;
+
+revoke all on function public.cfx_msg_listo(), public.cfx_msg_bloqueado(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.cfx_msg_restantes(uuid), public.cfx_msg_enviar(uuid, text), public.cfx_msg_lista(), public.cfx_msg_sin_leer(),
+  public.cfx_msg_hilo(uuid), public.cfx_msg_bloquear(uuid, boolean), public.cfx_msg_reportar(uuid, text), public.cfx_msg_borrar(uuid),
+  public.cfx_msg_reportes(), public.cfx_msg_resolver(uuid, boolean) from public, anon;
+grant execute on function public.cfx_msg_restantes(uuid), public.cfx_msg_enviar(uuid, text), public.cfx_msg_lista(), public.cfx_msg_sin_leer(),
+  public.cfx_msg_hilo(uuid), public.cfx_msg_bloquear(uuid, boolean), public.cfx_msg_reportar(uuid, text), public.cfx_msg_borrar(uuid),
+  public.cfx_msg_reportes(), public.cfx_msg_resolver(uuid, boolean) to authenticated;
 
 -- ---------- Seguridad (A7): lo que puede hacer alguien sin cuenta (anon) y los buckets de archivos ----------
 -- Va al final del núcleo: así alcanza a todas las funciones de la app.
