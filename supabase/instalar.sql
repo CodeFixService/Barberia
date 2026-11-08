@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.68'::text $$;
+language sql immutable as $$ select '2.69'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -4313,7 +4313,7 @@ begin
     'Registro', (select coalesce(jsonb_agg(to_jsonb(a) order by a.created_at), '[]') from public.auditoria a));
 end $$;
 
-create or replace function public.cfx_limpieza() returns jsonb
+create or replace function public.cfx_limpieza_app() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 begin
   perform public.cfx_es_admin();
@@ -4328,7 +4328,7 @@ begin
         and coalesce(devolucion, '') <> 'pendiente' and not (abono_destino = 'saldo' and saldo_hasta > now()))));
 end $$;
 
-create or replace function public.cfx_limpiar(p_clave text) returns int
+create or replace function public.cfx_limpiar_app(p_clave text) returns int
 language plpgsql security definer set search_path = '' as $$
 begin
   perform public.cfx_es_admin();
@@ -4336,8 +4336,8 @@ begin
 end $$;
 
 revoke all on function public.recordar_catalogo() from public, anon, authenticated;
-revoke all on function public.ocultar_aviso(uuid), public.chat_borrar(uuid), public.mi_respaldo(), public.cfx_es_admin(), public.cfx_respaldo(), public.cfx_limpieza(), public.cfx_limpiar(text) from public, anon;
-grant execute on function public.ocultar_aviso(uuid), public.chat_borrar(uuid), public.mi_respaldo(), public.cfx_respaldo(), public.cfx_limpieza(), public.cfx_limpiar(text) to authenticated;
+revoke all on function public.ocultar_aviso(uuid), public.chat_borrar(uuid), public.mi_respaldo(), public.cfx_es_admin(), public.cfx_respaldo(), public.cfx_limpieza_app(), public.cfx_limpiar_app(text) from public, anon;
+grant execute on function public.ocultar_aviso(uuid), public.chat_borrar(uuid), public.mi_respaldo(), public.cfx_respaldo(), public.cfx_limpieza_app(), public.cfx_limpiar_app(text) to authenticated;
 
 
 
@@ -5659,7 +5659,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_mensajes', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_mensajes', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -5814,7 +5814,8 @@ begin
     left join (values ('chat', '💬 Chat', 'Mensajes entre personas: 3 seguidos sin respuesta, 100 al día, bloquear y reportar.'),
                       ('calificaciones', '⭐ Calificaciones', 'El cliente califica al negocio y el negocio al cliente.'),
                       ('cupones', '🏷️ Cupones', 'Códigos de descuento del negocio para sus clientes.'),
-                      ('sellos', '🎟️ Tarjeta de sellos', 'Cada compra suma un sello; al completar la meta, premio.')) c(clave, nombre, detalle) on c.clave = k), '[]');
+                      ('sellos', '🎟️ Tarjeta de sellos', 'Cada compra suma un sello; al completar la meta, premio.'),
+                      ('carrito', '🛒 Recordar carrito', 'Si el cliente deja productos en el carrito, al día siguiente le llega un aviso (una vez).')) c(clave, nombre, detalle) on c.clave = k), '[]');
 end $$;
 
 create or replace function public.cfx_modulo_guardar(p_clave text, p_activo boolean) returns jsonb
@@ -6298,6 +6299,223 @@ revoke all on function public.cfx_desc_guardar(text, int, date), public.cfx_desc
   public.cfx_sellos_guardar(int, text), public.cfx_sellos_mios(uuid) from public, anon;
 grant execute on function public.cfx_desc_guardar(text, int, date), public.cfx_desc_borrar(uuid), public.cfx_desc_lista(), public.cfx_desc_validar(uuid, text),
   public.cfx_sellos_guardar(int, text), public.cfx_sellos_mios(uuid) to authenticated;
+-- ---------- 🛒 Carrito y 🚚 despacho (C17) ----------
+-- Carrito guardado en la nube (para recordarle al cliente lo que dejó) y el cálculo del despacho por comuna.
+-- Ganchos que pone cada app que lo usa (y 'carrito' en cfx_modulos_app() para el recordatorio):
+--   cfx_carrito_puede(u, negocio) bool           ¿u puede guardar carrito en ese negocio? (es su cliente, puede comprar)
+--   cfx_carrito_aviso(cliente, negocio, n) bool  manda el recordatorio (push); false = no corresponde (plan, vacaciones…)
+-- La app usa: cfx_carrito_vaciar (al crear el pedido), cfx_carritos_recordar (pg_cron, cada hora), cfx_carrito_borrar (al borrar una cuenta).
+-- Despacho (sin tabla: cada app guarda su { retiro, gratis_desde, zonas: [{comuna, precio}] } donde quiera):
+--   cfx_despacho_limpio(p) → la misma config revisada (o error claro) · cfx_despacho_costo(cfg, entrega, direccion, monto) → {costo, comuna} o {error}
+create table if not exists public.cfx_carritos (
+  cliente     uuid not null references auth.users (id) on delete cascade,
+  negocio     uuid not null,
+  items       jsonb not null default '[]'::jsonb,
+  actualizado timestamptz not null default now(),
+  avisado     timestamptz,
+  primary key (cliente, negocio)
+);
+create index if not exists cfx_carritos_negocio_idx on public.cfx_carritos (negocio);
+create index if not exists cfx_carritos_aviso_idx on public.cfx_carritos (actualizado) where avisado is null;
+alter table public.cfx_carritos enable row level security;
+revoke all on public.cfx_carritos from anon, authenticated;
+
+-- El cliente guarda su carrito (hasta 50 productos). Vacío = se borra.
+create or replace function public.cfx_carrito_guardar(p_negocio uuid, p_items jsonb) returns void
+language plpgsql security definer set search_path = '' as $$
+declare l jsonb := '[]'::jsonb; it jsonb; ok boolean := false;
+begin
+  if auth.uid() is null or p_negocio is null or to_regprocedure('public.cfx_carrito_puede(uuid,uuid)') is null then return; end if;
+  execute 'select public.cfx_carrito_puede($1, $2)' into ok using auth.uid(), p_negocio;
+  if not coalesce(ok, false) or jsonb_typeof(coalesce(p_items, '[]'::jsonb)) <> 'array' then return; end if;
+  for it in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) limit 50 loop
+    continue when jsonb_typeof(it) <> 'object' or coalesce(it ->> 'clave', '') = '';
+    l := l || jsonb_build_object('clave', left(it ->> 'clave', 60), 'cant', least(greatest(coalesce((it ->> 'cant')::int, 1), 1), 99), 'nombre', left(it ->> 'nombre', 80));
+  end loop;
+  if jsonb_array_length(l) = 0 then
+    delete from public.cfx_carritos where cliente = auth.uid() and negocio = p_negocio;
+  else
+    insert into public.cfx_carritos (cliente, negocio, items) values (auth.uid(), p_negocio, l)
+    on conflict (cliente, negocio) do update set items = excluded.items, actualizado = now(), avisado = null
+      where public.cfx_carritos.items is distinct from excluded.items;
+  end if;
+end $$;
+
+create or replace function public.cfx_carrito_vaciar(p_cliente uuid, p_negocio uuid) returns void
+language sql security definer set search_path = '' as $$ delete from public.cfx_carritos where cliente = p_cliente and negocio = p_negocio $$;
+create or replace function public.cfx_carrito_borrar(p_cuenta uuid) returns void
+language sql security definer set search_path = '' as $$ delete from public.cfx_carritos where cliente = p_cuenta or negocio = p_cuenta $$;
+
+-- Cada hora: carritos sin pedir de hace más de 20 horas (y menos de 4 días) reciben UN aviso, de 10 a 20 h de Chile.
+create or replace function public.cfx_carritos_recordar() returns int
+language plpgsql security definer set search_path = '' as $$
+declare r record; n int := 0; ok boolean; h int := extract(hour from now() at time zone 'America/Santiago');
+begin
+  if h < 10 or h > 20 or not public.cfx_modulo('carrito') or to_regprocedure('public.cfx_carrito_aviso(uuid,uuid,integer)') is null then return 0; end if;
+  for r in select * from public.cfx_carritos where avisado is null and actualizado < now() - interval '20 hours' and actualizado > now() - interval '4 days' limit 500 loop
+    execute 'select public.cfx_carrito_aviso($1, $2, $3)' into ok using r.cliente, r.negocio, jsonb_array_length(r.items);
+    update public.cfx_carritos set avisado = now() where cliente = r.cliente and negocio = r.negocio;
+    if coalesce(ok, false) then n := n + 1; end if;
+  end loop;
+  return n;
+end $$;
+
+-- ---------- Despacho por comuna ----------
+create or replace function public.cfx_comuna_norm(t text) returns text
+language sql immutable set search_path = '' as $$ select lower(trim(translate(coalesce(t, ''), 'ÁÉÍÓÚÜÑáéíóúüñ', 'AEIOUUNaeiouun'))) $$;
+
+create or replace function public.cfx_despacho_limpio(p jsonb) returns jsonb
+language plpgsql immutable set search_path = '' as $$
+declare z jsonb; l jsonb := '[]'::jsonb; vistas text[] := '{}';
+begin
+  if jsonb_typeof(p) is distinct from 'object' then raise exception 'Datos no válidos'; end if;
+  for z in select * from jsonb_array_elements(case when jsonb_typeof(p -> 'zonas') = 'array' then p -> 'zonas' else '[]'::jsonb end) loop
+    if coalesce(trim(z ->> 'comuna'), '') = '' then continue; end if;
+    if length(z ->> 'comuna') > 40 then raise exception 'Nombre de comuna muy largo'; end if;
+    if coalesce((z ->> 'precio')::numeric, -1) not between 0 and 200000 then raise exception 'El despacho a % debe costar entre $0 y $200.000', z ->> 'comuna'; end if;
+    if public.cfx_comuna_norm(z ->> 'comuna') = any (vistas) then raise exception 'La comuna % está repetida', z ->> 'comuna'; end if;
+    vistas := vistas || public.cfx_comuna_norm(z ->> 'comuna');
+    l := l || jsonb_build_object('comuna', trim(z ->> 'comuna'), 'precio', round((z ->> 'precio')::numeric));
+  end loop;
+  if jsonb_array_length(l) > 80 then raise exception 'Máximo 80 comunas'; end if;
+  if not coalesce((p ->> 'retiro')::boolean, true) and jsonb_array_length(l) = 0 then raise exception 'Activa el retiro en tienda o agrega al menos una comuna de despacho'; end if;
+  if coalesce((p ->> 'gratis_desde')::numeric, 0) not between 0 and 10000000 then raise exception 'Monto de despacho gratis no válido'; end if;
+  return jsonb_build_object('retiro', coalesce((p ->> 'retiro')::boolean, true), 'gratis_desde', round(coalesce((p ->> 'gratis_desde')::numeric, 0)), 'zonas', l);
+end $$;
+
+-- La comuna va al final de la dirección ("…, Ñuñoa"). Sin zonas: se coordina con el negocio ($0 aquí).
+create or replace function public.cfx_despacho_costo(p_cfg jsonb, p_entrega text, p_direccion text, p_monto numeric) returns jsonb
+language plpgsql immutable set search_path = '' as $$
+declare c jsonb := coalesce(p_cfg, '{}'::jsonb); com text; z jsonb;
+begin
+  if p_entrega is distinct from 'despacho' or jsonb_array_length(coalesce(c -> 'zonas', '[]'::jsonb)) = 0 then return jsonb_build_object('costo', 0, 'comuna', null); end if;
+  com := public.cfx_comuna_norm(regexp_replace(coalesce(p_direccion, ''), '^.*,', ''));
+  select e into z from jsonb_array_elements(c -> 'zonas') e where public.cfx_comuna_norm(e ->> 'comuna') = com limit 1;
+  if z is null then return jsonb_build_object('error', 'Esta tienda no despacha a esa comuna. Elige otra comuna o retiro en tienda.'); end if;
+  return jsonb_build_object('comuna', z ->> 'comuna', 'costo',
+    case when coalesce((c ->> 'gratis_desde')::numeric, 0) > 0 and p_monto >= (c ->> 'gratis_desde')::numeric then 0 else greatest(0, coalesce((z ->> 'precio')::numeric, 0)) end);
+end $$;
+
+revoke all on function public.cfx_carrito_vaciar(uuid, uuid), public.cfx_carrito_borrar(uuid), public.cfx_carritos_recordar(), public.cfx_comuna_norm(text),
+  public.cfx_despacho_limpio(jsonb), public.cfx_despacho_costo(jsonb, text, text, numeric) from public, anon, authenticated;
+revoke all on function public.cfx_carrito_guardar(uuid, jsonb) from public, anon;
+grant execute on function public.cfx_carrito_guardar(uuid, jsonb) to authenticated;
+do $$
+begin
+  perform cron.unschedule(jobid) from cron.job where jobname = 'cfx-carritos';
+  perform cron.schedule('cfx-carritos', '23 * * * *', 'select public.cfx_carritos_recordar()');
+exception when others then
+  raise notice 'Recordatorio de carritos no programado (%).', sqlerrm;
+end $$;
+-- ---------- 🧹 Limpieza (C18): una sola lista para el Centro de Mando → Mis aplicaciones → ↻ → 🧹 Respaldo y limpieza ----------
+-- Lo del núcleo (claves "n_…") se borra solo cada noche si la limpieza automática está prendida (por defecto sí).
+-- Lo propio de cada app viene del gancho cfx_limpieza_app() → [{clave, titulo, detalle, filas}] y cfx_limpiar_app(clave) → int
+-- (la app ya lo borra sola con su propio horario; aquí se puede borrar a mano).
+create index if not exists cfx_registro_creado_idx on public.cfx_registro (creado);
+create index if not exists cfx_errores_ultimo_idx on public.cfx_errores (ultimo);
+insert into public.cfx_config (clave, valor) values ('limpieza_auto', 'true') on conflict (clave) do nothing;
+
+create or replace function public.cfx_limpieza_nucleo() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  return jsonb_build_array(
+    jsonb_build_object('clave', 'n_registro', 'titulo', 'Registro de cambios', 'detalle', 'Más de 180 días.', 'auto', true,
+      'filas', (select count(*) from public.cfx_registro where creado < now() - interval '180 days')),
+    jsonb_build_object('clave', 'n_errores', 'titulo', 'Errores de la app', 'detalle', 'Sin repetirse hace más de 30 días.', 'auto', true,
+      'filas', (select count(*) from public.cfx_errores where ultimo < now() - interval '30 days')),
+    jsonb_build_object('clave', 'n_reportes', 'titulo', 'Reportes del chat ya revisados', 'detalle', 'Más de 90 días.', 'auto', true,
+      'filas', (select count(*) from public.cfx_reportes where resuelto and creado < now() - interval '90 days')),
+    jsonb_build_object('clave', 'n_carritos', 'titulo', 'Carritos abandonados', 'detalle', 'Sin tocar hace más de 30 días.', 'auto', true,
+      'filas', (select count(*) from public.cfx_carritos where actualizado < now() - interval '30 days')));
+end $$;
+
+create or replace function public.cfx_limpiar_nucleo(p_clave text) returns int
+language plpgsql security definer set search_path = '' as $$
+declare n int := 0;
+begin
+  if p_clave = 'n_registro' then delete from public.cfx_registro where creado < now() - interval '180 days';
+  elsif p_clave = 'n_errores' then delete from public.cfx_errores where ultimo < now() - interval '30 days';
+  elsif p_clave = 'n_reportes' then delete from public.cfx_reportes where resuelto and creado < now() - interval '90 days';
+  elsif p_clave = 'n_carritos' then delete from public.cfx_carritos where actualizado < now() - interval '30 days';
+  else return 0; end if;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+create or replace function public.cfx_limpieza() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare a jsonb := '[]';
+begin
+  perform public.cfx_es_admin();
+  if to_regprocedure('public.cfx_limpieza_app()') is not null then
+    execute 'select public.cfx_limpieza_app()' into a;
+  end if;
+  return public.cfx_limpieza_nucleo() || coalesce(a, '[]');
+end $$;
+
+create or replace function public.cfx_limpiar(p_clave text) returns int
+language plpgsql security definer set search_path = '' as $$
+declare n int := 0;
+begin
+  perform public.cfx_es_admin();
+  if p_clave like 'n\_%' then
+    if not exists (select 1 from jsonb_array_elements(public.cfx_limpieza_nucleo()) x where x ->> 'clave' = p_clave) then raise exception 'Opción no válida'; end if;
+    n := public.cfx_limpiar_nucleo(p_clave);
+  elsif to_regprocedure('public.cfx_limpiar_app(text)') is not null then
+    execute 'select public.cfx_limpiar_app($1)' into n using p_clave;
+  else raise exception 'Opción no válida'; end if;
+  perform public.cfx_anotar('limpieza', p_clave || ': ' || coalesce(n, 0) || ' borrados');
+  return coalesce(n, 0);
+end $$;
+
+-- Cada noche (pg_cron 'cfx-limpieza'): borra lo del núcleo marcado "auto" y anota cuánto.
+create or replace function public.cfx_limpieza_auto() returns int
+language plpgsql security definer set search_path = '' as $$
+declare x jsonb; n int := 0;
+begin
+  if not coalesce(((select valor from public.cfx_config where clave = 'limpieza_auto') #>> '{}')::boolean, true) then return 0; end if;
+  for x in select * from jsonb_array_elements(public.cfx_limpieza_nucleo()) loop
+    if (x ->> 'auto')::boolean and (x ->> 'filas')::int > 0 then n := n + public.cfx_limpiar_nucleo(x ->> 'clave'); end if;
+  end loop;
+  insert into public.cfx_salud (clave, valor, cuando) values ('limpieza', jsonb_build_object('filas', n), now())
+  on conflict (clave) do update set valor = excluded.valor, cuando = excluded.cuando;
+  if n > 0 then perform public.cfx_anotar('limpieza automática', n || ' filas viejas borradas'); end if;
+  return n;
+end $$;
+
+-- Interruptor del Centro de Mando: { activo, ultima, filas }.
+create or replace function public.cfx_limpieza_auto_ver() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  perform public.cfx_es_admin();
+  return jsonb_build_object('activo', coalesce(((select valor from public.cfx_config where clave = 'limpieza_auto') #>> '{}')::boolean, true),
+    'ultima', (select cuando from public.cfx_salud where clave = 'limpieza'), 'filas', (select (valor ->> 'filas')::int from public.cfx_salud where clave = 'limpieza'));
+end $$;
+create or replace function public.cfx_limpieza_auto_guardar(p_activo boolean) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform public.cfx_es_admin();
+  insert into public.cfx_config (clave, valor) values ('limpieza_auto', to_jsonb(coalesce(p_activo, true)))
+  on conflict (clave) do update set valor = excluded.valor;
+  perform public.cfx_anotar('limpieza automática', case when coalesce(p_activo, true) then 'prendida' else 'apagada' end);
+  return public.cfx_limpieza_auto_ver();
+end $$;
+
+revoke all on function public.cfx_limpieza_nucleo(), public.cfx_limpiar_nucleo(text), public.cfx_limpieza_auto() from public, anon, authenticated;
+revoke all on function public.cfx_limpieza(), public.cfx_limpiar(text), public.cfx_limpieza_auto_ver(), public.cfx_limpieza_auto_guardar(boolean) from public, anon;
+grant execute on function public.cfx_limpieza(), public.cfx_limpiar(text), public.cfx_limpieza_auto_ver(), public.cfx_limpieza_auto_guardar(boolean) to authenticated;
+do $$
+begin
+  if to_regprocedure('public.cfx_limpieza_app()') is not null then revoke all on function public.cfx_limpieza_app() from public, anon, authenticated; end if;
+  if to_regprocedure('public.cfx_limpiar_app(text)') is not null then revoke all on function public.cfx_limpiar_app(text) from public, anon, authenticated; end if;
+end $$;
+do $$
+begin
+  perform cron.unschedule(jobid) from cron.job where jobname = 'cfx-limpieza';
+  perform cron.schedule('cfx-limpieza', '40 7 * * *', 'select public.cfx_limpieza_auto()');
+exception when others then
+  raise notice 'Limpieza automática no programada (%).', sqlerrm;
+end $$;
 
 -- ---------- Seguridad (A7): lo que puede hacer alguien sin cuenta (anon) y los buckets de archivos ----------
 -- Va al final del núcleo: así alcanza a todas las funciones de la app.
