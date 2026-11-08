@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.69'::text $$;
+language sql immutable as $$ select '2.70'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -5659,7 +5659,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_mensajes', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_mensajes', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -5707,6 +5707,11 @@ create table if not exists public.cfx_errores (
   con_cuenta boolean not null default false, creado timestamptz not null default now(), ultimo timestamptz not null default now());
 -- Salud: 'ping' (lo toca GitHub Actions para que Supabase no pause la base) y 'respaldo' (lo anota el respaldo diario).
 create table if not exists public.cfx_salud (clave text primary key, valor jsonb not null default '{}', cuando timestamptz not null default now());
+-- B13 Carga real: cuánto demora en abrir cada página en los teléfonos (carga.js, 1 vez por página y sesión). Por día y página; 30 días.
+create table if not exists public.cfx_cargas (dia date not null default current_date, pagina text not null, veces int not null default 0, ms bigint not null default 0,
+  lcp bigint not null default 0, con_lcp int not null default 0, lentas int not null default 0, cache int not null default 0, primary key (dia, pagina));
+alter table public.cfx_cargas enable row level security;
+revoke all on public.cfx_cargas from anon, authenticated;
 alter table public.cfx_errores enable row level security;
 alter table public.cfx_salud enable row level security;
 revoke all on public.cfx_errores, public.cfx_salud from anon, authenticated;
@@ -5730,6 +5735,26 @@ begin
     on conflict (firma) do nothing;
 end $$;
 grant execute on function public.cfx_error_anotar(text, text, text, text, text) to anon, authenticated;
+
+-- B13: sin cuenta también (la vitrina la abren clientes sin cuenta). Valores acotados, máximo 40 páginas por día y 1 fila por día y página.
+create or replace function public.cfx_carga_anotar(p_pagina text, p_ms int, p_lcp int default null, p_cache boolean default false)
+returns void language plpgsql security definer set search_path = '' as $$
+declare pg text := left(regexp_replace(lower(coalesce(p_pagina, '')), '[^a-z0-9/_.-]', '', 'g'), 60); m int := least(greatest(coalesce(p_ms, 0), 0), 60000);
+  l int := least(greatest(coalesce(p_lcp, 0), 0), 60000);
+begin
+  if pg = '' or m = 0 then return; end if;
+  if not exists (select 1 from public.cfx_cargas where dia = current_date and pagina = pg) then
+    if (select count(*) from public.cfx_cargas where dia = current_date) >= 40 then return; end if;
+    delete from public.cfx_cargas where dia < current_date - 30;
+  end if;
+  insert into public.cfx_cargas as c (dia, pagina, veces, ms, lcp, con_lcp, lentas, cache)
+    values (current_date, pg, 1, m, l, (l > 0)::int, (m > 3000)::int, coalesce(p_cache, false)::int)
+    on conflict (dia, pagina) do update set veces = c.veces + 1, ms = c.ms + excluded.ms, lcp = c.lcp + excluded.lcp, con_lcp = c.con_lcp + excluded.con_lcp,
+      lentas = c.lentas + excluded.lentas, cache = c.cache + excluded.cache
+    where c.veces < 100000;
+end $$;
+revoke all on function public.cfx_carga_anotar(text, int, int, boolean) from public;
+grant execute on function public.cfx_carga_anotar(text, int, int, boolean) to anon, authenticated;
 
 -- Marca de salud (solo la base: GitHub Actions la llama con la conexión del respaldo; ping la usa por dentro).
 create or replace function public.cfx_salud_marca(p_clave text, p_valor jsonb default '{}') returns void
@@ -5758,6 +5783,9 @@ begin
   return jsonb_build_object(
     'ping', (select cuando from public.cfx_salud where clave = 'ping'),
     'respaldo', (select valor || jsonb_build_object('cuando', cuando) from public.cfx_salud where clave = 'respaldo'),
+    'carga', coalesce((select jsonb_agg(c order by c.veces desc) from (select pagina, sum(veces)::int veces, (sum(ms) / nullif(sum(veces), 0))::int ms,
+        (sum(lcp) / nullif(sum(con_lcp), 0))::int lcp, sum(lentas)::int lentas, sum(cache)::int cache
+      from public.cfx_cargas where dia > current_date - 7 group by pagina order by sum(veces) desc limit 20) c), '[]'),
     'errores_24h', (select coalesce(sum(veces), 0) from public.cfx_errores where ultimo > now() - interval '24 hours'),
     'errores', coalesce((select jsonb_agg(to_jsonb(e) - 'firma' order by e.ultimo desc) from (select * from public.cfx_errores order by ultimo desc limit 100) e), '[]'));
 end $$;
