@@ -1,1 +1,1 @@
-{"version": "2.65", "notas": "🛡️ Más seguridad: textos y links de la pantalla pasan por un solo filtro (no se cuela código)"}
+{"version": "2.66", "notas": "🛡️ Más seguridad: tras 10 keys erróneas en una hora se bloquea el canje (antes no contaba)"}
