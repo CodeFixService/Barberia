@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.72'::text $$;
+language sql immutable as $$ select '2.73'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -5989,6 +5989,8 @@ language sql immutable as $$
          ('campanas', '📣 Campañas automáticas', 'Ofertas por notificación y correo a tus suscriptores.'),
          ('redes', '📲 Vender en redes', 'Pedir por WhatsApp, catálogo para Google e Instagram.'),
          ('webhooks', '🔗 Avisos a tu sistema', 'Cada pedido llega firmado a tu sistema o planilla (webhooks).'),
+         ('medicion', '📊 Medir anuncios', 'Meta Pixel y Google Analytics en tu tienda: mide qué anuncio te trae ventas.'),
+         ('dominio', '🌐 Dominio propio', 'Tu tienda en tu dirección (mitienda.cl) en vez del link de Órbita.'),
          ('reservas', '📅 Reservas', 'Agenda en línea para tus clientes.'),
          ('recordatorios', '⏰ Recordatorios', 'Avisos automáticos antes de cada cita o vencimiento.')
 $$;
@@ -6704,7 +6706,7 @@ revoke all on function public.cfx_desc_guardar(text, int, date), public.cfx_desc
 grant execute on function public.cfx_desc_guardar(text, int, date), public.cfx_desc_borrar(uuid), public.cfx_desc_lista(), public.cfx_desc_validar(uuid, text),
   public.cfx_sellos_guardar(int, text), public.cfx_sellos_mios(uuid) to authenticated;
 -- ---------- 🛒 Carrito y 🚚 despacho (C17) ----------
--- Carrito guardado en la nube (para recordarle al cliente lo que dejó) y el cálculo del despacho por comuna.
+-- Carrito guardado en la nube (para recordarle al cliente lo que dejó) y el cálculo del despacho por comuna y al resto de Chile (2.58).
 -- Ganchos que pone cada app que lo usa (y 'carrito' en cfx_modulos_app() para el recordatorio):
 --   cfx_carrito_puede(u, negocio) bool           ¿u puede guardar carrito en ese negocio? (es su cliente, puede comprar)
 --   cfx_carrito_aviso(cliente, negocio, n) bool  manda el recordatorio (push); false = no corresponde (plan, vacaciones…)
@@ -6773,7 +6775,7 @@ language sql immutable set search_path = '' as $$ select lower(trim(translate(co
 
 create or replace function public.cfx_despacho_limpio(p jsonb) returns jsonb
 language plpgsql immutable set search_path = '' as $$
-declare z jsonb; l jsonb := '[]'::jsonb; vistas text[] := '{}';
+declare z jsonb; l jsonb := '[]'::jsonb; vistas text[] := '{}'; rm text;
 begin
   if jsonb_typeof(p) is distinct from 'object' then raise exception 'Datos no válidos'; end if;
   for z in select * from jsonb_array_elements(case when jsonb_typeof(p -> 'zonas') = 'array' then p -> 'zonas' else '[]'::jsonb end) loop
@@ -6785,22 +6787,34 @@ begin
     l := l || jsonb_build_object('comuna', trim(z ->> 'comuna'), 'precio', round((z ->> 'precio')::numeric));
   end loop;
   if jsonb_array_length(l) > 80 then raise exception 'Máximo 80 comunas'; end if;
-  if not coalesce((p ->> 'retiro')::boolean, true) and jsonb_array_length(l) = 0 then raise exception 'Activa el retiro en tienda o agrega al menos una comuna de despacho'; end if;
+  -- Resto de Chile (regiones y comunas que no están en la lista): 'no' | 'fijo' (un precio) | 'por_pagar' (lo paga quien recibe al courier).
+  rm := coalesce(nullif(p #>> '{resto,modo}', ''), 'no');
+  if rm not in ('no', 'fijo', 'por_pagar') then raise exception 'Elige cómo despachas al resto de Chile'; end if;
+  if rm = 'fijo' and coalesce((p #>> '{resto,precio}')::numeric, -1) not between 0 and 200000 then raise exception 'El despacho al resto de Chile debe costar entre $0 y $200.000'; end if;
+  if not coalesce((p ->> 'retiro')::boolean, true) and jsonb_array_length(l) = 0 and rm = 'no' then raise exception 'Activa el retiro en tienda o agrega al menos una comuna de despacho'; end if;
   if coalesce((p ->> 'gratis_desde')::numeric, 0) not between 0 and 10000000 then raise exception 'Monto de despacho gratis no válido'; end if;
-  return jsonb_build_object('retiro', coalesce((p ->> 'retiro')::boolean, true), 'gratis_desde', round(coalesce((p ->> 'gratis_desde')::numeric, 0)), 'zonas', l);
+  return jsonb_build_object('retiro', coalesce((p ->> 'retiro')::boolean, true), 'gratis_desde', round(coalesce((p ->> 'gratis_desde')::numeric, 0)), 'zonas', l,
+    'resto', jsonb_build_object('modo', rm, 'precio', case when rm = 'fijo' then round((p #>> '{resto,precio}')::numeric) else 0 end));
 end $$;
 
--- La comuna va al final de la dirección ("…, Ñuñoa"). Sin zonas: se coordina con el negocio ($0 aquí).
+-- La comuna va al final de la dirección ("…, Ñuñoa"). Sin zonas ni resto de Chile: se coordina con el negocio ($0 aquí).
+-- Comuna fuera de la lista: con resto 'fijo' cobra ese precio; con 'por_pagar' $0 y por_pagar = true (lo paga quien recibe).
 create or replace function public.cfx_despacho_costo(p_cfg jsonb, p_entrega text, p_direccion text, p_monto numeric) returns jsonb
 language plpgsql immutable set search_path = '' as $$
-declare c jsonb := coalesce(p_cfg, '{}'::jsonb); com text; z jsonb;
+declare c jsonb := coalesce(p_cfg, '{}'::jsonb); com text; z jsonb; rm text := coalesce(nullif(p_cfg #>> '{resto,modo}', ''), 'no'); orig text;
+  gratis boolean := coalesce((p_cfg ->> 'gratis_desde')::numeric, 0) > 0 and p_monto >= (p_cfg ->> 'gratis_desde')::numeric;
 begin
-  if p_entrega is distinct from 'despacho' or jsonb_array_length(coalesce(c -> 'zonas', '[]'::jsonb)) = 0 then return jsonb_build_object('costo', 0, 'comuna', null); end if;
-  com := public.cfx_comuna_norm(regexp_replace(coalesce(p_direccion, ''), '^.*,', ''));
-  select e into z from jsonb_array_elements(c -> 'zonas') e where public.cfx_comuna_norm(e ->> 'comuna') = com limit 1;
-  if z is null then return jsonb_build_object('error', 'Esta tienda no despacha a esa comuna. Elige otra comuna o retiro en tienda.'); end if;
-  return jsonb_build_object('comuna', z ->> 'comuna', 'costo',
-    case when coalesce((c ->> 'gratis_desde')::numeric, 0) > 0 and p_monto >= (c ->> 'gratis_desde')::numeric then 0 else greatest(0, coalesce((z ->> 'precio')::numeric, 0)) end);
+  if p_entrega is distinct from 'despacho' or (jsonb_array_length(coalesce(c -> 'zonas', '[]'::jsonb)) = 0 and rm = 'no') then return jsonb_build_object('costo', 0, 'comuna', null); end if;
+  orig := left(trim(regexp_replace(coalesce(p_direccion, ''), '^.*,', '')), 60);
+  com := public.cfx_comuna_norm(orig);
+  select e into z from jsonb_array_elements(coalesce(c -> 'zonas', '[]'::jsonb)) e where public.cfx_comuna_norm(e ->> 'comuna') = com limit 1;
+  if z is null then
+    if com = '' or position(',' in coalesce(p_direccion, '')) = 0 then return jsonb_build_object('error', 'Escribe la dirección y la comuna de despacho'); end if;
+    if rm = 'fijo' then return jsonb_build_object('comuna', orig, 'costo', case when gratis then 0 else greatest(0, coalesce((c #>> '{resto,precio}')::numeric, 0)) end); end if;
+    if rm = 'por_pagar' then return jsonb_build_object('comuna', orig, 'costo', 0, 'por_pagar', true); end if;
+    return jsonb_build_object('error', 'Esta tienda no despacha a esa comuna. Elige otra comuna o retiro en tienda.');
+  end if;
+  return jsonb_build_object('comuna', z ->> 'comuna', 'costo', case when gratis then 0 else greatest(0, coalesce((z ->> 'precio')::numeric, 0)) end);
 end $$;
 
 revoke all on function public.cfx_carrito_vaciar(uuid, uuid), public.cfx_carrito_borrar(uuid), public.cfx_carritos_recordar(), public.cfx_comuna_norm(text),
