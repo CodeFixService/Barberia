@@ -1,0 +1,8 @@
+// Publicación en Cloudflare (Workers con archivos estáticos). No necesita compilación. "previews" = rama pruebas (CM → Apps → 🧪 Probar).
+// G24: faltaba este archivo (las ramas que no son main fallaban al compilar en Workers Builds).
+{
+  "name": "barberia",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./" },
+  "previews": {}
+}
