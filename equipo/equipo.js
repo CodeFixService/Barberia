@@ -321,7 +321,7 @@
     const lista = quien === '*' ? ids : [quien];
     if (vista === 'dia') {
       $('cTit').textContent = C.relativoDia(fechaSel) === C.fechaLarga(fechaSel) ? C.fechaLarga(fechaSel) : C.relativoDia(fechaSel) + ' · ' + C.diaCorto(fechaSel);
-      const cols = lista.map((id) => ({ f: fechaSel, barbero: id, titulo: esc(id === yo.id ? 'Yo' : (barbero(id) || {}).nombre || ''), hoy: fechaSel === C.hoy() }));
+      const cols = lista.map((id) => ({ f: fechaSel, barbero: id, titulo: esc(id === yo.id ? 'Yo' : ((barbero(id) || {}).nombre || '').split(' ')[0]), hoy: fechaSel === C.hoy() }));
       zona.innerHTML = '<div id="tl"></div>';
       A.timeline($('tl'), { cols, datos, horarios: horarios(), staff: true, verAnuladas, ancho: lista.length > 1 ? 120 : 200,
         alBloque: abrirReserva, alBloqueo: borrarBloqueo,
@@ -500,12 +500,27 @@
     const cliDe = () => clientes.find((c) => c.id && c.nombre.toLowerCase() === buscar.value.trim().toLowerCase());
     if (pre) { buscar.value = pre.nombre || ''; if (pre.invitado) h.q('[data-tel]').value = pre.telefono || ''; }
     buscar.oninput = () => { const c = cliDe(); h.q('[data-cli-info]').textContent = c ? '✅ Cliente con cuenta: le llegará un aviso' : 'Si no tiene cuenta, escribe su nombre igual.'; };
+    const recalcular = () => {
+      const bb = barbero(h.q('[data-b]') ? h.q('[data-b]').value : yo.id) || {};
+      h.q('[data-min]').value = A.duracion(bb, [...carro].map(servicio).filter(Boolean)) || '';
+    };
     h.qa('[data-s]').forEach((b) => b.onclick = () => {
       if (carro.has(b.dataset.s)) carro.delete(b.dataset.s); else carro.add(b.dataset.s);
       b.classList.toggle('on', carro.has(b.dataset.s));
-      const bb = barbero(h.q('[data-b]') ? h.q('[data-b]').value : yo.id) || {};
-      h.q('[data-min]').value = A.duracion(bb, [...carro].map(servicio).filter(Boolean)) || '';
+      recalcular();
     });
+    // 🎤 G20: "corte y barba para Juan mañana a las 5 con Pedro" llena cliente, servicios, día, hora y barbero.
+    if (window.Dictado) Dictado.montar(h, { ejemplo: 'Ej: corte para Juan mañana a las 5', datos: () => ({ servicios: B.servicios, clientes, barberos: dueno() ? B.barberos : [], hoy: C.hoy() }),
+      aplicar: (r) => {
+        let n = 0;
+        if (r.cliente) { buscar.value = r.cliente.nombre; buscar.oninput(); n++; }
+        if (r.barbero && h.q('[data-b]')) { h.q('[data-b]').value = r.barbero; n++; }
+        if (r.servicios.length) { carro.clear(); r.servicios.forEach((id) => carro.add(id)); h.qa('[data-s]').forEach((b) => b.classList.toggle('on', carro.has(b.dataset.s))); n++; }
+        if (r.fecha) { h.q('[data-f]').value = r.fecha; n++; }
+        if (r.hora) { h.q('[data-h]').value = r.hora; n++; }
+        recalcular();
+        return n;
+      } });
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
       if (!h.q('[data-h]').value) throw new Error('Elige la hora');
       const c = cliDe();
@@ -629,6 +644,21 @@
       h.qa('[data-s]').forEach((x) => x.classList.toggle('on', x === b));
     });
     h.q('[data-serv]').oninput = () => { servId = ''; h.qa('[data-s]').forEach((x) => x.classList.remove('on')); };
+    // 🎤 G20: "corte con barba 12 mil en efectivo para Juan, propina 2 mil" llena servicio, monto, medio, cliente y propina.
+    if (window.Dictado && !k) Dictado.montar(h, { ejemplo: plata ? 'Ej: corte 8 mil en efectivo' : 'Ej: corte en efectivo para Juan',
+      datos: () => ({ servicios: B.servicios, clientes, barberos: dueno() ? B.barberos : [], hoy: C.hoy() }),
+      aplicar: (r) => {
+        let n = 0;
+        const b = r.servicios[0] && h.q('[data-s="' + r.servicios[0] + '"]');
+        if (b) { b.click(); n++; }
+        if (r.monto != null && h.q('[data-monto]')) { h.q('[data-monto]').value = r.monto; n++; }
+        if (r.medio) { medio = r.medio; pintarMedio(); n++; }
+        if (r.barbero && h.q('[data-b]')) { h.q('[data-b]').value = r.barbero; n++; }
+        if (r.cliente || (r.propina && h.q('[data-prop]'))) h.q('details').open = true;
+        if (r.cliente) { h.q('[data-cli]').value = r.cliente.nombre; n++; }
+        if (r.propina && h.q('[data-prop]')) { h.q('[data-prop]').value = r.propina; n++; }
+        return n;
+      } });
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
       const cli = clientes.find((c) => c.id && c.nombre.toLowerCase() === h.q('[data-cli]').value.trim().toLowerCase());
       const p = { id: k ? k.id : '', servicio: h.q('[data-serv]').value, servicio_id: servId, medio,
@@ -691,7 +721,7 @@
     const z = seccion('💾 Respaldo');
     z.innerHTML = '<div class="card"><p>Descarga en Excel tus clientes, horas, servicios, caja, ofertas y calificaciones. Guárdalo donde quieras.</p>' +
       '<p class="muted chico">Los avisos y mensajes se borran solos a los 30 días (te avisamos antes). Tus horas, clientes y caja no.</p>' +
-      '<div class="btns"><button id="bRespaldo">⬇️ Descargar respaldo (Excel)</button></div></div>';
+      '<div class="btns"><button id="bRespaldo">⬇️ Descargar</button></div><p class="cfx-nota-btn">Un archivo Excel con todo: clientes, horas, servicios y caja.</p></div>';
     $('bRespaldo').onclick = () => C.accion($('bRespaldo'), async () => CFX_RESPALDO.excel('respaldo-' + bar().nombre, await K.rpc('mi_respaldo')), '💾 Respaldo descargado');
   }
   // Cada sección se abre en una hoja desde abajo (núcleo), encima del menú Más, que no se mueve.
@@ -915,7 +945,7 @@
         '<div class="hs' + (d.e === 'x' ? ' cerrado' : '') + '"><input type="time" step="900" data-i value="' + (d.i || '10:00') + '" aria-label="Abre"><input type="time" step="900" data-f value="' + (d.f || '20:00') + '" aria-label="Cierra">' +
         '<input type="time" step="900" data-ci value="' + (d.ci || '') + '" aria-label="Colación desde" placeholder="colación"><input type="time" step="900" data-cf value="' + (d.cf || '') + '" aria-label="Colación hasta"></div></div>';
     }).join('') + '<p class="muted chico">Por día: abre · cierra · colación desde · hasta (deja la colación vacía si no hay).</p>' +
-      '<div class="btns"><button type="button" class="small gris" data-copiar>Copiar el lunes a lun–vie</button><button type="button" class="small gris" data-todos>Copiar el lunes a todos</button></div>';
+      '<div class="btns"><button type="button" class="small gris" data-copiar>📋 Lun a vie</button><button type="button" class="small gris" data-todos>📋 Todos</button></div><p class="cfx-nota-btn">Copian el horario del lunes a los días de semana o a todos.</p>';
     el.querySelectorAll('[data-e]').forEach((s) => s.onchange = () => s.closest('.horario-dia').querySelector('.hs').classList.toggle('cerrado', s.value === 'x'));
     const copiar = (hasta) => {
       const l = el.querySelector('[data-d="0"]');
@@ -1148,7 +1178,7 @@
     const hm = (m) => (m >= 60 ? Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) : '') : m + ' min');
     z.innerHTML = '<div class="card"><p class="muted chico" style="margin-top:0">Cuando un cliente reserva contigo, se bloquea al tiro lo que te dura el servicio <b>más tu descanso</b>. ' +
       'La siguiente hora libre parte justo cuando terminas: así no quedan huecos.</p>' +
-      '<div class="row"><div><label>Descanso entre citas</label><select id="tDesc">' + opc([0, 5, 10, 15, 20, 25, 30, 45, 60], yo.descanso_min || 0, (v) => v ? v + ' min' : 'Sin descanso') + '</select></div>' +
+      '<div class="row apila"><div><label>Descanso entre citas</label><select id="tDesc">' + opc([0, 5, 10, 15, 20, 25, 30, 45, 60], yo.descanso_min || 0, (v) => v ? v + ' min' : 'Sin descanso') + '</select></div>' +
       '<div><label>Mis horas parten cada</label><select id="tPaso">' + opc([10, 15, 20, 30, 45, 60, 75, 90, 120], yo.paso_min || 15, hm) + '</select></div></div></div>' +
       '<div class="card"><h2>✂️ Cuánto me dura cada servicio</h2><p class="muted chico" style="margin-top:-6px">Déjalo vacío para usar la duración de la barbería.</p>' +
       (B.servicios.length ? B.servicios.map((sv) => '<div class="det-fila" style="align-items:center"><span>' + esc(sv.nombre) + ' <span class="muted chico">(barbería: ' + sv.duracion + ' min)</span></span>' +
@@ -1191,7 +1221,7 @@
         const act = ((b.pagos || {}).activo || 1) === n;
         return '<div class="card" style="box-shadow:none;margin:10px 0 0;padding:12px' + (act ? ';border-color:var(--brand)' : '') + '" data-pago="' + n + '">' +
           '<label class="check" style="margin:0"><input type="radio" name="pagoActivo" value="' + n + '"' + (act ? ' checked' : '') + '> <b>Link ' + n + '<span data-act-txt>' + (act ? ' · activo' : '') + '</span></b></label>' +
-          '<div class="row"><div><label>Monto</label><input data-pm type="number" inputmode="numeric" min="0" max="100000" placeholder="$" value="' + (pg.monto == null ? '' : pg.monto) + '"></div>' +
+          '<div class="row apila"><div><label>Monto</label><input data-pm type="number" inputmode="numeric" min="0" max="100000" placeholder="$" value="' + (pg.monto == null ? '' : pg.monto) + '"></div>' +
           '<div style="flex:2"><label>Link de pago <span class="opc">(Mercado Pago u otro)</span></label><input data-pl placeholder="https://…" value="' + esc(pg.link || '') + '"></div></div>' +
           '<label>Texto <span class="opc">(lo ve el cliente, ej. "Abono normal")</span></label><input data-px maxlength="120" value="' + esc(pg.texto || '') + '"></div>';
       }).join('') +

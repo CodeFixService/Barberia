@@ -9,6 +9,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="shared/vendor/bootstrap-utilities.min.css">
 <link rel="stylesheet" href="shared/core.css">
 <link rel="stylesheet" href="shared/tema.css">
 <style>
@@ -20,8 +21,6 @@
   .logo-grande.img { background-color: #fff; }
   .entrar h1 { text-align: center; font-size: 23px; margin: 0 0 4px; letter-spacing: -.02em; }
   .entrar .sub { text-align: center; color: var(--muted); font-size: 14.5px; margin: 0 0 16px; }
-  .ver-clave { position: relative; }
-  .ver-clave button { position: absolute; right: 6px; top: 6px; padding: 6px 10px; background: transparent; color: var(--muted); box-shadow: none; }
   .olvido { display: block; text-align: center; margin-top: 14px; font-size: 14.5px; }
   #cargando { text-align: center; margin-top: 30vh; color: var(--muted); }
 </style>
@@ -47,8 +46,7 @@
       <label for="email">Correo</label>
       <input id="email" type="email" autocomplete="username" inputmode="email" required placeholder="tu@correo.cl">
       <label for="clave">Clave</label>
-      <div class="ver-clave"><input id="clave" type="password" autocomplete="current-password" required placeholder="••••••">
-        <button type="button" id="bVer" aria-label="Mostrar clave">👁️</button></div>
+      <input id="clave" type="password" autocomplete="current-password" required placeholder="••••••"><!-- el ojito lo pone el núcleo (carga.js) -->
       <p class="err" id="eEntrar"></p>
       <button class="full grande" id="bEntrar">Entrar</button>
     </form>
@@ -106,7 +104,6 @@
   $('cargando').classList.add('hidden');
   $('cEntrar').classList.remove('hidden');
   $('email').value = C.leer('ultimoEmail', '');
-  $('bVer').onclick = () => { const i = $('clave'); i.type = i.type === 'password' ? 'text' : 'password'; };
   $('fEntrar').onsubmit = async (e) => {
     e.preventDefault();
     $('eEntrar').textContent = '';

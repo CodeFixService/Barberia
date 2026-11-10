@@ -90,7 +90,15 @@
     const adm = a.role === 'admin' || a.role === 'socio';
     window.CFX_AYUDA_PEND = Object.assign(window.CFX_AYUDA_PEND || {}, { rpc, app: 'barberia', admin: adm, socio: a.role === 'socio', premium: !!a.is_premium, id: a.id, hasta: a.premium_until,
       nombre: a.nombre, email: a.email, foto: a.foto || null, cuenta: adm ? '#cuenta' : '#perfil', panel: adm && !/\/admin\//.test(location.pathname) ? C.raiz() + 'admin/' : null,
-      salir: async () => { await salir(); location.replace(C.raiz()); } });
+      salir: async () => { await salir(); location.replace(C.raiz()); },
+      // 🔔 G20: la campana abre la ventana de avisos del núcleo (deslizar = borrar; tocar = texto completo con ‹ ›). "Enviados" sigue en Más → Avisos.
+      avisos: {
+        lista: async () => ((await rpc('mis_avisos')) || []).map((x) => ({ id: x.id, titulo: x.titulo, cuerpo: x.cuerpo, de: x.de, fecha: x.created_at, leido: !!x.visto_at,
+          url: !x.url || x.url === 'actualizar' ? '' : /^https?:/.test(x.url) ? x.url : '#' + x.url })),
+        leer: async (id) => { await rpc('marcar_vistos', { p_ids: [id] }); if (window.Avisos) window.Avisos.actualizar(); },
+        borrar: async (id) => { await rpc('ocultar_aviso', { p_id: id }); if (window.Avisos) window.Avisos.actualizar(); },
+        limpiar: async () => { await rpc('limpiar_avisos'); if (window.Avisos) window.Avisos.actualizar(); }
+      } });
     if (window.CFX_AYUDA) window.CFX_AYUDA.iniciar(window.CFX_AYUDA_PEND);
     return a;
   }

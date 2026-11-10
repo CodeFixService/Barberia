@@ -9,12 +9,15 @@
 <link rel="manifest" href="../manifest.webmanifest">
 <link rel="icon" href="../icons/icon-192.png">
 <link rel="apple-touch-icon" href="../icons/icon-192.png">
+<link rel="stylesheet" href="../shared/vendor/bootstrap-utilities.min.css">
 <link rel="stylesheet" href="../shared/core.css">
 <link rel="stylesheet" href="../shared/tema.css">
 <style>
   main { max-width: 1100px; }
   .barra-cal { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
   .barra-cal .fecha-tit { flex: 1; min-width: 140px; font-weight: 750; text-align: center; }
+  /* ≤380 px (G22): ‹ Hoy fecha › en una sola fila; filas .apila (Mis tiempos, Links de pago) una debajo de otra para que no se corten. */
+  @media (max-width: 380px) { .barra-cal { flex-wrap: nowrap; gap: 6px; } .barra-cal .fecha-tit { min-width: 0; font-size: 14.5px; } .row.apila { flex-direction: column; gap: 0; } }
   .pend { border-left: 4px solid var(--consultar); }
   .menu-mas { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
   .menu-mas button { flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px; border-radius: 18px; background: var(--card); color: var(--text);
@@ -26,6 +29,8 @@
   .horario-dia .hs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
   .horario-dia input, .horario-dia select { padding: 9px 10px; font-size: 14.5px; }
   .horario-dia .hs.cerrado { display: none; }
+  /* ≤380 px: día y Abierto/Cerrado en una fila arriba, las 4 horas abajo a todo el ancho (antes se cortaban: "10:0", "Abiert"). */
+  @media (max-width: 380px) { .horario-dia { grid-template-columns: 1fr; } .horario-dia > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 10px; } .horario-dia > div:first-child select { margin-top: 0 !important; width: auto; } .horario-dia input { padding: 9px 6px; } }
   .durs { display: flex; gap: 6px; flex-wrap: wrap; }
   .qr-img { width: 220px; max-width: 70%; display: block; margin: 10px auto; border-radius: 12px; }
   .orden button { padding: 4px 8px; font-size: 13px; }
@@ -59,6 +64,7 @@
 <script src="../shared/chat.js"></script>
 <script src="../shared/agenda.js"></script>
 <script src="../shared/perfil.js"></script>
+<script src="../shared/dictado.js"></script>
 <script src="equipo.js"></script>
 <script src="../shared/iconos.js"></script>
 <script src="../shared/instalar.js"></script>

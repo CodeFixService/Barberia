@@ -19,7 +19,7 @@
       '<span class="logo' + (logo ? ' img' : '') + '" style="' + C.fondo(logo) + '">' + (logo ? '' : '💈') + '</span>') +
       '<div class="tit"><b>' + esc(opts.titulo || b.nombre || 'Barbería') + '</b>' + (opts.sub ? '<small>' + opts.sub + '</small>' : '') + '</div>' +
       (opts.extra || '') +
-      '<button class="icono" id="bCampana" aria-label="Avisos">🔔<span class="num" id="nAvisos"></span></button>';
+      '<button class="icono" id="bCampana" aria-label="Avisos">🔔</button>';  // G20: el número lo pone la campana común (núcleo)
     document.body.prepend(h);
     h.querySelector('#bCampana').onclick = abrir;
     actualizar();
@@ -41,6 +41,7 @@
       if (r.avisos > antes.avisos && antes !== null && antes.avisos !== undefined && document.visibilityState === 'visible' && antes.cargado) {
         if (window.CFX_ANIM) window.CFX_ANIM.emergente({ titulo: 'Tienes un aviso nuevo', cuerpo: 'Tócalo para verlo' }); else C.toast('🔔 Tienes un aviso nuevo');
       }
+      if (r.avisos !== antes.avisos && window.CFX_AYUDA && window.CFX_AYUDA.avisos) window.CFX_AYUDA.avisos();  // globito de la campana común al día
       ultimo.cargado = true;
       oyentes.forEach((f) => { try { f(r, antes); } catch (e) { /* nada */ } });
     } catch (e) { /* sin red */ }
