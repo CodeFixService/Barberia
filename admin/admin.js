@@ -76,9 +76,9 @@
     try {
       [s, rep, barberias, uso] = await Promise.all([K.rpc('admin_resumen'), K.rpc('admin_reportes'), K.rpc('admin_barberias'), K.rpc('admin_uso')]);
     } catch (e) { el.innerHTML = '<div class="card err">' + esc(e.message) + '<br><span class="muted">La base de datos se actualiza sola en máximo 10 minutos.</span></div>'; return; }
-    try { web = String((await (await fetch(C.raiz() + 'version.json', { cache: 'no-store' })).json()).version); } catch (e) { /* sin red */ }
+    try { const v = await (await fetch(C.raiz() + 'version.json', { cache: 'no-store' })).json(); web = String(v.bd || v.version); } catch (e) { /* sin red */ }  // bd = versión de base que pide la app (no la de la app)
     let html = '';
-    if (web && s.db_version && s.db_version !== web) html += '<div class="banner alerta"><div class="grow"><b>🗄️ La base de datos es la versión ' + esc(s.db_version) + ' y la app la ' + esc(web) + '</b><br>' +
+    if (web && s.db_version && s.db_version !== web) html += '<div class="banner alerta"><div class="grow"><b>🗄️ La base de datos es la versión ' + esc(s.db_version) + ' y la app pide la ' + esc(web) + '</b><br>' +
       '<span class="chico">Se actualiza sola en máximo 10 minutos (no borra datos).</span></div></div>';
     if (!(await K.pushActivo())) html += '<div class="cfx-av-tarj no-ico" data-cfx-push style="--cfx-color:var(--brand,var(--marca,#b8862b))"><span class="cfx-av-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21a2 2 0 0 0 4 0"/></svg></span><div><b>Activa los avisos</b><small>Para enterarte al tiro de los pagos por revisar.</small></div><button type="button" class="cfx-av-si" id="bPush">Activar</button></div>';
     const pct = Math.round(uso.db_bytes / uso.limite * 100);
