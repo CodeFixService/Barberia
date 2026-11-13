@@ -1,1 +1,1 @@
-{"version": "2.81", "bd": "2.74", "notas": "Núcleo 2.65: base lista para entrar con QR desde el celular."}
+{"version": "2.82", "bd": "2.75", "notas": "🔑 Entra en el computador con el QR del celular. 🔒 Tras 3 claves malas, se entra con un enlace al correo."}

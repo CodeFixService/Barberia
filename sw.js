@@ -4,7 +4,7 @@
 const FILES = [
   './', 'index.html', 'legal.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'shared/core.css', 'shared/core.js', 'shared/vendor/bootstrap-utilities.min.css', 'shared/seguro.js', 'shared/vitrina.js', 'shared/datos.js', 'shared/carga.js', 'shared/ayuda.js', 'shared/premium.js', 'shared/humano.js', 'shared/verificar.js', 'shared/pagos.js', 'shared/respaldo.js', 'shared/voz.js', 'shared/fotos.js', 'shared/auto.js', 'shared/barra.js', 'shared/tema.css', 'shared/iconos.js', 'shared/instalar.js', 'shared/config.js', 'shared/cuenta.js', 'shared/avisos.js', 'shared/chat.js',
-  'shared/agenda.js', 'shared/perfil.js', 'shared/dictado.js', 'shared/vendor/supabase.js', 'shared/vendor/qrcode.js',
+  'shared/agenda.js', 'shared/perfil.js', 'shared/dictado.js', 'shared/vendor/supabase.js', 'shared/vendor/qrcode.js', 'shared/qr.js',
   'cliente/', 'cliente/index.html', 'cliente/cliente.js',
   'equipo/', 'equipo/index.html', 'equipo/equipo.js',
   'admin/', 'admin/index.html', 'admin/admin.js',

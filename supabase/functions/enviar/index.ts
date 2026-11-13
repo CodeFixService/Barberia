@@ -2,11 +2,12 @@
 //  1) Envía por push los avisos pendientes (la llaman el cron cada minuto y la base de datos al crear un aviso).
 //  2) Crea cuentas desde el panel ({accion: 'crear_usuario'}): Josué crea barberías; cada dueño, sus barberos y clientes.
 //  3) Restablece claves ({accion: 'restablecer_clave'}): Josué a cualquiera; el dueño a su gente.
+//  4) Entrar con QR ({accion: 'qr_entrar'}): el computador entra con la sesión que aprobó el celular.
 // Se despliega en Supabase → Edge Functions → nombre "enviar" (con "Verify JWT" apagado).
 import webpush from 'npm:web-push@3.6.7';
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 
-const VERSION = '1.0';
+const VERSION = '1.1';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -102,6 +103,17 @@ async function restablecerClave(jwt: string, b: { id?: string; password?: string
   return { ok: true };
 }
 
+// G32 d · 🔑 Entrar con QR: el celular aprobó; se canjea UNA vez y se entrega un enlace mágico de un solo uso al computador.
+async function qrEntrar(b: { token?: string; secreto?: string }) {
+  const s = db();
+  const { data: email, error } = await s.rpc('cfx_qr_canjear', { p_token: String(b.token || ''), p_secreto: String(b.secreto || '') });
+  if (error) return { ok: false, error: 'Actualiza la base de datos (falta Entrar con QR)' };
+  if (!email) return { ok: false, error: 'El código venció o ya se usó' };
+  const { data, error: e2 } = await s.auth.admin.generateLink({ type: 'magiclink', email: String(email) });
+  if (e2 || !data?.properties?.hashed_token) return { ok: false, error: 'No se pudo abrir la sesión' };
+  return { ok: true, token_hash: data.properties.hashed_token };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   const json = (o: unknown, status = 200) =>
@@ -110,6 +122,7 @@ Deno.serve(async (req) => {
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
     const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
     if (body?.accion === 'ping') return json({ ok: true, version: VERSION, servicio: !!Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') });
+    if (body?.accion === 'qr_entrar') return json(await qrEntrar(body));
     if (body?.accion === 'crear_usuario') return json(await crearUsuario(jwt, body));
     if (body?.accion === 'restablecer_clave') return json(await restablecerClave(jwt, body));
     return json(await enviarPush());

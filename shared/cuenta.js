@@ -6,8 +6,11 @@
   const C = global.Core;
   const listo = !!(cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && global.supabase);
   const sb = listo ? global.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
-    auth: { persistSession: true, autoRefreshToken: true, storageKey: 'barb-auth', detectSessionInUrl: false }
+    auth: { persistSession: true, autoRefreshToken: true, storageKey: 'barb-auth', detectSessionInUrl: true }  // G32 f: el enlace del correo abre la sesión
   }) : null;
+  // G32 d/f · 🔑 Entrar con QR y 🔒 clave pausada tras 3 intentos (núcleo qr.js). En las demás páginas se carga solo.
+  const qrIni = () => global.CFX_QR.iniciar({ sb, funcion: 'enviar', qrLib: C.raiz() + 'shared/vendor/qrcode.js' });
+  if (sb && global.CFX_QR) qrIni(); else if (sb) { const q = document.createElement('script'); q.src = C.raiz() + 'shared/qr.js'; q.onload = qrIni; document.head.appendChild(q); }
 
   let cuenta = C.leer('cuenta', null);
 
@@ -104,8 +107,9 @@
   }
 
   async function entrar(email, clave) {
-    const { error } = await sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password: clave });
-    if (error) throw new Error(amigable(error));
+    const pw = () => sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password: clave });  // G32 f: 3 claves malas → enlace al correo
+    const { error } = await (global.CFX_QR ? global.CFX_QR.clave(email, pw) : pw());
+    if (error) throw new Error(error.code === 'cfx_bloqueado' ? error.message : amigable(error));
     const a = await refrescar();
     sincronizarPush();
     return a;

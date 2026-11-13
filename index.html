@@ -42,6 +42,7 @@
     <div class="logo-grande" id="lgLogo">💈</div>
     <h1 id="lgNombre">Reserva tu hora</h1>
     <p class="sub" id="lgSub">Ingresa con la cuenta que te dio tu barbería</p>
+    <div id="lQR" hidden></div>
     <form id="fEntrar" autocomplete="on">
       <label for="email">Correo</label>
       <input id="email" type="email" autocomplete="username" inputmode="email" required placeholder="tu@correo.cl">
@@ -58,6 +59,7 @@
 <script src="shared/config.js"></script>
 <script src="shared/vendor/supabase.js"></script>
 <script src="shared/core.js"></script>
+<script src="shared/qr.js"></script>
 <script src="shared/cuenta.js"></script>
 <script>
 (async function () {
@@ -78,7 +80,11 @@
   // ¿Ya tiene sesión? → a su app.
   let a = null;
   try { a = await K.refrescar(); } catch (e) { a = K.cuenta; }
-  if (a) { location.replace(C.raiz() + K.paginaDe(a.role) + (ir ? '#' + ir : '')); return; }
+  // G32 d/f: si el celular llegó por el QR del computador (?qr=), primero pregunta; si entró con el enlace del correo, ofrece clave nueva.
+  const despues = async () => { if (window.CFX_QR) { if (params.get('qr')) await CFX_QR.revisar(); await CFX_QR.despues(); } };
+  const aSuApp = async (x) => { await despues(); location.replace(C.raiz() + K.paginaDe(x.role) + (ir ? '#' + ir : '')); };
+  if (window.CFX_QR) CFX_QR.iniciar({ alEntrar: async () => { const x = await K.refrescar(); if (x) aSuApp(x); } });
+  if (a) { await aSuApp(a); return; }
 
   // Barbería del enlace (?b=código) o la recordada en este celular: logo, nombre y WhatsApp.
   let local = K.barberiaLocal();
@@ -103,6 +109,7 @@
 
   $('cargando').classList.add('hidden');
   $('cEntrar').classList.remove('hidden');
+  if (window.CFX_QR) CFX_QR.pc($('lQR'));  // 💻 computador: entrar con el QR del celular
   $('email').value = C.leer('ultimoEmail', '');
   $('fEntrar').onsubmit = async (e) => {
     e.preventDefault();
@@ -113,7 +120,7 @@
       const cta = await K.entrar($('email').value, $('clave').value);
       C.guardar('ultimoEmail', $('email').value.trim().toLowerCase());
       if (!cta) throw new Error('Tu cuenta no está lista. Pide ayuda a tu barbería.');
-      location.replace(C.raiz() + K.paginaDe(cta.role) + (ir ? '#' + ir : ''));
+      await aSuApp(cta);
     } catch (err) {
       $('eEntrar').textContent = err.message;
       b.disabled = false; b.textContent = 'Entrar';
