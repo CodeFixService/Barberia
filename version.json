@@ -1,1 +1,1 @@
-{"version": "2.82", "bd": "2.75", "notas": "🔑 Entra en el computador con el QR del celular. 🔒 Tras 3 claves malas, se entra con un enlace al correo."}
+{"version": "2.83", "bd": "2.76", "notas": "💳 Arreglado: al enviar el comprobante de pago salía \"Could not choose the best candidate function\"."}

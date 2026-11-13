@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.75'::text $$;
+language sql immutable as $$ select '2.76'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -4500,6 +4500,7 @@ end $$;
 
 drop function if exists public.cfx_pago_pedir(text, int, text, text, text);
 drop function if exists public.cfx_pago_pedir(text, int, text, text, text, text);
+drop function if exists public.cfx_pago_pedir(text, int, text, text, text, text, int);  -- G36: la de 7 dejaba 2 versiones ("Could not choose the best candidate")
 drop function if exists public.cfx_pago_pedir(text, int, text, text, text, text, int, text);
 create or replace function public.cfx_pago_pedir(p_periodo text, p_monto int, p_medio text, p_comprobante text, p_nota text default '', p_cupon text default null, p_meses int default null, p_producto text default null) returns uuid
 language plpgsql security definer set search_path = '' as $$
