@@ -1,1 +1,1 @@
-{"version": "2.84", "bd": "2.76", "notas": "💳 Pago con señal débil: si el envío del comprobante se corta, se reintenta solo (antes salía \"Sin conexión con el servidor\")."}
+{"version": "2.85", "bd": "2.77", "notas": "🌐 Dominio de CodeFix: el CM lo arma en Cloudflare y los links, QR y correos usan el dominio cuando está listo."}
