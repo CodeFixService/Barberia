@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.77'::text $$;
+language sql immutable as $$ select '2.78'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -4773,26 +4773,40 @@ begin
 end $$;
 
 -- ---------- Nueva versión disponible: push a todos al liberar (una sola vez por versión) ----------
--- La llama el Centro de Mando después de liberar (Apps → Liberar) con las notas que se escriben ahí.
+-- G44b: el aviso dice SOLO categorías (🔒 Seguridad · ⚙️ Funcionamiento · 🖥️ Sistema · ✏️ Mejoras · 🎁 Premios/novedades), nunca qué se hizo.
+-- p_notas trae las categorías (claves seg/func/sis/mej/pre o sus nombres); el texto libre NO llega a los usuarios.
+-- El detalle (p_detalle) queda solo para el administrador: en cfx_versiones (sin políticas = nadie lo lee) y en el 📜 Registro.
 create table if not exists public.cfx_versiones (version text primary key, notas text not null default '', avisados int not null default 0, creado timestamptz not null default now());
+alter table public.cfx_versiones add column if not exists detalle text not null default '';
 alter table public.cfx_versiones enable row level security;
-create or replace function public.cfx_avisar_version(p_version text, p_notas text default '', p_app text default '') returns int
+create or replace function public.cfx_version_categorias(p text) returns text
+language sql immutable set search_path = '' as $$
+  select coalesce(string_agg(c.nombre, ' · ' order by c.orden), '')
+  from (values (1, '🔒 Seguridad', '(^|[^a-z])seg([^a-z]|$)|🔒|seguridad'), (2, '⚙️ Funcionamiento', '(^|[^a-z])func([^a-z]|$)|⚙|funcionamiento'),
+               (3, '🖥️ Sistema', '(^|[^a-z])sis([^a-z]|$)|🖥|sistema'), (4, '✏️ Mejoras', '(^|[^a-z])mej([^a-z]|$)|✏|mejora'),
+               (5, '🎁 Premios/novedades', '(^|[^a-z])pre([^a-z]|$)|🎁|premio|novedad')) c(orden, nombre, patron)
+  where lower(coalesce(p, '')) ~ c.patron
+$$;
+drop function if exists public.cfx_avisar_version(text, text, text);
+create or replace function public.cfx_avisar_version(p_version text, p_notas text default '', p_app text default '', p_detalle text default '') returns int
 language plpgsql security definer set search_path = '' as $$
-declare u uuid; n int := 0; v text := trim(coalesce(p_version, '')); nt text := left(trim(coalesce(p_notas, '')), 140);
+declare u uuid; n int := 0; v text := trim(coalesce(p_version, '')); cat text := public.cfx_version_categorias(p_notas);
+  det text := left(trim(coalesce(nullif(trim(coalesce(p_detalle, '')), ''), p_notas, '')), 400);
 begin
   perform public.cfx_es_admin();
   if v !~ '^[0-9]+(\.[0-9]+){0,3}$' then raise exception 'Versión no válida'; end if;
   if exists (select 1 from public.cfx_versiones where version = v) then return 0; end if;
   for u in select * from public.cfx_destinatarios('todos') loop
-    perform public.cfx_avisar(u, '🚀 Nueva versión disponible', left(coalesce(nullif(trim(p_app), '') || ' ', '') || 'v' || v || case when nt <> '' then ' · ' || nt else '' end || '. Se actualiza sola al abrirla.', 240));
+    perform public.cfx_avisar(u, '🔄 Nueva versión', left(coalesce(nullif(trim(p_app), '') || ' ', '') || 'v' || v || case when cat <> '' then ': ' || cat else '' end || '. Se actualiza sola al abrirla.', 240));
     n := n + 1;
   end loop;
-  insert into public.cfx_versiones (version, notas, avisados) values (v, nt, n);
-  perform public.cfx_anotar('version', 'v' || v || ' avisada a ' || n);
+  insert into public.cfx_versiones (version, notas, avisados, detalle) values (v, cat, n, det);
+  perform public.cfx_anotar('version', left('v' || v || ' avisada a ' || n || case when cat <> '' then ' · ' || cat else '' end || case when det <> '' then ' — ' || det else '' end, 500));
   return n;
 end $$;
-revoke execute on function public.cfx_avisar_version(text, text, text) from public, anon;
-grant execute on function public.cfx_avisar_version(text, text, text) to authenticated;
+revoke execute on function public.cfx_avisar_version(text, text, text, text) from public, anon;
+grant execute on function public.cfx_avisar_version(text, text, text, text) to authenticated;
+revoke all on function public.cfx_version_categorias(text) from public, anon, authenticated;
 
 -- ---------- Keys de Premium (de un solo uso). Se guardan cifradas: el código completo solo se ve al crearlas. ----------
 create or replace function public.cfx_keys_crear(p_n int, p_rol text, p_dias int, p_nota text default '') returns jsonb
