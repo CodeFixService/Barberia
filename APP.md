@@ -47,5 +47,5 @@ Auto-actualizar compara con `bd` de version.json (antes con `version` → se rei
 - ✅ G39 + R1 (2.94 · bd 2.79): ver "Planes y módulos". Josué prende la venta en CM → Apps → 🧩.
 - ✅ G42 🔐: links de pago del negocio con CFX_URL (cliente/, r/).
 - ✅ G42e: utilidades Bootstrap ya enlazadas por el sincronizador.
-- Pendiente núcleo: ▶️ (botón Probar de modulos.js) no tiene SVG en iconos.js (también en Despega) → próxima pasada del núcleo. Texto del módulo 📣 Campañas en `cfx_modulos_catalogo` habla de "suscriptores" (es de Despega): hacerlo genérico en esa pasada.
+- ✅ Núcleo 2.79 (2.95 · bd 2.80): ▶️ con SVG, 📣 Campañas genérico, 💬 avisos propios (CFX_DIALOGO), "Cuenta y ayuda" ya no sale bajo Clientes.
 - G43: la tarjeta "🚀 Termina de armar tu negocio" ya sale en Inicio; afinar guiaPasos con campo exacto si Josué lo pide.

@@ -8,7 +8,7 @@
     location.replace(cfg.SITIO + location.pathname.replace(/^\/Barberia\//i, '') + location.search + location.hash);
   }
   const ZONA = cfg.ZONA || 'America/Santiago';
-  const VERSION = '2.94';
+  const VERSION = '2.95';
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -251,8 +251,9 @@
   }
   function copiar(txt) {
     const fin = () => toast('📋 Copiado');
-    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(fin, () => prompt('Copia:', txt));
-    else prompt('Copia:', txt);
+    const verlo = () => (window.CFX_DIALOGO ? CFX_DIALOGO.pedir('Copia:', txt, { si: 'Cerrar' }) : prompt('Copia:', txt));
+    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(fin, verlo);
+    else verlo();
   }
   function guardar(k, v) { try { localStorage.setItem('barb:' + k, JSON.stringify(v)); } catch (e) { /* lleno */ } }
   function leer(k, def) { try { const v = localStorage.getItem('barb:' + k); return v === null ? def : JSON.parse(v); } catch (e) { return def; } }
