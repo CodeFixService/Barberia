@@ -318,8 +318,8 @@
     const lib = s.version_liberada || '';
     const admin = !!(cuenta && cuenta.is_admin);
     if (!admin && (!lib || mayor(nueva, lib))) return;
-    // Núcleo: si ya está liberada, se instala sola (sin botón). El admin ve el aviso solo mientras no la libera.
-    if (lib && !mayor(nueva, lib) && global.CodeFixAuto) { global.CodeFixAuto(nueva, () => actualizarAhora()); return; }
+    // G36 · núcleo: el admin (y el socio) la recibe sola apenas se publica; los usuarios, al liberarla, con el botón "🔄 Actualizar".
+    if (global.CodeFixAuto && (admin || (lib && !mayor(nueva, lib)))) { global.CodeFixAuto(nueva, () => actualizarAhora(), { admin }); return; }
     if (document.getElementById('bUpd')) return;
     const d = document.createElement('div');
     d.className = 'banner oscuro'; d.id = 'bUpd';
