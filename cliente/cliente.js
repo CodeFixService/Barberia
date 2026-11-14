@@ -100,7 +100,7 @@
     if (yo.saldo > 0) html += '<div class="card"><div class="flex"><span style="font-size:28px">💰</span><div class="grow"><b>Tienes ' + C.plata(yo.saldo) + ' a favor</b><div class="sub muted">Se usa solo como abono en tu próxima reserva.</div></div></div></div>';
     html += '<div id="sellos"></div>';
     // v2.1: regalo de cumpleaños (vale 7 días desde el cumpleaños).
-    if (yo.cumple && b.regalo_cumple && K.tiene('barberia', 'cumpleanos', !!b.premium)) {
+    if (yo.cumple && b.regalo_cumple && (K.tiene('barberia', 'cumpleanos', !!b.premium) || !!(b.modulos && b.modulos.campanas))) {
       const cf = C.hoy().slice(0, 4) + yo.cumple.slice(4);
       if (C.hoy() >= cf && C.hoy() <= C.sumarDias(cf, 7)) html += '<div class="card oro-marco"><div class="flex"><span style="font-size:32px">🎂</span><div class="grow"><b>¡Feliz cumpleaños!</b>' +
         '<div class="sub">' + esc(b.nombre) + ' te regala: <b>' + esc(b.regalo_cumple) + '</b>. Vale hasta el ' + P.fechaCorta(C.sumarDias(cf, 7) + 'T12:00:00') + '. Muéstralo al llegar.</div></div></div></div>';
@@ -400,7 +400,7 @@
     const h = C.hoja('<h2>💳 Abona para asegurar tu hora</h2><div class="reloj" data-reloj="' + hr.expira_at + '">--:--</div>' +
       '<p class="muted centro chico" style="margin-top:0">tienes este tiempo para abonar ' + C.plata(hr.abono || b.abono) + '</p>' +
       '<div class="card" style="box-shadow:none"><b>1. Paga ' + C.plata(hr.abono || b.abono) + '</b>' + (b.abono_texto ? '<div class="muted chico">' + esc(b.abono_texto) + '</div>' : '') + '<div class="btns" style="flex-direction:column">' +
-      (b.link_pago ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(b.link_pago) + '" data-link>💳 Pagar con link de pago</a>' : '') +
+      (b.link_pago ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(CFX_URL(b.link_pago)) + '" data-link>💳 Pagar con link de pago</a>' : '') +
       (b.datos_transferencia ? '<button class="gris full" data-tr>🏦 Transferencia: ver datos</button><div class="hidden muted" data-trd style="white-space:pre-line;padding:10px;background:var(--field);border-radius:12px">' + esc(b.datos_transferencia) +
         '<br><button class="small alt" data-copiar style="margin-top:8px">📋 Copiar datos</button></div>' : '') +
       (!b.link_pago && !b.datos_transferencia ? '<p class="err">La barbería aún no configura cómo recibir abonos. Escríbele por el chat.</p>' : '') + '</div></div>' +

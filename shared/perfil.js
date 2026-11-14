@@ -32,27 +32,32 @@
   const diasQuedan = (t) => Math.max(0, Math.ceil((new Date(t) - Date.now()) / 864e5));
 
   /* ---------- Aviso "esto es Premium" (al tocar algo plateado) ---------- */
-  function upsell(que) {
+  // G39 🧩: mod = módulo que desbloquea esto suelto (recordatorios, sellos, campanas). Si se vende, el dueño Free puede comprar solo ese.
+  function upsell(que, mod) {
     const a = K.cuenta || {};
+    const vende = mod && a.role === 'owner' && a.barberia && a.barberia.modulos && mod in a.barberia.modulos && global.CFX_MODULOS_TIENDA;
     const esDueno = a.role === 'owner', esCliente = a.role === 'client';
     const h = C.hoja('<h2>⭐ ' + esc(que || 'Función Premium') + '</h2>' +
       (esCliente || esDueno
         ? '<p>Esto es parte de <b>Premium</b>. Por <b>' + C.plata(precio()) + ' al mes</b> desbloqueas:</p><ul class="feat">' +
           beneficios(esDueno ? 'owner' : 'client').map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul>' +
-          '<div class="btns"><button class="oro full" data-ir>⭐ Ver Premium</button></div>'
+          '<div class="btns"><button class="oro full" data-ir>⭐ Ver Premium</button></div>' +
+          (vende ? '<div class="btns"><button class="gris full" data-mod>🧩 O activa solo esta función</button></div>' : '')
         : '<p>Esta función está disponible cuando tu barbería es <b>Premium</b>. Pídele al dueño que la active.</p>'));
     const b = h.q('[data-ir]');
     if (b) b.onclick = () => { h.cerrar(); K.irA('plan'); };
+    const m = h.q('[data-mod]');
+    if (m) m.onclick = () => { h.cerrar(); global.CFX_MODULOS_TIENDA.probar(mod, { rpc: K.rpc, alCambiar: () => setTimeout(() => location.reload(), 1500) }); };
   }
   // Precio mensual: el mismo de las 6 apps (núcleo: cfx_precios); si aún no carga, el de la barbería.
   let PRECIOS = null;
   K.rpc('cfx_precios').then((x) => { PRECIOS = x; }).catch(() => {});
   const precio = () => { const g = (K.cuenta || {}).role === 'owner' ? 'negocio' : 'cliente'; return (PRECIOS && PRECIOS[g] && PRECIOS[g].mensual) || K.linkPremium(K.grupoDe((K.cuenta || {}).role)).monto; };
   // Marca un elemento como Premium bloqueado (plateado con candado).
-  function bloquear(el, que) {
+  function bloquear(el, que, mod) {
     if (!el) return;
     el.classList.add('plata');
-    el.addEventListener('click', (e) => { e.preventDefault(); e.stopImmediatePropagation(); upsell(que); }, true);
+    el.addEventListener('click', (e) => { e.preventDefault(); e.stopImmediatePropagation(); upsell(que, mod); }, true);
   }
 
   /* ---------- Compartir: link + QR (descargar, copiar, WhatsApp) ---------- */

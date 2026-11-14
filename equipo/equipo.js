@@ -57,7 +57,7 @@
     if (v === 'agenda' && q.get('r')) { mostrar('agenda'); abrirReserva(q.get('r'), true); return; }
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
-    if (['plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo'].includes(v)) {
+    if (['plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo', 'modulos'].includes(v)) {
       mostrar('mas'); abrirSeccion(v === 'ajustes' ? 'negocio' : v); return;
     }
     mostrar(VISTAS[v] ? v : 'hoy');
@@ -177,7 +177,7 @@
         if (r && r.invitado) avisarInvitado(r, 'no_llego');
       }, 'Listo: sin devolución');
     });
-    if ($('upRecordar')) $('upRecordar').addEventListener('click', (e) => { e.preventDefault(); P.upsell('Recordatorio por WhatsApp en 1 toque'); }, true);
+    if ($('upRecordar')) $('upRecordar').addEventListener('click', (e) => { e.preventDefault(); P.upsell('Recordatorio por WhatsApp en 1 toque', 'recordatorios'); }, true);
     if ($('cInvitar')) $('cInvitar').onclick = () => { mostrar('mas'); abrirSeccion('invitar'); };
     if ($('cMiLink')) $('cMiLink').onclick = () => { mostrar('mas'); abrirSeccion('milink'); };
     tarjetasResumen();
@@ -263,7 +263,7 @@
         if (!z || !x.total) return;
         z.innerHTML = '<div class="card tap"><div class="flex"><span style="font-size:28px">👋</span><div class="grow"><b>' + x.total + ' cliente' + (x.total === 1 ? '' : 's') + ' no vuelve' + (x.total === 1 ? '' : 'n') + ' hace +' + x.dias + ' días</b>' +
           '<div class="sub muted">' + (x.bloqueado ? '🔒 Premium: ve quiénes son y escríbeles con una oferta en 1 toque.' : 'Escríbeles con una oferta en 1 toque.') + '</div></div><span>›</span></div></div>';
-        z.firstChild.onclick = () => { if (x.bloqueado) P.upsell('Clientes que no vuelven'); else { mostrar('mas'); abrirSeccion('volver'); } };
+        z.firstChild.onclick = () => { if (x.bloqueado) P.upsell('Clientes que no vuelven', 'campanas'); else { mostrar('mas'); abrirSeccion('volver'); } };
       }).catch(() => {});
     }
   }
@@ -404,7 +404,7 @@
         if (a === 'aprobar') { await C.accion(btn, () => K.rpc('confirmar_hora', { p_reserva: r.id })); fin('✅ Aprobada: la hora quedó agendada'); if (r.invitado) avisarInvitado(r, 'aprobada'); }
         if (a === 'rechazar') { h.cerrar(); rechazar(r.id, true, () => { Avisos.actualizar(); refrescarVista(); }, r); }
         if (a === 'anular') { h.cerrar(); rechazar(r.id, false, () => { Avisos.actualizar(); refrescarVista(); }, r); }
-        if (a === 'recordar') { if (!tiene('recordar_wsp')) P.upsell('Recordatorio por WhatsApp en 1 toque'); else open(C.wa(r.cliente_tel, msgRecordar(r)), '_blank'); }
+        if (a === 'recordar') { if (!tiene('recordar_wsp')) P.upsell('Recordatorio por WhatsApp en 1 toque', 'recordatorios'); else open(C.wa(r.cliente_tel, msgRecordar(r)), '_blank'); }
         if (a === 'devuelto') { await K.rpc('marcar_devuelto', { p_reserva: r.id }); fin('💸 Marcado como devuelto'); }
         if (a === 'comp') verComprobante(r.id);
         if (a === 'chat') { h.cerrar(); mostrar('chat'); Chat.abrir(r.cliente_id, { nombre: r.cliente, avatar: r.cliente_avatar, rol: 'client' }, r.id); }
@@ -633,7 +633,9 @@
       (plata ? '<label>Propina</label><input data-prop type="number" inputmode="numeric" min="0" value="' + (k ? k.propina || '' : '') + '">' : '') +
       '<label>Nota</label><input data-nota maxlength="200" value="' + esc(k ? k.nota || '' : '') + '"></details>' +
       (dueno() && !k && B.barberos.length > 1 ? '<label>Barbero</label><select data-b>' + B.barberos.map((b) => '<option value="' + b.id + '"' + (b.id === yo.id ? ' selected' : '') + '>' + esc(b.nombre) + '</option>').join('') + '</select>' : '') +
-      '<div class="btns"><button class="full" data-ok>Guardar</button>' + (k ? '<button class="danger" data-del>Borrar</button>' : '') + '</div>');
+      '<div class="btns"><button class="full" data-ok>Guardar</button>' + (k ? '<button class="danger" data-del>Borrar</button>' : '') + '</div>' +
+      (k && plata && window.CFX_COMPROBANTE ? '<div class="btns"><button class="gris full" data-comp>🧾 Comprobante para el cliente</button></div>' : ''));
+    if (h.q('[data-comp]')) h.q('[data-comp]').onclick = () => comprobante(k);
     let medio = k ? k.medio : 'efectivo';
     const pintarMedio = () => h.qa('[data-m]').forEach((b) => b.classList.toggle('on', b.dataset.m === medio));
     pintarMedio();
@@ -692,6 +694,7 @@
       ['enlace', '🔗', 'Enlace y QR', 'Para que tus clientes reserven'],
       ['invitar', '🤝', 'Invita una barbería', K.regla('dias_referido') ? 'Gana ' + K.regla('dias_referido') + ' días de Premium' : 'Comparte la app'],
       ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
+      ...(bar().modulos && !premium() ? [['modulos', '🧩', 'Módulos', 'Activa solo lo que necesitas']] : []),
       ['respaldo', '💾', 'Respaldo', 'Descarga todo en Excel'],
       ['verificar', '🪪', 'Verificar identidad', 'Tus clientes confían más'],
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
@@ -709,7 +712,7 @@
     // Mi cuenta (perfil) y Soporte ya vienen en el menú común (Configuración y Cuenta y ayuda).
     const G = dueno() ? { negocio: 'Tu barbería', horario: 'Tu barbería', tiempos: 'Tu barbería', servicios: 'Tu barbería', links: 'Tu barbería', ofertas: 'Tu barbería', equipo: 'Tu barbería', enlace: 'Tu barbería',
       caja: 'Ventas y clientes', estadisticas: 'Ventas y clientes', resumen: 'Ventas y clientes', volver: 'Ventas y clientes', calificaciones: 'Ventas y clientes',
-      plan: 'Tu plan', invitar: 'Tu plan', verificar: 'Tu plan', respaldo: 'Configuración' } : {};
+      plan: 'Tu plan', modulos: 'Tu plan', invitar: 'Tu plan', verificar: 'Tu plan', respaldo: 'Configuración' } : {};
     const K2 = { plan: 'premium', invitar: 'invitar' };
     const L = items.filter((i) => i[0] !== 'perfil' && i[0] !== 'soporte').map((i) => ({ k: K2[i[0]] || i[0], ico: i[1], t: i[2], d: i[3], grupo: G[i[0]] || 'Tu trabajo', accion: () => abrirSeccion(i[0]) }))
       .concat([{ k: 'tour', ico: '🧭', t: 'Ver el recorrido', grupo: 'Cuenta y ayuda', accion: () => P.tour(pasos(), true) }]);
@@ -724,6 +727,20 @@
       '<div class="btns"><button id="bRespaldo">⬇️ Descargar</button></div><p class="cfx-nota-btn">Un archivo Excel con todo: clientes, horas, servicios y caja.</p></div>';
     $('bRespaldo').onclick = () => C.accion($('bRespaldo'), async () => CFX_RESPALDO.excel('respaldo-' + bar().nombre, await K.rpc('mi_respaldo')), '💾 Respaldo descargado');
   }
+  // G39 🧩 Módulos sueltos para la barbería Free (núcleo: modulos.js). Premium ya los trae incluidos.
+  function secModulos() {
+    const z = seccion('🧩 Módulos');
+    if (premium()) { z.innerHTML = '<div class="card empty"><span class="ico">⭐</span>Tu Premium ya incluye recordatorios, sellos y campañas.</div>'; return; }
+    z.innerHTML = '<p class="muted">Activa solo la función que necesitas, sin pasarte a Premium. Toca Probar para ver cómo funciona.</p><div id="modZona"></div>';
+    CFX_MODULOS_TIENDA.montar($('modZona'), { rpc: K.rpc, alCambiar: () => setTimeout(() => location.reload(), 1500) }).cargar();
+  }
+  // 🧾 G37: comprobante de un corte de la caja (núcleo: comprobante.js). Logo de la barbería; sin RUT sale igual (G31).
+  window.CFX_COMPROBANTE_DATOS = async () => ({ logo: bar().logo || '' });
+  function comprobante(k) {
+    CFX_COMPROBANTE.abrir({ negocio: bar().nombre, fecha: k.fecha, numero: String(k.id).slice(-6).toUpperCase(), cliente: k.cliente || '',
+      tel: k.cliente_tel || '', items: [{ cant: 1, nombre: k.servicio, precio: k.monto }].concat(k.propina ? [{ cant: 1, nombre: 'Propina', precio: k.propina }] : []),
+      total: k.monto + (k.propina || 0), medio: k.medio });
+  }
   // Cada sección se abre en una hoja desde abajo (núcleo), encima del menú Más, que no se mueve.
   // Si la sección se vuelve a dibujar (p. ej. después de guardar), usa la misma hoja.
   let hojaSec = null;
@@ -737,11 +754,11 @@
     if (s === 'soporte') { if (window.CFX_AYUDA) window.CFX_AYUDA.chat(); return; }  // chat común de soporte (llega al Centro de Mando)
     if (s === 'clientes') { mostrar('clientes'); return; }
     if (s === 'verificar') { CFX_VERIFICAR.abrir({ rpc: K.rpc }); return; }
-    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'resumen', 'invitar', 'respaldo'];
+    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'modulos', 'resumen', 'invitar', 'respaldo'];
     if (!dueno() && soloDueno.includes(s)) { mas(); return; }
     if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); mas(); }
     const F = { equipo: secEquipo, servicios: secServicios, ofertas: secOfertas, estadisticas: secEstadisticas, negocio: secNegocio, horario: secHorario, links: secLinks,
-      respaldo: secRespaldo, caja, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
+      respaldo: secRespaldo, modulos: secModulos, caja, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
       milink: () => P.compartir({ el: seccion('🔳 Mi link y QR'), link: K.linkBarberia(bar().codigo, yo.id), archivo: 'qr-' + primerNombre(yo.nombre),
         texto: 'Con este link o QR tus clientes reservan <b>directo contigo</b> en ' + esc(bar().nombre) + ' (sin cuenta o con su cuenta).',
         mensaje: '💈 Reserva tu hora conmigo en ' + bar().nombre }), plan: () => P.plan(seccion('💎 Mi plan')),
@@ -1133,7 +1150,7 @@
     if ($('bSinPortada')) $('bSinPortada').onclick = () => { portada = ''; C.toast('Portada quitada, toca Guardar'); };
     if (!colores) P.bloquear($('cPrem'), 'Colores y portada');
     if (!tiene('comisiones')) P.bloquear($('cCom'), 'Comisiones y sellos');
-    if (!tiene('cumpleanos')) P.bloquear($('cCumple'), 'Regalo de cumpleaños automático');
+    if (!tiene('cumpleanos')) P.bloquear($('cCumple'), 'Regalo de cumpleaños automático', 'campanas');
     $('bGuardarAj').onclick = (ev) => C.accion(ev.target, async () => {
       const p = {};
       z.querySelectorAll('[data-k]').forEach((i) => {
@@ -1301,7 +1318,7 @@
     if (x.bloqueado) {
       z.innerHTML = '<div class="card plata" id="upVolver"><h2>👋 ' + x.total + ' cliente(s) no vuelven hace +' + x.dias + ' días</h2><p class="muted">Ve quiénes son, cuántas veces vinieron y escríbeles con una oferta por WhatsApp en 1 toque.</p>' +
         '<ul class="list">' + ['Juan P.', 'Diego R.', 'Matías S.'].map((n) => '<li><span class="grow borroso">' + n + '</span><span class="btn small wsp">💬 Oferta</span></li>').join('') + '</ul></div>';
-      $('upVolver').onclick = () => P.upsell('Clientes que no vuelven');
+      $('upVolver').onclick = () => P.upsell('Clientes que no vuelven', 'campanas');
       return;
     }
     z.innerHTML = '<div class="card"><p class="muted chico" style="margin-top:0">Su última visita fue hace más de ' + x.dias + ' días y no tienen hora agendada.</p>' +

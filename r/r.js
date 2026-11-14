@@ -83,7 +83,7 @@
     if (R.estado === 'esperando_abono') {
       html += '<div class="card"><h2>1. Paga ' + C.plata(R.abono) + '</h2>' + (b.abono_texto ? '<p class="muted chico" style="margin-top:-6px">' + esc(b.abono_texto) + '</p>' : '') +
         '<div class="btns" style="flex-direction:column">' +
-        (b.link_pago ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(b.link_pago) + '" data-link>💳 Pagar con link de pago</a>' : '') +
+        (b.link_pago ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(CFX_URL(b.link_pago)) + '" data-link>💳 Pagar con link de pago</a>' : '') +
         (b.datos_transferencia ? '<button class="gris full" data-tr>🏦 Transferencia: ver datos</button><div class="hidden" data-trd style="white-space:pre-line;padding:10px;background:var(--field);border-radius:12px">' +
           esc(b.datos_transferencia) + '<br><button class="small alt" data-copiar style="margin-top:8px">📋 Copiar datos</button></div>' : '') + '</div></div>' +
         '<div class="card"><h2>2. Sube la foto del comprobante</h2><p class="muted chico" style="margin-top:-6px">Al subirla, el reloj se detiene y tu hora queda guardada mientras el barbero verifica el pago.</p>' +

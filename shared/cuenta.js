@@ -232,7 +232,10 @@
   // Opciones sí/no del plan: tiene('barberia', 'estadisticas', true)
   const tiene = (grupo, clave, premium) => plan(grupo, clave, premium) > 0;
   // Lo que incluye el plan de la barbería de esta cuenta (dueño y barberos).
-  const barberiaTiene = (clave) => tiene('barberia', clave, !!(cuenta && cuenta.barberia && cuenta.barberia.premium));
+  // G39 🧩: o la barbería compró el módulo que lo trae (recordatorios, sellos, campañas = no vuelven + cumpleaños).
+  const MODULO_DE = { recordatorios: 'recordatorios', recordar_wsp: 'recordatorios', sellos: 'sellos', recuperar: 'campanas', cumpleanos: 'campanas' };
+  const barberiaTiene = (clave) => tiene('barberia', clave, !!(cuenta && cuenta.barberia && cuenta.barberia.premium)) ||
+    !!(cuenta && cuenta.barberia && cuenta.barberia.modulos && cuenta.barberia.modulos[MODULO_DE[clave]]);
   const clienteTiene = (clave) => tiene('cliente', clave, !!(cuenta && cuenta.is_premium));
 
   /* ---------- Reglas, textos y links (los edita el admin) ---------- */
@@ -364,7 +367,7 @@
     listo, sb, rpc, refrescar, exigir, entrar, salir, cambiarClave, crearUsuario, restablecerClave, probarServidor, despertarEnvios,
     claveNueva, mensajeAcceso, activarPush, sincronizarPush, pushActivo, pushPosible, esIOS, instalada, ajustes, revisarActualizacion,
     recordarBarberia, barberiaLocal, paginaDe, irA, aplicarMarca, amigable, colorPremium, plan, limite, grupoDe,
-    tiene, barberiaTiene, clienteTiene, regla, texto, linkPremium, linkTrimestral, prioridadBloquea, planInfo, registrarse,
+    tiene, barberiaTiene, clienteTiene, MODULO_DE, regla, texto, linkPremium, linkTrimestral, prioridadBloquea, planInfo, registrarse,
     registrarBarberia, linkRegistro, linkBarberia,
     get cuenta() { return cuenta; },
     premium: () => !!(cuenta && cuenta.is_premium),

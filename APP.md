@@ -1,10 +1,51 @@
-# APP.md
+# APP.md · 💈 Barbería
 
-(Mapa completo pendiente: G42j.)
+Leer esto antes que el código (G42j). Repo Barberia · id `barberia` · Supabase gxlabxuttnxvzkucckef.
+Reservas con abono para barberías: agenda, caja, clientes, link/QR para reservar. Free / Premium / 🧩 módulos (G39: Free compra módulos; Premium ya los trae).
+
+## Quién usa qué
+- **Dueño** (`owner`) y **barbero** (`barber`): `/equipo/` (Inicio · Agenda · Clientes · Mensajes · Más).
+- **Cliente** (`client`, con cuenta): `/cliente/`.
+- **Público** (sin cuenta): `/b/?b=<codigo>` reservar con nombre + WhatsApp · `/r/?t=<token>` su reserva (abono, comprobante, cancelar, calificar).
+- **Admin**: el panel vive en CM → Apps → 💈 Barbería (`admin/` redirige; socios siguen en `admin/`).
+
+## Pantallas
+| URL | Qué es |
+|---|---|
+| `/` | Entrar (correo/clave, QR en PC) → manda a equipo/ o cliente/ según rol |
+| `/registro/` | Crear barbería (registro.js) |
+| `/equipo/` `#hoy` `#agenda` `#clientes` `#chat` `#mas` | Panel (equipo.js). `#agenda?r=<id>` abre una hora |
+| `/equipo/#negocio` `#horario` `#tiempos` `#servicios` `#links` `#ofertas` `#equipo` `#enlace` | Más → Tu barbería |
+| `/equipo/#caja` `#estadisticas` `#resumen` `#volver` `#calificaciones` | Más → Ventas y clientes (caja: tocar un corte → 🧾 Comprobante) |
+| `/equipo/#plan` `#modulos` `#invitar` `#respaldo` `#perfil` | Más → Tu plan / Configuración. 🧩 Módulos solo sale si el dueño es Free y la venta está prendida |
+| `/cliente/` (`#plan`) | Inicio del cliente: horas, sellos, cumpleaños, Premium del cliente |
+| `/b/?b=` · `/r/?t=` · `/legal.html` | Vista pública · reserva por link · términos |
+
+## Archivos clave
+- `shared/core.js` (VERSION l.11), `shared/cuenta.js` (sesión, planes `tiene/limite`, `barberiaTiene` + `MODULO_DE`), `shared/perfil.js` (Mi plan, `upsell(que, mod)`, `bloquear(el, que, mod)`, compartir), `shared/config.js` (⚠️ correo: solo Edit).
+- Propios: agenda.js, avisos.js, chat.js (tabla messages), dictado.js (🎤), perfil.js, cuenta.js, core.js/core.css.
+- Del núcleo (NO editar aquí: SaaS/nucleo): auto, ayuda, barra, carga, comprobante, datos, fotos, humano, iconos, impresora, instalar, modulos, pagos, premium, qr, respaldo, seguro, tema.css, ui, verificar, vitrina, voz.
+- `supabase/instalar.sql` (~7.300 l; db_version() l.21; notas_version l.25 = solo categorías) · `supabase/functions/enviar` (push y QR, 1.1).
+- Pruebas: `supabase/pruebas/correr.sh` (SQL completa), SaaS/pruebas `g39_barberia.js`, `bar_ui.js`, `bar_pagos.js`, `node celular.js barberia`, central.js.
+
+## Planes y módulos (G39)
+- Planes en tabla `planes` (grupo barberia/cliente; límites y opciones sí/no) → SQL `tiene()/limite()`, JS `K.tiene/K.barberiaTiene`.
+- FREE: agenda, servicios, link de reservas, caja de cortes, 🧾 comprobante. PREMIUM: más barberos/clientes, estadísticas, colores, reportes de caja, comisiones…
+- 🧩 Módulos (`cfx_modulos_app()` = recordatorios, sellos, campanas): `bar_tiene(clave, barberia)` = Premium **o** módulo comprado (`bar_modulo_clave`: recordatorios/recordar_wsp → recordatorios · sellos → sellos · recuperar/cumpleanos → campanas). `mi_cuenta().barberia.modulos` = {módulo: activo} solo con la venta prendida (si no, null y todo es como antes).
+- Negocio = el dueño (`cfx_negocio_de_cuenta`: dueño → él, barbero → su dueño, cliente → null). Packs propios (Básico 1.490 · Completo 1.990), solo si seguían los de fábrica.
+- R1: trigger `profiles_vence` → todo Premium con fecha (30 días si viene sin fecha; admin no).
+
+## Tablas propias (además de las cfx_* del núcleo)
+planes, planes_info, profiles, barberias, user_invites, app_settings, textos, auditoria, app_secrets, push_subscriptions, avisos, licenses, requests, pagos, servicios, bloqueos, ofertas, reservas, calificaciones, lista_negra, lista_espera, caja, messages, blocks, reports, actualizaciones.
+
+## Versiones
+`shared/core.js` l.11 + `version.json` (version, bd, notas = SOLO categorías) + `db_version()` en instalar.sql. Ahora: 2.94 · bd 2.79 · enviar 1.1.
+Auto-actualizar compara con `bd` de version.json (antes con `version` → se reinstalaba cada 10 min; arreglado en 2.79).
 
 ## 🧠 Del núcleo: falta aplicar aquí
-- G42e (núcleo 2.78): utilidades Bootstrap 5.3.8 ya usan los colores CodeFix (--bs-* → --cfx-*). Al revisar esta app: si quiere Bootstrap, enlazar vendor/bootstrap-utilities.min.css ANTES de su CSS (nunca el Bootstrap completo: choca con .btn/.card/.modal/.row/.toast).
-- G48 (núcleo 2.77): revisar en el celular ✋ mover secciones desde el título y 🎨 Color y modo → Colores a tu gusto (fondo, texto, íconos y +); si la app pinta íconos o fondo con colores fijos, pasarlos a var(--cfx-icono)/var(--cfx-fondo).
-- G37 (núcleo 2.76): 🧾 comprobante.js + 🖨️ impresora.js son del núcleo (OPCIONAL). Aplicar: sumar "barberia" a OPCIONAL en sincronizar.py + <script> + FILES de sw.js; definir window.CFX_COMPROBANTE_DATOS = async (c) => ({ logo, firma }) y abrir CFX_COMPROBANTE.abrir({...}) en atención cobrada / venta en local. 🧾 Boleta SII: hoy solo Despega (SQL boleta_*); si esta app la necesita, pasarla primero a nucleo/sql/boleta.sql.
-- G42 (núcleo 2.75, ya activo solo): ⬆️ subir, 🪟 ventanas del núcleo (✕+Cerrar / ← Volver), 📌 títulos fijos y ✋ ordenar en CFX_AJUSTES/CFX_MENU. Falta aquí: ✋ marcar otras listas propias con data-cfx-orden si sirve; 🪟 revisar ventanas propias (dialog) que no usan la hoja del núcleo; 🔐 usar CFX_TAPAR en avisos de enlace/validación y CFX_URL en links que pone el negocio (boleta, pago).
-- G43: revisar si la tarjeta "🚀 Termina de armar tu negocio" (núcleo) cae bien en equipo/ (si no, marcar el lugar con data-cfx-guia); afinar guiaPasos (campo exacto de cada paso); quitar avisos propios de instalar/notificaciones si se repiten con instalar.js.
+- ✅ G37 (2.94): comprobante.js + impresora.js en OPCIONAL; Caja → tocar un corte → 🧾 Comprobante (logo con CFX_COMPROBANTE_DATOS; sin RUT sale igual, G31). Boleta SII: no (solo Despega).
+- ✅ G39 + R1 (2.94 · bd 2.79): ver "Planes y módulos". Josué prende la venta en CM → Apps → 🧩.
+- ✅ G42 🔐: links de pago del negocio con CFX_URL (cliente/, r/).
+- ✅ G42e: utilidades Bootstrap ya enlazadas por el sincronizador.
+- Pendiente núcleo: ▶️ (botón Probar de modulos.js) no tiene SVG en iconos.js (también en Despega) → próxima pasada del núcleo. Texto del módulo 📣 Campañas en `cfx_modulos_catalogo` habla de "suscriptores" (es de Despega): hacerlo genérico en esa pasada.
+- G43: la tarjeta "🚀 Termina de armar tu negocio" ya sale en Inicio; afinar guiaPasos con campo exacto si Josué lo pide.
