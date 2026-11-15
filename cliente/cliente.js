@@ -15,14 +15,14 @@
   let barberoSel = null, fechaSel = C.hoy(), vista = 'dia', mesSel = C.hoy().slice(0, 7);
   const ACTIVA = ['esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada'];
 
-  Avisos.montar({ sub: yo.is_premium ? '⭐ Cliente Premium' : 'Reserva tu hora' });
+  Avisos.montar({ sub: 'Reserva tu hora' });
   Avisos.alCambiar((r, antes) => { if (antes.cargado && r.avisos > antes.avisos) { cargarHoras().then(() => { if (vistaActual === 'inicio') inicio(); if (vistaActual === 'horas') pintarHoras(); }); } });
   C.marca(bar().premium);
 
   const prem = () => !!yo.is_premium;
   const diasMax = () => K.limite('dias', prem());
-  // Días que se muestran en el calendario (los de Premium, para que el Free los vea plateados).
-  const ventana = () => Math.min(365, Math.max(K.limite('dias', true), K.limite('dias', false)) + 1);
+  // Días que se muestran en el calendario (G53: sin Premium de cliente, solo los que puede reservar).
+  const ventana = () => Math.min(365, diasMax() + 1);
   const servicio = (id) => B.servicios.find((s) => s.id === id);
   const barbero = (id) => B.barberos.find((b) => b.id === id);
   const reservables = () => B.barberos.filter((b) => b.reservable);
@@ -90,7 +90,7 @@
     html += '<div class="card ' + (prem() ? 'oro-marco' : '') + '"><div class="hola">' + C.avatar(yo, 'lg' + (prem() ? ' premium' : '')) +
       '<div class="grow"><h2>Hola, ' + esc(yo.nombre.split(' ')[0]) + ' 👋</h2><div class="muted">' + esc(b.bienvenida || '¿Listo para tu próximo corte?') + '</div>' +
       (B.calificacion && B.calificacion.total ? '<div class="chico">' + esc(b.nombre) + ' <span class="nota">' + B.calificacion.promedio + '</span> <span class="muted">(' + B.calificacion.total + ')</span></div>' : '') +
-      (prem() ? '<span class="pill oro" style="margin-top:6px">⭐ Premium</span>' : '<a href="#plan" class="pill" style="margin-top:6px;text-decoration:none">💎 Hazte Premium</a>') + '</div></div>' +
+      (prem() ? '<span class="pill oro" style="margin-top:6px">⭐ Premium</span>' : '') + '</div></div>' +
       '<div class="btns"><button class="grande full" id="bAgendar">📅 Agendar hora</button>' +
       (ultima ? '<button class="alt full" id="bRepetir">⭐ Repetir mi último corte<br><small style="font-weight:500">' + esc(ultima.servicios.map((s) => s.nombre).join(' + ')) + ' con ' + esc(ultima.barbero) + '</small></button>' : '') + '</div></div>';
 
@@ -243,7 +243,7 @@
       '<div class="seg" style="margin-bottom:10px"><button data-vista="dia">Día</button><button data-vista="semana">Semana</button><button data-vista="mes">Mes</button></div>' +
       '<div id="cal"></div><div class="leyenda"><span class="l">Libre</span><span class="o">Ocupado</span><span class="m">Mía</span></div>' +
       '<p class="muted chico">Abono para reservar: <b>' + C.plata(abonoMio()) + '</b>' + (prem() && abonoMio() < b.abono ? ' ⭐ (rebajado por ser Premium)' : '') + ' (se descuenta del total).' +
-      (!prem() && b.abono_premium != null && b.abono_premium < b.abono ? ' <a href="#plan">⭐ Premium: abono ' + (b.abono_premium ? C.plata(b.abono_premium) : 'gratis') + '</a>.' : '') + ' Reservas hasta ' + diasMax() + ' días adelante' + (prem() ? '' : ' · <a href="#plan">Premium: ' + K.limite('dias', true) + '</a>') + '.</p>';
+      ' Reservas hasta ' + diasMax() + ' días adelante.</p>';
     el.innerHTML = html;
     el.querySelectorAll('.serv').forEach((x) => x.onclick = () => {
       const id = x.dataset.s;
@@ -308,7 +308,7 @@
       A.tiraDias($('tira'), { cuantos: ventana(), sel: fechaSel, info: infoDia, alElegir: (f) => { fechaSel = f; pintarCalendario(); } });
       // Días más allá del límite: plateados (Premium).
       $('tira').querySelectorAll('.dia').forEach((d) => {
-        if (d.dataset.f > lim) P.bloquear(d, 'Reservar hasta ' + K.limite('dias', true) + ' días adelante');
+        if (d.dataset.f > lim) d.classList.add('plata');
         else if (K.prioridadBloquea(d.dataset.f, prem())) P.bloquear(d, 'Prioridad Premium: viernes y sábados con más de ' + K.regla('dias_prioridad') + ' días');
       });
       const s = horasDe(fechaSel);
@@ -317,7 +317,8 @@
       if (!s.length) h += '<div class="empty"><span class="ico">' + (dh.e === 'x' ? '🚪' : '😕') + '</span>' + (dh.e === 'x' ? 'Ese día no se atiende.' : 'No quedan horas este día.') + '</div>';
       else h += '<div class="slots">' + s.map((x) => '<button class="slot ' + x.estado + '" data-m="' + x.min + '"' + (x.estado === 'ocupado' ? ' disabled' : '') + '>' + x.hhmm + '</button>').join('') + '</div>';
       const libres = s.filter((x) => x.estado === 'libre').length;
-      if (s.length && !libres) h += '<div class="btns"><button class="alt full" id="bEspera">🔔 Avísame si se libera una hora</button></div>';
+      // G53 ⏳: solo si la barbería tiene el módulo Lista de espera.
+      if (s.length && !libres && K.clienteTiene('lista_espera')) h += '<div class="btns"><button class="alt full" id="bEspera">🔔 Avísame si se libera una hora</button></div>';
       $('slots').innerHTML = h;
       $('slots').querySelectorAll('.slot:not([disabled])').forEach((b) => b.onclick = () => {
         const x = s.find((y) => y.min === +b.dataset.m);
@@ -325,8 +326,7 @@
         confirmar(x, fechaSel);
       });
       if ($('bEspera')) {
-        if (!K.clienteTiene('lista_espera')) P.bloquear($('bEspera'), 'Lista de espera');
-        else $('bEspera').onclick = (ev) => C.accion(ev.target, () => K.rpc('unirse_espera', { p_fecha: fechaSel, p_barbero: barberoSel === '*' ? null : barberoSel }), '🔔 Te avisaremos si se libera una hora');
+        $('bEspera').onclick = (ev) => C.accion(ev.target, () => K.rpc('unirse_espera', { p_fecha: fechaSel, p_barbero: barberoSel === '*' ? null : barberoSel }), '🔔 Te avisaremos si se libera una hora');
       }
     } else if (vista === 'semana') {
       const id = barberoSel === '*' ? (reservables()[0] || {}).id : barberoSel;
@@ -355,7 +355,7 @@
       $('mAnt').onclick = () => mover(-1);
       $('mSig').onclick = () => mover(1);
       A.mes($('mes'), { mes: mesSel, info: (f) => (f < C.hoy() || f > C.sumarDias(C.hoy(), ventana()) ? { cerrado: f < C.hoy() } : infoDia(f)),
-        alDia: (f) => { if (f < C.hoy()) return; if (f > lim) return P.upsell('Reservar hasta ' + K.limite('dias', true) + ' días adelante'); if (K.prioridadBloquea(f, prem())) return P.upsell('Prioridad Premium: viernes y sábados'); fechaSel = f; vista = 'dia'; pintarAgendar(); } });
+        alDia: (f) => { if (f < C.hoy()) return; if (f > lim) return C.toast('Puedes reservar hasta ' + diasMax() + ' días adelante'); if (K.prioridadBloquea(f, prem())) return P.upsell('Prioridad Premium: viernes y sábados'); fechaSel = f; vista = 'dia'; pintarAgendar(); } });
     }
   }
 
@@ -510,6 +510,7 @@
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
       await K.rpc('calificar_barberia', { p_reserva: hr.id, p_estrellas: n, p_comentario: h.q('[data-c]').value });
       h.cerrar(); await cargarHoras(); VISTAS[vistaActual]();
+      if (n >= 4) P.pedirGoogle((K.cuenta.barberia || {}).google_resenas, (K.cuenta.barberia || {}).nombre);  // G53 ⭐
     }, '⭐ ¡Gracias por calificar!');
   }
 
@@ -521,7 +522,7 @@
     const prox = horasMias.filter((h) => new Date(h.fin) > ahora && h.estado !== 'anulada').sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
     const hist = horasMias.filter((h) => !(new Date(h.fin) > ahora && h.estado !== 'anulada'));
     el.innerHTML = '<div class="card"><h2><span class="grow">🗓️ Mis horas</span><button class="small" id="bNueva">+ Agendar</button></h2>' +
-      '<p class="muted chico" style="margin:0">Horas activas: ' + prox.filter((h) => ACTIVA.includes(h.estado)).length + ' de ' + K.limite('activas', prem()) + (prem() ? '' : ' · <a href="#plan">Premium: hasta ' + K.limite('activas', true) + '</a>') + '</p></div>' +
+      '<p class="muted chico" style="margin:0">Horas activas: ' + prox.filter((h) => ACTIVA.includes(h.estado)).length + ' de ' + K.limite('activas', prem()) + '</p></div>' +
       (prox.length ? prox.map((h) => tarjetaHora(h, true)).join('') : '<div class="card empty"><span class="ico">📅</span>No tienes horas próximas.</div>') +
       (hist.length ? '<div class="sec-tit">Historial</div>' + hist.slice(0, 30).map((h) => tarjetaHora(h)).join('') : '');
     $('bNueva').onclick = () => { location.hash = 'agendar'; };

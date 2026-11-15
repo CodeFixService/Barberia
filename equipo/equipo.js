@@ -694,7 +694,7 @@
       ['enlace', '🔗', 'Enlace y QR', 'Para que tus clientes reserven'],
       ['invitar', '🤝', 'Invita una barbería', K.regla('dias_referido') ? 'Gana ' + K.regla('dias_referido') + ' días de Premium' : 'Comparte la app'],
       ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
-      ...(bar().modulos && !premium() ? [['modulos', '🧩', 'Módulos', 'Activa solo lo que necesitas']] : []),
+      ...(bar().modulos ? [['modulos', '🧩', 'Módulos', premium() ? 'Incluidos + nuevos con -20%' : 'Activa solo lo que necesitas']] : []),
       ['respaldo', '💾', 'Respaldo', 'Descarga todo en Excel'],
       ['verificar', '🪪', 'Verificar identidad', 'Tus clientes confían más'],
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
@@ -727,11 +727,11 @@
       '<div class="btns"><button id="bRespaldo">⬇️ Descargar</button></div><p class="cfx-nota-btn">Un archivo Excel con todo: clientes, horas, servicios y caja.</p></div>';
     $('bRespaldo').onclick = () => C.accion($('bRespaldo'), async () => CFX_RESPALDO.excel('respaldo-' + bar().nombre, await K.rpc('mi_respaldo')), '💾 Respaldo descargado');
   }
-  // G39 🧩 Módulos sueltos para la barbería Free (núcleo: modulos.js). Premium ya los trae incluidos.
+  // G39/G53 🧩 Módulos sueltos (núcleo: modulos.js). Premium trae incluidos recordatorios, sellos y campañas; los nuevos con -20 %.
   function secModulos() {
     const z = seccion('🧩 Módulos');
-    if (premium()) { z.innerHTML = '<div class="card empty"><span class="ico">⭐</span>Tu Premium ya incluye recordatorios, sellos y campañas.</div>'; return; }
-    z.innerHTML = '<p class="muted">Activa solo la función que necesitas, sin pasarte a Premium. Toca Probar para ver cómo funciona.</p><div id="modZona"></div>';
+    z.innerHTML = '<p class="muted">' + (premium() ? 'Tu Premium ya trae algunos (✅). Los demás te salen 20% más baratos.'
+      : 'Activa solo la función que necesitas, sin pasarte a Premium.') + ' Toca ▶️ Probar para ver cómo funciona.</p><div id="modZona"></div>';
     CFX_MODULOS_TIENDA.montar($('modZona'), { rpc: K.rpc, alCambiar: () => setTimeout(() => location.reload(), 1500) }).cargar();
   }
   // 🧾 G37: comprobante de un corte de la caja (núcleo: comprobante.js). Logo de la barbería; sin RUT sale igual (G31).
@@ -1140,6 +1140,10 @@
       '<div><label>Sellos para corte gratis</label><input data-k="sellos_meta" type="number" min="3" max="30" value="' + b.sellos_meta + '"></div></div></div>' +
       '<div class="card" id="cCumple"><h2>🎂 Regalo de cumpleaños</h2><p class="muted chico" style="margin-top:-6px">El día de su cumpleaños, a tus clientes con cuenta les llega este regalo (vale 7 días). Vacío = no se envía.</p>' +
       '<input data-k="regalo_cumple" maxlength="120" placeholder="Ej: 20% de descuento en tu corte" value="' + esc(b.regalo_cumple || '') + '"></div>' +
+      // G53 ⭐ módulo Reseñas en Google
+      '<div class="card" id="cResenas"><h2>⭐ Reseñas en Google</h2><p class="muted chico" style="margin-top:-6px">Si un cliente te pone 4 o 5 estrellas, le pedimos su reseña en Google con este link.</p>' +
+      '<input data-k="google_resenas" inputmode="url" maxlength="300" placeholder="https://g.page/r/…/review" value="' + esc(b.google_resenas || '') + '">' +
+      '<p class="cfx-nota-btn">Dónde sale: Google Maps → tu barbería → "Pedir reseñas" → Compartir → copiar link.</p></div>' +
       '<div class="btns"><button class="grande full" id="bGuardarAj">Guardar</button></div>';
     let logo, portada, color = b.color || '';
     $('bLogo').onclick = async () => { const f = await C.elegirImagen(160, 0.8); if (!f) return; logo = f; $('aLogo').style.cssText = C.fondo(f); $('aLogo').textContent = ''; };
@@ -1151,11 +1155,13 @@
     if (!colores) P.bloquear($('cPrem'), 'Colores y portada');
     if (!tiene('comisiones')) P.bloquear($('cCom'), 'Comisiones y sellos');
     if (!tiene('cumpleanos')) P.bloquear($('cCumple'), 'Regalo de cumpleaños automático', 'campanas');
+    if (!tiene('resenas')) P.bloquear($('cResenas'), 'Reseñas en Google', 'resenas');
     $('bGuardarAj').onclick = (ev) => C.accion(ev.target, async () => {
       const p = {};
       z.querySelectorAll('[data-k]').forEach((i) => {
         if (!tiene('comisiones') && (i.dataset.k === 'comision' || i.dataset.k === 'sellos_meta')) return;
         if (!tiene('cumpleanos') && i.dataset.k === 'regalo_cumple') return;
+        if (!tiene('resenas') && i.dataset.k === 'google_resenas') return;
         p[i.dataset.k] = i.type === 'number' ? (+i.value || 0) : i.value;
       });
       if (logo !== undefined) p.logo = logo;

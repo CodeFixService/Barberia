@@ -164,6 +164,10 @@
     if (q('[data-calificar]')) q('[data-calificar]').onclick = (ev) => C.accion(ev.target, async () => {
       R = await K.rpc('reserva_calificar', { p_token: token, p_estrellas: estrellas, p_comentario: q('[data-com]').value });
       pintar();
+      // G53 ⭐ módulo Reseñas en Google: al cliente feliz le pedimos su reseña (solo si la barbería puso su link).
+      const g = estrellas >= 4 && R.google_resenas ? CFX_URL(R.google_resenas) : '';
+      if (/^https:/.test(g)) C.hoja('<h2>⭐ ¡Gracias!</h2><p>¿Nos ayudas con una reseña en Google? Es 1 minuto y ayuda mucho a la barbería.</p>' +
+        '<div class="btns"><a class="btn oro full" target="_blank" rel="noopener" href="' + esc(g) + '">⭐ Dejar reseña en Google</a></div>');
     }, '⭐ ¡Gracias!');
   }
 

@@ -1,7 +1,7 @@
 # APP.md · 💈 Barbería
 
 Leer esto antes que el código (G42j). Repo Barberia · id `barberia` · Supabase gxlabxuttnxvzkucckef.
-Reservas con abono para barberías: agenda, caja, clientes, link/QR para reservar. Free / Premium / 🧩 módulos (G39: Free compra módulos; Premium ya los trae).
+Reservas con abono para barberías: agenda, caja, clientes, link/QR para reservar. Free / Premium / 🧩 módulos (G53: Premium trae solo los 3 primeros; los nuevos se compran aparte, Premium -20 %). Clientes NO pagan.
 
 ## Quién usa qué
 - **Dueño** (`owner`) y **barbero** (`barber`): `/equipo/` (Inicio · Agenda · Clientes · Mensajes · Más).
@@ -17,8 +17,8 @@ Reservas con abono para barberías: agenda, caja, clientes, link/QR para reserva
 | `/equipo/` `#hoy` `#agenda` `#clientes` `#chat` `#mas` | Panel (equipo.js). `#agenda?r=<id>` abre una hora |
 | `/equipo/#negocio` `#horario` `#tiempos` `#servicios` `#links` `#ofertas` `#equipo` `#enlace` | Más → Tu barbería |
 | `/equipo/#caja` `#estadisticas` `#resumen` `#volver` `#calificaciones` | Más → Ventas y clientes (caja: tocar un corte → 🧾 Comprobante) |
-| `/equipo/#plan` `#modulos` `#invitar` `#respaldo` `#perfil` | Más → Tu plan / Configuración. 🧩 Módulos solo sale si el dueño es Free y la venta está prendida |
-| `/cliente/` (`#plan`) | Inicio del cliente: horas, sellos, cumpleaños, Premium del cliente |
+| `/equipo/#plan` `#modulos` `#invitar` `#respaldo` `#perfil` | Más → Tu plan / Configuración. 🧩 Módulos sale con la venta prendida (Free y Premium: incluidos ✅ + nuevos -20 %) |
+| `/cliente/` | Inicio del cliente: horas, sellos, cumpleaños. Perfil → 📣 Recomienda tu barbería (link /b/ + QR). Sin Premium de cliente (G53) |
 | `/b/?b=` · `/r/?t=` · `/legal.html` | Vista pública · reserva por link · términos |
 
 ## Archivos clave
@@ -33,13 +33,16 @@ Reservas con abono para barberías: agenda, caja, clientes, link/QR para reserva
 - FREE: agenda, servicios, link de reservas, caja de cortes, 🧾 comprobante. PREMIUM: más barberos/clientes, estadísticas, colores, reportes de caja, comisiones…
 - 🧩 Módulos (`cfx_modulos_app()` = recordatorios, sellos, campanas): `bar_tiene(clave, barberia)` = Premium **o** módulo comprado (`bar_modulo_clave`: recordatorios/recordar_wsp → recordatorios · sellos → sellos · recuperar/cumpleanos → campanas). `mi_cuenta().barberia.modulos` = {módulo: activo} solo con la venta prendida (si no, null y todo es como antes).
 - Negocio = el dueño (`cfx_negocio_de_cuenta`: dueño → él, barbero → su dueño, cliente → null). Packs propios (Básico 1.490 · Completo 1.990), solo si seguían los de fábrica.
+- G53 (2.97 · bd 2.82): módulos NUEVOS `bar_nuevos()` = espera, resenas (luego: antifalta, portafolio, giftcards, membresia, productos, agenda_redes; ya están en el catálogo del núcleo con demo). NO vienen en Premium; venta apagada = gratis (como el núcleo). `bar_sueltos(bid)` → `mi_cuenta().barberia.sueltos`; JS `K.NUEVOS` + `barberiaTiene`. `cfx_modulo_plan_app` = los 3 primeros incluidos en Premium (tienda: "✅ Incluido en tu Premium", sin packs que ya trae). Candado de un módulo nuevo → demo ▶️ directa (perfil.js upsell).
+- ⏳ espera: `unirse_espera` exige `bar_tiene('espera')` (o Premium de cliente antiguo hasta que venza); el botón solo sale si la barbería lo tiene. ⭐ resenas: `barberias.google_resenas` (Más → Perfil de la barbería), tras 4-5 ★ en cliente/ y /r/ se pide reseña en Google (`Perfil.pedirGoogle`).
+- 👤 Clientes sin Premium (G53): colores, favorito y ofertas VIP gratis; sin prioridad de viernes/sábado; límites del cliente = los Free (anti-abuso). Quien pagó Premium de cliente lo conserva hasta que venza.
 - R1: trigger `profiles_vence` → todo Premium con fecha (30 días si viene sin fecha; admin no).
 
 ## Tablas propias (además de las cfx_* del núcleo)
 planes, planes_info, profiles, barberias, user_invites, app_settings, textos, auditoria, app_secrets, push_subscriptions, avisos, licenses, requests, pagos, servicios, bloqueos, ofertas, reservas, calificaciones, lista_negra, lista_espera, caja, messages, blocks, reports, actualizaciones.
 
 ## Versiones
-`shared/core.js` l.11 + `version.json` (version, bd, notas = SOLO categorías) + `db_version()` en instalar.sql. Ahora: 2.94 · bd 2.79 · enviar 1.1.
+`shared/core.js` l.11 + `version.json` (version, bd, notas = SOLO categorías) + `db_version()` en instalar.sql. Ahora: 2.97 · bd 2.82 · enviar 1.1.
 Auto-actualizar compara con `bd` de version.json (antes con `version` → se reinstalaba cada 10 min; arreglado en 2.79).
 
 ## 🧠 Del núcleo: falta aplicar aquí

@@ -35,6 +35,19 @@
   // G39 🧩: mod = módulo que desbloquea esto suelto (recordatorios, sellos, campanas). Si se vende, el dueño Free puede comprar solo ese.
   function upsell(que, mod) {
     const a = K.cuenta || {};
+    // G53: los módulos NUEVOS no vienen en Premium → directo a la demo ▶️ + Comprar (Premium paga -20 %).
+    if (mod && (K.NUEVOS || []).includes(mod)) {
+      if (a.role === 'owner' && global.CFX_MODULOS_TIENDA) {
+        global.CFX_MODULOS_TIENDA.probar(mod, { rpc: K.rpc, alCambiar: () => setTimeout(() => location.reload(), 1500) })
+          .then((d) => { if (!d) C.toast('Esta función no está disponible por ahora'); });
+      } else C.hoja('<h2>🧩 ' + esc(que || 'Módulo') + '</h2><p>Esta función se activa cuando tu barbería suma el módulo. Pídele al dueño que lo active en Más → 🧩 Módulos.</p>');
+      return;
+    }
+    // G53 👤: el cliente no paga nada; lo que falta depende de su barbería.
+    if (a.role === 'client' && !a.is_premium) {
+      C.hoja('<h2>💈 ' + esc(que || 'Función') + '</h2><p>Esta función todavía no está activa en tu barbería. Puedes contarle que te gustaría usarla 😉</p>');
+      return;
+    }
     const vende = mod && a.role === 'owner' && a.barberia && a.barberia.modulos && mod in a.barberia.modulos && global.CFX_MODULOS_TIENDA;
     const esDueno = a.role === 'owner', esCliente = a.role === 'client';
     const h = C.hoja('<h2>⭐ ' + esc(que || 'Función Premium') + '</h2>' +
@@ -58,6 +71,14 @@
     if (!el) return;
     el.classList.add('plata');
     el.addEventListener('click', (e) => { e.preventDefault(); e.stopImmediatePropagation(); upsell(que, mod); }, true);
+  }
+
+  /* ---------- G53 ⭐ Reseñas en Google: después de 4 o 5 estrellas (solo si la barbería tiene el módulo y puso su link) ---------- */
+  function pedirGoogle(link, nombre) {
+    const u = link && global.CFX_URL ? global.CFX_URL(link) : '';
+    if (!u || !/^https:/.test(u)) return;
+    C.hoja('<h2>⭐ ¡Gracias!</h2><p>¿Nos ayudas con una reseña en Google? Así más gente conoce ' + esc(nombre || 'la barbería') + '. Es 1 minuto.</p>' +
+      '<div class="btns"><a class="btn oro full" target="_blank" rel="noopener" href="' + esc(u) + '">⭐ Dejar reseña en Google</a></div>');
   }
 
   /* ---------- Compartir: link + QR (descargar, copiar, WhatsApp) ---------- */
@@ -172,13 +193,17 @@
     const esCliente = a.role === 'client';
     // Lo propio de Barbería queda escondido en la página y se muestra dentro de su hoja (favorito y plan siguen funcionando igual).
     el.innerHTML = '<div data-menu></div>' + (opts.extraPerfil ? '<div class="card cfx-oc" data-fav>' + opts.extraPerfil + '</div>' : '') +
-      ((a.role === 'owner' || esCliente) ? '<div class="cfx-oc" data-plan></div>' : '');
+      ((a.role === 'owner' || (esCliente && a.is_premium)) ? '<div class="cfx-oc" data-plan></div>' : '');  // G53: cliente sin Premium (quien pagó lo ve hasta que venza)
     const q = (x) => el.querySelector(x);
     if (q('[data-plan]')) plan(q('[data-plan]'));
     const wsp = esCliente && a.barberia && a.barberia.whatsapp;
     const items = [
       q('[data-fav]') && { k: 'favorito', ico: '❤️', t: 'Barbero favorito', d: 'Se elige solo al agendar', grupo: 'Configuración', nodo: q('[data-fav]') },
       q('[data-plan]') && { k: 'premium', ico: '⭐', t: a.is_premium ? 'Mi plan Premium' : 'Hazte Premium', dato: a.is_premium ? 'Premium' : 'Free', grupo: 'Tu plan', nodo: q('[data-plan]') },
+      // G53 📣: el cliente recomienda SU barbería gratis (link de reservas por WhatsApp o QR).
+      esCliente && a.barberia && a.barberia.codigo && { k: 'recomendar', ico: '📣', t: 'Recomienda tu barbería', d: 'Comparte el link para reservar', grupo: 'Cuenta y ayuda',
+        accion: () => compartir({ titulo: '📣 Recomienda ' + (a.barberia.nombre || 'tu barbería'), texto: 'Mándale este link a un amigo: reserva su hora en 1 minuto.',
+          link: K.linkBarberia(a.barberia.codigo), mensaje: '💈 Te recomiendo ' + (a.barberia.nombre || 'mi barbería') + ', reserva tu hora aquí', archivo: 'qr-barberia' }) },
       wsp && { k: 'wsp', ico: '💬', t: 'WhatsApp de la barbería', grupo: 'Cuenta y ayuda', accion: () => window.open(C.wa(a.barberia.whatsapp, 'Hola, tengo una consulta sobre la app'), '_blank', 'noopener') },
       { k: 'tour', ico: '🧭', t: 'Ver el recorrido', grupo: 'Cuenta y ayuda', accion: () => opts.tour && opts.tour(true) },
       { k: 'terminos', ico: '📄', t: 'Términos y privacidad', grupo: 'Cuenta y ayuda', ir: C.raiz() + 'legal.html' }
@@ -204,5 +229,5 @@
     pintar();
   }
 
-  global.Perfil = { perfil, plan, upsell, bloquear, tour, beneficios, fechaCorta, diasQuedan, compartir };
+  global.Perfil = { perfil, plan, upsell, bloquear, tour, beneficios, fechaCorta, diasQuedan, compartir, pedirGoogle };
 })(window);

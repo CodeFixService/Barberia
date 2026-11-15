@@ -427,7 +427,7 @@ select pg_temp.ok(not public.puede_restablecer(prueba.id('pedro@test.cl'), prueb
 -- 15. v1.3: colores, conexión y limpiar la campanita
 update public.profiles set plan = 'free', premium_until = null where email = 'beto@test.cl';
 select pg_temp.como('beto@test.cl');
-select pg_temp.debe_fallar($$select public.guardar_perfil('{"color":"#123456"}')$$, 'Premium');
+select public.guardar_perfil('{"color":"#123456"}');  -- G53: los clientes no pagan: todos los colores
 select public.guardar_perfil('{"color":"#1d4ed8"}');
 select pg_temp.debe_fallar($$select public.guardar_perfil('{"color":"rojo"}')$$, 'no válido');
 reset role;
@@ -552,9 +552,8 @@ select (select d from generate_series((now() at time zone 'America/Santiago')::d
 grant select on t2 to authenticated, anon;
 create or replace function pg_temp.en(p_d date, p_h text) returns timestamptz language sql as $$ select (p_d + p_h::time) at time zone 'America/Santiago' $$;
 
--- Prioridad Premium: viernes y sábados lejanos solo para Premium.
+-- G53: sin Premium de cliente ya no hay prioridad de viernes y sábados (se quitó la prueba).
 set role anon;
-select pg_temp.debe_fallar($$select public.reservar_invitado(prueba.cod(), prueba.id('pedro@test.cl'), pg_temp.en((select vie from t2), '11:00'), array[prueba.serv('Corte')], 'Lejos', '911112222')$$, 'Premium');
 
 -- Devolución de un abono que nadie verificó: el dueño la descarta si la transferencia no llegó.
 create temp table gv1 as select public.reservar_invitado(prueba.cod(), prueba.id('pedro@test.cl'), pg_temp.en((select d from t2), '09:00'), array[prueba.serv('Corte')], 'Gabi', '911113333') as r;

@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.81'::text $$;
+language sql immutable as $$ select '2.82'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -117,10 +117,14 @@ $$;
 -- G39 🧩 (2.79): una barbería Free puede comprar sueltas algunas opciones del Premium (módulos: ⏰ recordatorios, 🎟️ sellos,
 -- 📣 campañas = clientes que no vuelven + cumpleaños). Premium las sigue teniendo incluidas. Con la venta de módulos apagada
 -- (Centro de Mando → Apps → 🧩) todo sigue como antes: solo Premium.
+-- G53 (2.82): módulos NUEVOS. NO vienen en Premium (Premium paga -20 %). Venta apagada = gratis para todos (como el núcleo).
+create or replace function public.bar_nuevos() returns text[]
+language sql immutable as $$ select array['espera', 'resenas'] $$;
 create or replace function public.bar_modulo_clave(p_clave text) returns text
 language sql immutable as $$
   select case when p_clave in ('recordatorios', 'recordar_wsp') then 'recordatorios' when p_clave = 'sellos' then 'sellos'
-              when p_clave in ('recuperar', 'cumpleanos') then 'campanas' end
+              when p_clave in ('recuperar', 'cumpleanos') then 'campanas'
+              when p_clave = any(public.bar_nuevos()) then p_clave end
 $$;
 create or replace function public.bar_modulo(p_modulo text, bid uuid) returns boolean
 language plpgsql stable security definer set search_path = '' as $$
@@ -128,8 +132,14 @@ declare o uuid;
 begin
   if p_modulo is null or bid is null or to_regprocedure('public.cfx_venta_activa(text)') is null then return false; end if;
   select owner_id into o from public.barberias where id = bid;
+  if o is not null and p_modulo = any(public.bar_nuevos()) then return public.cfx_modulo_de(p_modulo, o); end if;
   return o is not null and public.cfx_venta_activa(p_modulo) and public.cfx_modulo_de(p_modulo, o);
 end $$;
+-- Para la app (dueño, barbero y cliente): {"espera": true, ...} de los módulos nuevos que puede usar la barbería.
+create or replace function public.bar_sueltos(bid uuid) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select coalesce(jsonb_object_agg(k, public.bar_modulo(k, bid)), '{}') from unnest(public.bar_nuevos()) k
+$$;
 create or replace function public.bar_tiene(p_clave text, bid uuid) returns boolean
 language plpgsql stable security definer set search_path = '' as $$
 begin
@@ -140,8 +150,9 @@ create or replace function public.bar_modulos(bid uuid) returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 begin
   if bid is null or to_regprocedure('public.cfx_venta_on()') is null or not public.cfx_venta_on() then return null; end if;
-  return (select jsonb_object_agg(k, public.bar_modulo(k, bid)) from unnest(array['recordatorios', 'sellos', 'campanas']) k where public.cfx_venta_activa(k));
+  return (select jsonb_object_agg(k, public.bar_modulo(k, bid)) from unnest(public.cfx_modulos_app()) k where public.cfx_venta_activa(k));
 end $$;
+revoke all on function public.bar_sueltos(uuid) from public, anon, authenticated;
 revoke all on function public.bar_modulo_clave(text), public.bar_modulo(text, uuid), public.bar_tiene(text, uuid), public.bar_modulos(uuid) from public, anon, authenticated;
 
 -- Duración (días) de un mes de Premium.
@@ -306,6 +317,7 @@ alter table public.barberias drop constraint if exists barberias_abono_premium_c
 alter table public.barberias add constraint barberias_abono_premium_check check (abono_premium is null or abono_premium between 0 and 100000);
 alter table public.barberias add column if not exists regalo_cumple text;
 alter table public.barberias add column if not exists mensaje_volver text;
+alter table public.barberias add column if not exists google_resenas text;  -- G53 ⭐ link para dejar reseña en Google (https://)
 alter table public.barberias add column if not exists resumen_enviado text;
 
 create or replace function public.nuevo_codigo() returns text
@@ -583,7 +595,9 @@ begin
       -- v2.1: abono para clientes Premium, regalo de cumpleaños y mensaje para los que no vuelven.
       'abono_premium', case when me.role <> 'barber' then b.abono_premium end, 'regalo_cumple', b.regalo_cumple, 'mensaje_volver', b.mensaje_volver,
       'premium', public.is_premium(b.owner_id), 'premium_until', o.premium_until, 'owner_id', b.owner_id,
-      'modulos', public.bar_modulos(b.id)) end);
+      'modulos', public.bar_modulos(b.id), 'sueltos', public.bar_sueltos(b.id),
+      -- G53 ⭐: link de reseñas en Google (el dueño lo ve siempre para editarlo; los demás solo si la barbería tiene el módulo).
+      'google_resenas', case when me.role = 'owner' or public.bar_tiene('resenas', b.id) then b.google_resenas end) end);
 end $$;
 
 -- Datos mínimos para la pantalla de inicio de sesión (sin cuenta): logo, nombre y WhatsApp.
@@ -1876,7 +1890,9 @@ declare me public.profiles;
 begin
   me := public.yo_activo();
   if me.role <> 'client' then raise exception 'Solo clientes'; end if;
-  if not public.tiene('cliente', 'lista_espera', public.is_premium(me.id)) then raise exception 'La lista de espera es Premium ⭐'; end if;
+  -- G53: módulo ⏳ de la barbería (el cliente no paga). Quien ya pagó Premium de cliente la sigue teniendo hasta que venza.
+  if not (public.bar_tiene('espera', me.barberia_id) or public.tiene('cliente', 'lista_espera', public.is_premium(me.id))) then
+    raise exception 'Tu barbería no tiene la lista de espera'; end if;
   if p_fecha < (now() at time zone public.tz())::date then raise exception 'Esa fecha ya pasó'; end if;
   if (select count(*) from public.lista_espera where cliente_id = me.id and not avisado and fecha >= current_date) >= 5 then
     raise exception 'Máximo 5 días en lista de espera';
@@ -1896,7 +1912,7 @@ begin
   if me.barberia_id is null then raise exception 'Sin barbería'; end if;
   prem_cli := public.is_premium(me.id);
   staff := public.es_staff(me);
-  ve_vip := staff or public.tiene('cliente', 'ofertas_vip', prem_cli);
+  ve_vip := true;  -- G53: los clientes no pagan: ven también las ofertas VIP (crearlas sigue siendo Premium de la barbería)
   return jsonb_build_object(
     'barberos', (select coalesce(jsonb_agg(jsonb_build_object(
         'id', p.id, 'nombre', public.nombre_de(p), 'avatar', p.avatar, 'foto', p.foto, 'descripcion', p.descripcion,
@@ -2042,10 +2058,11 @@ begin
   if p_inicio < now() + interval '1 hour' then raise exception 'Reserva con al menos 1 hora de anticipación'; end if;
   if p_inicio > now() + make_interval(days => public.limite('dias', p_premium)) then
     raise exception 'Puedes reservar hasta % días adelante%', public.limite('dias', p_premium),
-      case when p_premium then '' else ' (Premium: ' || public.limite('dias', true) || ' días)' end;
+      '';  -- G53: sin ofrecer Premium al cliente
   end if;
   -- v2.1: prioridad Premium. Los viernes y sábados con más de N días de anticipación son para clientes Premium (0 = sin prioridad).
-  if public.regla('dias_prioridad') > 0 and not public.tiene('cliente', 'prioridad', p_premium)
+  -- G53: sin Premium de cliente ya no hay prioridad (nadie queda fuera de los viernes y sábados).
+  if false and public.regla('dias_prioridad') > 0 and not public.tiene('cliente', 'prioridad', p_premium)
      and extract(isodow from p_inicio at time zone public.tz()) in (5, 6)
      and (p_inicio at time zone public.tz())::date > (now() at time zone public.tz())::date + public.regla('dias_prioridad') then
     raise exception 'Los viernes y sábados con más de % días de anticipación son para clientes Premium ⭐. Elige un día más cercano.', public.regla('dias_prioridad');
@@ -2360,6 +2377,7 @@ begin
     'nombre', coalesce(c.nombre, r.cliente_nombre), 'con_cuenta', r.cliente_id is not null,
     'politica', public.politica(r), 'reagendable', public.reagendable(r) and r.cliente_id is null,
     'calificada', exists (select 1 from public.calificaciones q where q.reserva_id = r.id and q.autor = 'cliente'),
+    'google_resenas', (select b2.google_resenas from public.barberias b2 where b2.id = r.barberia_id and public.bar_tiene('resenas', b2.id)),  -- G53 ⭐
     'barbero', jsonb_build_object('id', bar.id, 'nombre', public.nombre_de(bar), 'avatar', bar.avatar, 'foto', bar.foto,
       'horario', public.horario_de(bar.id), 'reservable', public.reservable(bar), 'paso', bar.paso_min),
     'barberia', jsonb_build_object('codigo', b.codigo, 'nombre', b.nombre, 'logo', b.logo, 'color', case when public.barberia_premium(b.id) then b.color end,
@@ -2964,6 +2982,7 @@ begin
   if p ? 'horario' and not public.horario_valido(p -> 'horario') then raise exception 'Horario no válido'; end if;
   if not public.img_ok(p ->> 'logo', 30000) or not public.img_ok(p ->> 'portada', 420000) then raise exception 'Imagen muy pesada'; end if;
   if coalesce(p ->> 'link_pago', '') <> '' and p ->> 'link_pago' !~* '^https://' then raise exception 'El link de pago debe empezar con https://'; end if;
+  if coalesce(trim(p ->> 'google_resenas'), '') <> '' and trim(p ->> 'google_resenas') !~ '^https://[^ <>"]+$' then raise exception 'El link de Google debe empezar con https://'; end if;
   -- v1.4: dos links de pago; el activo pasa a ser el abono y el link que ven los clientes.
   if p ? 'pagos' then
     if coalesce(p -> 'pagos' ->> 'activo', '1') not in ('1', '2') then raise exception 'Elige el link 1 o el 2'; end if;
@@ -3016,6 +3035,7 @@ begin
     sellos_meta = case when p ? 'sellos_meta' then greatest(3, least(30, (p ->> 'sellos_meta')::int)) else sellos_meta end,
     barberos_crean_clientes = case when p ? 'barberos_crean_clientes' then coalesce((p ->> 'barberos_crean_clientes')::boolean, true) else barberos_crean_clientes end,
     abono_premium = case when p ? 'abono_premium' then nullif(p ->> 'abono_premium', '')::int else abono_premium end,
+    google_resenas = case when p ? 'google_resenas' then left(nullif(trim(p ->> 'google_resenas'), ''), 300) else google_resenas end,
     regalo_cumple = case when p ? 'regalo_cumple' then left(nullif(trim(p ->> 'regalo_cumple'), ''), 120) else regalo_cumple end,
     mensaje_volver = case when p ? 'mensaje_volver' then left(nullif(trim(p ->> 'mensaje_volver'), ''), 300) else mensaje_volver end
   where id = me.barberia_id;
@@ -3044,7 +3064,7 @@ declare me public.profiles; prem boolean;
 begin
   me := public.yo_activo();
   prem := case when me.role in ('admin', 'socio') then true when public.es_staff(me) then public.tiene('barberia', 'colores', public.barberia_premium(me.barberia_id))
-               else public.tiene('cliente', 'colores', public.is_premium(me.id)) end;
+               else true end;  -- G53: los clientes no pagan: todos los colores
   if not public.img_ok(p ->> 'foto', 40000) then raise exception 'Foto muy pesada'; end if;
   -- v1.3: Free elige entre 4 colores conocidos; Premium, cualquier color (también uno personalizado).
   if coalesce(p ->> 'color', '') <> '' then
@@ -3054,7 +3074,7 @@ begin
     end if;
   end if;
   if p ? 'favorito' and nullif(p ->> 'favorito', '') is not null then
-    if not public.tiene('cliente', 'favorito', public.is_premium(me.id)) then raise exception 'Barbero favorito es Premium ⭐'; end if;
+    -- G53: barbero favorito gratis para todos los clientes.
     if not exists (select 1 from public.profiles where id = (p ->> 'favorito')::uuid and barberia_id = me.barberia_id and role in ('owner', 'barber')) then
       raise exception 'Barbero no encontrado';
     end if;
@@ -3167,7 +3187,7 @@ begin
       select nombre into bname from public.barberias where id = me.barberia_id;
       for c in select id from public.profiles where barberia_id = me.barberia_id and role = 'client' and not suspended
                and public.cfx_acepta(id, 'negocios')  -- el cliente puede dejar de recibir ofertas (Mis datos y privacidad)
-               and (not o.vip or public.tiene('cliente', 'ofertas_vip', public.is_premium(id))) loop
+               loop  -- G53: las ofertas VIP llegan a todos los clientes
         perform public.avisar(me.id, c.id, 'oferta', (case when o.vip then '⭐ Oferta VIP · ' else '🏷️ ' end) || o.titulo,
           coalesce(o.detalle, bname), 'ofertas');
       end loop;
@@ -6145,7 +6165,16 @@ language sql immutable as $$
          ('medicion', '📊 Medir anuncios', 'Meta Pixel y Google Analytics en tu tienda: mide qué anuncio te trae ventas.'),
          ('dominio', '🌐 Dominio propio', 'Tu tienda en tu dirección (mitienda.cl) en vez del link de Despega Pyme.'),
          ('reservas', '📅 Reservas', 'Agenda en línea para tus clientes.'),
-         ('recordatorios', '⏰ Recordatorios', 'Avisos automáticos antes de cada cita o vencimiento.')
+         ('recordatorios', '⏰ Recordatorios', 'Avisos automáticos antes de cada cita o vencimiento.'),
+         -- G53: módulos de agenda (Barbería primero; sirven para cualquier app con reservas).
+         ('antifalta', '💳 Anti-falta', 'Abono obligatorio y bloqueo automático para los clientes que reservan y no llegan.'),
+         ('espera', '⏳ Lista de espera', 'Si no hay horas, el cliente se anota y le avisamos apenas se libere una.'),
+         ('resenas', '⭐ Reseñas en Google', 'Al cliente feliz le pedimos su reseña en Google: más gente te encuentra.'),
+         ('portafolio', '🖼️ Portafolio', 'Fotos de tus mejores trabajos en tu página de reservas.'),
+         ('giftcards', '🎁 Gift cards', 'Vende tarjetas de regalo con código para canjear en tu negocio.'),
+         ('membresia', '🔁 Membresía', 'Plan mensual para tus clientes (ej. 4 cortes al mes): plata segura cada mes.'),
+         ('productos', '🛍️ Productos y stock', 'Vende productos en la caja y lleva su stock.'),
+         ('agenda_redes', '🤖 Reservas por WhatsApp e Instagram', 'Link y respuestas listas para que reserven desde tus redes.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb
@@ -6227,6 +6256,17 @@ begin
   return mx;
 end $$;
 
+-- G53: ¿el plan del negocio ya trae este módulo? (ej. Barbería: Premium incluye los 3 primeros). Gancho opcional de cada app:
+-- cfx_modulo_plan_app(text, uuid) → boolean. Sin gancho: ninguno viene en el plan.
+create or replace function public.cfx_modulo_plan(p_modulo text, p_negocio uuid) returns boolean
+language plpgsql stable security definer set search_path = '' as $$
+declare r boolean;
+begin
+  if p_negocio is null or to_regprocedure('public.cfx_modulo_plan_app(text,uuid)') is null then return false; end if;
+  execute 'select public.cfx_modulo_plan_app($1, $2)' into r using p_modulo, p_negocio;
+  return coalesce(r, false);
+end $$;
+
 -- Pantalla 🧩 Módulos del negocio: catálogo, precios (con su descuento Premium), lo que tiene y hasta cuándo.
 create or replace function public.cfx_modulos_tienda() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
@@ -6242,7 +6282,7 @@ begin
     'prueba_pack', exists (select 1 from public.cfx_modulos_pruebas p where p.negocio = n and p.item like 'pack:%'),
     'modulos', coalesce((select jsonb_agg(jsonb_build_object('clave', k, 'nombre', coalesce(c.nombre, k), 'detalle', coalesce(c.detalle, ''),
         'precio', round(public.cfx_venta_precio(k) * (100 - d) / 100.0)::int, 'lista', public.cfx_venta_precio(k),
-        'vende', public.cfx_venta_activa(k), 'activo', public.cfx_modulo_de(k, n),
+        'vende', public.cfx_venta_activa(k), 'activo', public.cfx_modulo_de(k, n) or public.cfx_modulo_plan(k, n), 'plan', public.cfx_modulo_plan(k, n),
         'hasta', m.hasta, 'origen', m.origen, 'prueba_usada', exists (select 1 from public.cfx_modulos_pruebas p where p.negocio = n and p.item = k),
         'links', v #> array['links', k]) order by o)
       from unnest(public.cfx_modulos_de_app()) with ordinality u(k, o)
@@ -6362,7 +6402,7 @@ begin
 end $$;
 
 revoke all on function public.cfx_modulos_catalogo(), public.cfx_venta(), public.cfx_venta_on(), public.cfx_venta_precio(text), public.cfx_venta_activa(text), public.cfx_venta_modulos(text),
-  public.cfx_negocio_cuenta(uuid), public.cfx_negocio_premium(uuid), public.cfx_modulo_de(text, uuid), public.cfx_modulo_mio(text),
+  public.cfx_negocio_cuenta(uuid), public.cfx_negocio_premium(uuid), public.cfx_modulo_plan(text, uuid), public.cfx_modulo_de(text, uuid), public.cfx_modulo_mio(text),
   public.cfx_modulos_dar(uuid, text, int, text), public.cfx_modulos_avisar(), public.cfx_modulos_borrar(uuid) from public, anon, authenticated;
 revoke all on function public.cfx_modulos_de(uuid), public.cfx_modulos_tienda(), public.cfx_modulo_probar(text), public.cfx_venta_admin(),
   public.cfx_venta_guardar(jsonb), public.cfx_modulo_regalar(text, text, int) from public, anon;
@@ -7399,14 +7439,22 @@ $$;
 create or replace function public.cfx_es_premium(n uuid) returns boolean
 language sql stable security definer set search_path = '' as $$ select public.is_premium(n) $$;
 create or replace function public.cfx_modulos_app() returns text[]
-language sql immutable as $$ select array['recordatorios', 'sellos', 'campanas'] $$;
-revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app() from public, anon, authenticated;
+language sql immutable as $$ select array['recordatorios', 'sellos', 'campanas'] || public.bar_nuevos() $$;
+-- G53: el Premium de la barbería trae incluidos los 3 primeros (no se le quita nada a quien ya paga); los nuevos se compran aparte (-20 %).
+create or replace function public.cfx_modulo_plan_app(p_modulo text, n uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select p_modulo in ('recordatorios', 'sellos', 'campanas') and public.is_premium(n)
+$$;
+revoke all on function public.cfx_negocio_de_cuenta(uuid), public.cfx_es_premium(uuid), public.cfx_modulos_app(), public.cfx_modulo_plan_app(text, uuid) from public, anon, authenticated;
 -- Packs de Barbería (los del núcleo son de la tienda y aquí saldrían más caros que sueltos). Solo si siguen los de fábrica:
 -- si Josué ya los cambió en el Centro de Mando, no se tocan.
 update public.cfx_config set valor = jsonb_set(valor, '{packs}', jsonb_build_object(
     'basico',   jsonb_build_object('nombre', '🌱 Básico', 'detalle', 'Que tus clientes no falten y vuelvan', 'precio', 1490, 'modulos', jsonb_build_array('recordatorios', 'sellos')),
     'completo', jsonb_build_object('nombre', '💎 Completo', 'detalle', 'Recordatorios, sellos y campañas', 'precio', 1990, 'destacado', true, 'modulos', '*')))
 where clave = 'modulos_venta' and valor #>> '{packs,crecer,modulos,4}' = 'carrito';
+-- G53: el Completo ahora trae también los módulos nuevos (⏳ ⭐ …): texto y precio nuevos, solo si sigue el de fábrica.
+update public.cfx_config set valor = jsonb_set(jsonb_set(valor, '{packs,completo,detalle}', '"Todos los módulos, también los nuevos"'), '{packs,completo,precio}', '2990')
+where clave = 'modulos_venta' and valor #>> '{packs,completo,detalle}' = 'Recordatorios, sellos y campañas' and valor #>> '{packs,completo,precio}' = '1990';
 
 -- R1 (G25): todo Premium tiene fecha de término (mensual 30 días, regalo los días que se den) y se corta solo al vencer;
 -- nunca queda "permanente" (solo el administrador).

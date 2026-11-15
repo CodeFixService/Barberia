@@ -233,10 +233,24 @@
   const tiene = (grupo, clave, premium) => plan(grupo, clave, premium) > 0;
   // Lo que incluye el plan de la barbería de esta cuenta (dueño y barberos).
   // G39 🧩: o la barbería compró el módulo que lo trae (recordatorios, sellos, campañas = no vuelven + cumpleaños).
-  const MODULO_DE = { recordatorios: 'recordatorios', recordar_wsp: 'recordatorios', sellos: 'sellos', recuperar: 'campanas', cumpleanos: 'campanas' };
-  const barberiaTiene = (clave) => tiene('barberia', clave, !!(cuenta && cuenta.barberia && cuenta.barberia.premium)) ||
-    !!(cuenta && cuenta.barberia && cuenta.barberia.modulos && cuenta.barberia.modulos[MODULO_DE[clave]]);
-  const clienteTiene = (clave) => tiene('cliente', clave, !!(cuenta && cuenta.is_premium));
+  // G53: módulos NUEVOS (espera, resenas…) NO vienen en Premium: los dice cuenta.barberia.sueltos (bar_sueltos en la base).
+  const MODULO_DE = { recordatorios: 'recordatorios', recordar_wsp: 'recordatorios', sellos: 'sellos', recuperar: 'campanas', cumpleanos: 'campanas',
+    espera: 'espera', resenas: 'resenas' };
+  const NUEVOS = ['espera', 'resenas'];
+  const barberiaTiene = (clave) => {
+    const b = (cuenta && cuenta.barberia) || {};
+    if (NUEVOS.includes(clave)) return !!(b.sueltos && b.sueltos[clave]);
+    return tiene('barberia', clave, !!b.premium) || !!(b.modulos && b.modulos[MODULO_DE[clave]]);
+  };
+  // G53 👤: los clientes NO pagan. Todo cómodo gratis; lo que depende de un módulo, solo si SU barbería lo tiene.
+  // (Quien ya pagó Premium de cliente lo conserva hasta que venza.)
+  const clienteTiene = (clave) => {
+    const prem = !!(cuenta && cuenta.is_premium);
+    if (clave === 'lista_espera') return barberiaTiene('espera') || tiene('cliente', clave, prem);
+    if (clave === 'recordatorios') return barberiaTiene('recordatorios') || tiene('cliente', clave, prem);
+    if (['favorito', 'colores', 'ofertas_vip', 'prioridad'].includes(clave)) return true;
+    return tiene('cliente', clave, prem);
+  };
 
   /* ---------- Reglas, textos y links (los edita el admin) ---------- */
   const REGLAS_BASE = { minutos_pago: 10, minutos_devolucion: 10, horas_cancelacion: 24, dias_saldo: 90, dias_regalo: 30, dias_aviso: 3,
@@ -265,8 +279,7 @@
   }
   // v2.1: ¿se puede reservar este día? Los viernes y sábados con más de N días de anticipación son para clientes Premium.
   function prioridadBloquea(f, premium) {
-    const n = regla('dias_prioridad');
-    return n > 0 && !tiene('cliente', 'prioridad', !!premium) && [5, 6].includes(C.dow(f)) && f > C.sumarDias(C.hoy(), n);
+    return false;  // G53: sin Premium de cliente no hay prioridad de viernes y sábados (antes: regla dias_prioridad)
   }
   function planInfo(grupo, nivel) { return (((C.leer('ajustes', {}) || {}).planes_info || {})[grupo] || {})[nivel] || {}; }
 
@@ -367,7 +380,7 @@
     listo, sb, rpc, refrescar, exigir, entrar, salir, cambiarClave, crearUsuario, restablecerClave, probarServidor, despertarEnvios,
     claveNueva, mensajeAcceso, activarPush, sincronizarPush, pushActivo, pushPosible, esIOS, instalada, ajustes, revisarActualizacion,
     recordarBarberia, barberiaLocal, paginaDe, irA, aplicarMarca, amigable, colorPremium, plan, limite, grupoDe,
-    tiene, barberiaTiene, clienteTiene, MODULO_DE, regla, texto, linkPremium, linkTrimestral, prioridadBloquea, planInfo, registrarse,
+    tiene, barberiaTiene, clienteTiene, MODULO_DE, NUEVOS, regla, texto, linkPremium, linkTrimestral, prioridadBloquea, planInfo, registrarse,
     registrarBarberia, linkRegistro, linkBarberia,
     get cuenta() { return cuenta; },
     premium: () => !!(cuenta && cuenta.is_premium),
