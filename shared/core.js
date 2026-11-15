@@ -8,7 +8,7 @@
     location.replace(cfg.SITIO + location.pathname.replace(/^\/Barberia\//i, '') + location.search + location.hash);
   }
   const ZONA = cfg.ZONA || 'America/Santiago';
-  const VERSION = '2.97';
+  const VERSION = '2.98';
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -18,6 +18,7 @@
   /* ---------- Avisos flotantes ---------- */
   let toastTimer;
   function toast(msg, ms) {
+    if (window.CFX_AVISO) { window.CFX_AVISO(msg, { ms }); return; }  // G58 aviso moderno del núcleo
     let el = $('toast');
     if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
     el.textContent = msg;
