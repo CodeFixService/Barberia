@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.84'::text $$;
+language sql immutable as $$ select '2.85'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -6556,7 +6556,9 @@ language sql immutable as $$
          ('giftcards', '🎁 Gift cards', 'Vende tarjetas de regalo con código para canjear en tu negocio.'),
          ('membresia', '🔁 Membresía', 'Plan mensual para tus clientes (ej. 4 cortes al mes): plata segura cada mes.'),
          ('productos', '🛍️ Productos y stock', 'Vende productos en la caja y lleva su stock.'),
-         ('agenda_redes', '🤖 Reservas por WhatsApp e Instagram', 'Link y respuestas listas para que reserven desde tus redes.')
+         ('agenda_redes', '🤖 Reservas por WhatsApp e Instagram', 'Link y respuestas listas para que reserven desde tus redes.'),
+         -- G59: módulos de taller (BiciTaller primero; sirven para cualquier app con órdenes de trabajo).
+         ('presupuesto', '✅ Presupuesto por link', 'El cliente aprueba o rechaza cada arreglo desde su celular: sin llamadas ni reclamos.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb
