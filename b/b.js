@@ -106,6 +106,11 @@
       html += '<div class="sec-tit">🏷️ Ofertas</div>' + V.ofertas.map((o) => '<div class="card oferta"><h2>' + esc(o.titulo) + (o.precio ? ' <span class="pill ok">' + esc(o.precio) + '</span>' : '') + '</h2>' +
         (o.detalle ? '<p style="margin:0;white-space:pre-line">' + esc(o.detalle) + '</p>' : '') + (o.imagen && /^data:image\//.test(o.imagen) ? '<img src="' + o.imagen + '" alt="">' : '') + '</div>').join('');
     }
+    // G53b 🖼️ Portafolio (módulo): fotos de los mejores cortes
+    if (V.portafolio && V.portafolio.length) {
+      html += '<div class="sec-tit">🖼️ Nuestros cortes</div><div class="pf-grid">' + V.portafolio.filter((f) => /^data:image\//.test(f.foto)).map((f) =>
+        '<figure><img src="' + f.foto + '" alt="' + esc(f.titulo || 'Corte') + '" loading="lazy">' + (f.titulo ? '<figcaption>' + esc(f.titulo) + '</figcaption>' : '') + '</figure>').join('') + '</div>';
+    }
     // Equipo y datos
     html += '<div class="sec-tit">💈 Nuestro equipo</div><div class="card"><ul class="list">' + V.barberos.map((x) =>
       '<li>' + C.avatar(x) + '<div class="grow"><b>' + esc(x.nombre) + '</b>' + (x.descripcion ? '<div class="sub">' + esc(x.descripcion) + '</div>' : '') +

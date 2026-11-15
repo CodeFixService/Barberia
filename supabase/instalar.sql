@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.83'::text $$;
+language sql immutable as $$ select '2.84'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -119,7 +119,7 @@ $$;
 -- (Centro de Mando → Apps → 🧩) todo sigue como antes: solo Premium.
 -- G53 (2.82): módulos NUEVOS. NO vienen en Premium (Premium paga -20 %). Venta apagada = gratis para todos (como el núcleo).
 create or replace function public.bar_nuevos() returns text[]
-language sql immutable as $$ select array['espera', 'resenas'] $$;
+language sql immutable as $$ select array['espera', 'resenas', 'antifalta', 'portafolio', 'giftcards', 'membresia', 'productos', 'agenda_redes'] $$;
 create or replace function public.bar_modulo_clave(p_clave text) returns text
 language sql immutable as $$
   select case when p_clave in ('recordatorios', 'recordar_wsp') then 'recordatorios' when p_clave = 'sellos' then 'sellos'
@@ -597,7 +597,9 @@ begin
       'premium', public.is_premium(b.owner_id), 'premium_until', o.premium_until, 'owner_id', b.owner_id,
       'modulos', public.bar_modulos(b.id), 'sueltos', public.bar_sueltos(b.id),
       -- G53 ⭐: link de reseñas en Google (el dueño lo ve siempre para editarlo; los demás solo si la barbería tiene el módulo).
-      'google_resenas', case when me.role = 'owner' or public.bar_tiene('resenas', b.id) then b.google_resenas end) end);
+      'google_resenas', case when me.role = 'owner' or public.bar_tiene('resenas', b.id) then b.google_resenas end,
+      -- G53b 💳 Anti-falta (solo el dueño lo configura).
+      'antifalta', case when me.role = 'owner' then jsonb_build_object('abono', b.antifalta_abono, 'faltas', b.antifalta_faltas) end) end);
 end $$;
 
 -- Datos mínimos para la pantalla de inicio de sesión (sin cuenta): logo, nombre y WhatsApp.
@@ -2081,6 +2083,7 @@ declare
   x jsonb;
   r public.reservas;
   usa_saldo boolean;
+  af jsonb;
 begin
   me := public.yo_activo();
   if me.role <> 'client' then raise exception 'Solo los clientes reservan desde aquí'; end if;
@@ -2099,6 +2102,12 @@ begin
   perform public.liberar_vencidas();
   -- v2.1: la barbería puede rebajar (o quitar) el abono a los clientes Premium.
   if prem and b.abono_premium is not null then b.abono := least(b.abono, b.abono_premium); end if;
+  -- G53b 💳 Anti-falta: quien ya faltó paga abono (aunque sea Premium o no haya abono) y tras N faltas no reserva solo.
+  af := public.bar_antifalta(b.id, me.id, me.telefono);
+  if coalesce((af ->> 'bloqueado')::boolean, false) then
+    raise exception 'Tienes % falta(s) sin avisar. Para reservar, escríbele a la barbería por WhatsApp.', af ->> 'faltas';
+  end if;
+  if (af ->> 'abono')::int > b.abono then b.abono := (af ->> 'abono')::int; end if;
   usa_saldo := b.abono = 0 or me.saldo >= b.abono;
   begin
     insert into public.reservas (barberia_id, barbero_id, cliente_id, cliente_tel, inicio, fin, servicios, total, abono, pagado_con, estado,
@@ -2129,6 +2138,7 @@ declare
   b public.barberias;
   x jsonb;
   r public.reservas;
+  af jsonb;
   tel text := public.tel_norm(p_telefono);
   nom text := left(trim(coalesce(p_nombre, '')), 60);
 begin
@@ -2138,6 +2148,12 @@ begin
   end if;
   if length(nom) < 2 then raise exception 'Escribe tu nombre'; end if;
   if length(tel) < 8 then raise exception 'Escribe tu WhatsApp (ej. +56 9 1234 5678)'; end if;
+  -- G53b 💳 Anti-falta (por WhatsApp): abono obligatorio para quien ya faltó; bloqueo tras N faltas.
+  af := public.bar_antifalta(b.id, null, tel);
+  if coalesce((af ->> 'bloqueado')::boolean, false) then
+    raise exception 'Tienes % falta(s) sin avisar. Para reservar, escríbele a la barbería por WhatsApp.', af ->> 'faltas';
+  end if;
+  if (af ->> 'abono')::int > b.abono then b.abono := (af ->> 'abono')::int; end if;
   if b.abono > 0 and b.link_pago is null and b.datos_transferencia is null then
     raise exception 'La barbería aún no configura cómo recibir el abono. Escríbele por WhatsApp.';
   end if;
@@ -2469,6 +2485,9 @@ begin
     'horario', b.horario, 'abono', b.abono, 'suspendida', susp,
     'recibe', not susp and (b.abono = 0 or b.link_pago is not null or b.datos_transferencia is not null),
     'calificacion', public.nota_barberia(b.id),
+    -- G53b 🖼️ Portafolio (módulo): fotos de los mejores cortes.
+    'portafolio', case when public.bar_tiene('portafolio', b.id) then (select coalesce(jsonb_agg(jsonb_build_object('foto', f.foto, 'titulo', f.titulo)
+        order by f.created_at desc), '[]'::jsonb) from public.bar_portafolio f where f.barberia_id = b.id) end,
     'registro', not susp and (select count(*) from public.profiles where barberia_id = b.id and role = 'client') < public.limite('clientes', prem),
     'dias_max', public.limite('dias', false),
     'barberos', (select coalesce(jsonb_agg(jsonb_build_object('id', p.id, 'nombre', public.nombre_de(p), 'avatar', p.avatar, 'foto', p.foto,
@@ -3019,6 +3038,15 @@ begin
   if p ? 'abono_premium' and nullif(p ->> 'abono_premium', '') is not null and (p ->> 'abono_premium')::int not between 0 and 100000 then
     raise exception 'Abono Premium no válido';
   end if;
+  -- G53b 💳 Anti-falta (módulo): abono para quien ya faltó y bloqueo tras N faltas.
+  if (coalesce(nullif(p ->> 'antifalta_abono', '')::int, 0) > 0 or coalesce(nullif(p ->> 'antifalta_faltas', '')::int, 0) > 0)
+     and not public.bar_tiene('antifalta', me.barberia_id) then
+    raise exception 'Anti-falta es un módulo 🧩: actívalo en Más → Módulos';
+  end if;
+  if coalesce(nullif(p ->> 'antifalta_abono', '')::int, 0) > 0
+     and (select link_pago is null and datos_transferencia is null from public.barberias where id = me.barberia_id) then
+    raise exception 'Para pedir abono, primero pon tu link de pago o tus datos de transferencia (Más → Links de pago)';
+  end if;
   update public.barberias set
     nombre = coalesce(left(nullif(trim(p ->> 'nombre'), ''), 80), nombre),
     direccion = case when p ? 'direccion' then left(nullif(trim(p ->> 'direccion'), ''), 160) else direccion end,
@@ -3036,6 +3064,8 @@ begin
     barberos_crean_clientes = case when p ? 'barberos_crean_clientes' then coalesce((p ->> 'barberos_crean_clientes')::boolean, true) else barberos_crean_clientes end,
     abono_premium = case when p ? 'abono_premium' then nullif(p ->> 'abono_premium', '')::int else abono_premium end,
     google_resenas = case when p ? 'google_resenas' then left(nullif(trim(p ->> 'google_resenas'), ''), 300) else google_resenas end,
+    antifalta_abono = case when p ? 'antifalta_abono' then greatest(0, least(100000, coalesce(nullif(p ->> 'antifalta_abono', '')::int, 0))) else antifalta_abono end,
+    antifalta_faltas = case when p ? 'antifalta_faltas' then greatest(0, least(20, coalesce(nullif(p ->> 'antifalta_faltas', '')::int, 0))) else antifalta_faltas end,
     regalo_cumple = case when p ? 'regalo_cumple' then left(nullif(trim(p ->> 'regalo_cumple'), ''), 120) else regalo_cumple end,
     mensaje_volver = case when p ? 'mensaje_volver' then left(nullif(trim(p ->> 'mensaje_volver'), ''), 300) else mensaje_volver end
   where id = me.barberia_id;
@@ -4110,6 +4140,358 @@ begin
   update public.reservas set estado = 'anulada', motivo = 'Cuenta eliminada', anulada_at = now()
     where cliente_id = me.id and estado in ('esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada') and inicio > now();
   delete from auth.users where id = me.id;
+end $$;
+
+-- =====================================================================
+-- G53b 🧩 Módulos nuevos de Barbería (NO vienen en Premium; con la venta apagada son gratis, como el núcleo).
+--   Cada función revisa bar_tiene('<módulo>'). Lo que se vende (gift card, membresía, producto) entra a la Caja.
+-- =====================================================================
+-- 💳 Anti-falta: abono obligatorio para quien ya faltó y bloqueo tras N faltas (últimos 12 meses). El abono normal sigue FREE.
+alter table public.barberias add column if not exists antifalta_abono int;
+alter table public.barberias add column if not exists antifalta_faltas int;
+alter table public.barberias drop constraint if exists barberias_antifalta_check;
+alter table public.barberias add constraint barberias_antifalta_check check ((antifalta_abono is null or antifalta_abono between 0 and 100000)
+  and (antifalta_faltas is null or antifalta_faltas between 0 and 20));
+create or replace function public.bar_faltas(bid uuid, cid uuid, tel text) returns int
+language sql stable security definer set search_path = '' as $$
+  select count(*)::int from public.reservas r left join public.profiles c on c.id = r.cliente_id
+  where r.barberia_id = bid and r.estado = 'no_vino' and r.inicio > now() - interval '365 days'
+    and ((cid is not null and r.cliente_id = cid)
+         or (length(public.tel_norm(tel)) >= 8 and public.tel_norm(coalesce(c.telefono, r.cliente_tel)) = public.tel_norm(tel)))
+$$;
+-- Lo que anti-falta le pide a este cliente: {faltas, bloqueado, abono} (null = nada).
+create or replace function public.bar_antifalta(bid uuid, cid uuid, tel text) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare b public.barberias; n int;
+begin
+  select * into b from public.barberias where id = bid;
+  if b.id is null or (coalesce(b.antifalta_abono, 0) = 0 and coalesce(b.antifalta_faltas, 0) = 0) or not public.bar_tiene('antifalta', bid) then return null; end if;
+  n := public.bar_faltas(bid, cid, tel);
+  if n = 0 then return null; end if;
+  return jsonb_build_object('faltas', n, 'bloqueado', coalesce(b.antifalta_faltas, 0) > 0 and n >= b.antifalta_faltas,
+    'abono', case when coalesce(b.antifalta_abono, 0) > 0 and (b.link_pago is not null or b.datos_transferencia is not null) then b.antifalta_abono end);
+end $$;
+revoke all on function public.bar_faltas(uuid, uuid, text), public.bar_antifalta(uuid, uuid, text) from public, anon, authenticated;
+
+-- 🖼️ Portafolio: fotos de los mejores cortes en el link de reservas (/b/).
+create table if not exists public.bar_portafolio (
+  id          uuid primary key default gen_random_uuid(),
+  barberia_id uuid not null references public.barberias (id) on delete cascade,
+  foto        text not null,
+  titulo      text,
+  autor       uuid references public.profiles (id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists bar_portafolio_idx on public.bar_portafolio (barberia_id, created_at desc);
+alter table public.bar_portafolio enable row level security;
+create or replace function public.portafolio_lista() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', f.id, 'foto', f.foto, 'titulo', f.titulo, 'mia', f.autor = me.id) order by f.created_at desc), '[]')
+          from public.bar_portafolio f where f.barberia_id = me.barberia_id);
+end $$;
+create or replace function public.portafolio_agregar(p_foto text, p_titulo text default null) returns void
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  if not public.bar_tiene('portafolio', me.barberia_id) then raise exception 'Portafolio es un módulo 🧩: actívalo en Más → Módulos'; end if;
+  if coalesce(p_foto, '') = '' or not public.img_ok(p_foto, 320000) then raise exception 'Foto no válida o muy pesada'; end if;
+  if (select count(*) from public.bar_portafolio where barberia_id = me.barberia_id) >= 24 then raise exception 'Máximo 24 fotos: borra alguna para subir otra'; end if;
+  insert into public.bar_portafolio (barberia_id, foto, titulo, autor) values (me.barberia_id, p_foto, left(nullif(trim(p_titulo), ''), 60), me.id);
+end $$;
+create or replace function public.portafolio_borrar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  delete from public.bar_portafolio where id = p_id and barberia_id = me.barberia_id and (me.role = 'owner' or autor = me.id);
+  if not found then raise exception 'Solo el dueño o quien la subió puede borrarla'; end if;
+end $$;
+
+-- 🎁 Gift cards: el dueño las vende (entra a la Caja) y el equipo las canjea con el código hasta agotar el saldo.
+create table if not exists public.bar_giftcards (
+  id          uuid primary key default gen_random_uuid(),
+  barberia_id uuid not null references public.barberias (id) on delete cascade,
+  codigo      text not null unique,
+  monto       int not null check (monto between 1000 and 1000000),
+  saldo       int not null check (saldo >= 0),
+  para        text,
+  de          text,
+  vence       date not null,
+  anulada     boolean not null default false,
+  creada_por  uuid references public.profiles (id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists bar_giftcards_idx on public.bar_giftcards (barberia_id, created_at desc);
+alter table public.bar_giftcards enable row level security;
+create table if not exists public.bar_giftcard_usos (
+  id          uuid primary key default gen_random_uuid(),
+  giftcard_id uuid not null references public.bar_giftcards (id) on delete cascade,
+  monto       int not null check (monto > 0),
+  por         uuid references public.profiles (id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+alter table public.bar_giftcard_usos enable row level security;
+create or replace function public.giftcard_json(g public.bar_giftcards) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('id', g.id, 'codigo', g.codigo, 'monto', g.monto, 'saldo', g.saldo, 'para', g.para, 'de', g.de, 'vence', g.vence,
+    'anulada', g.anulada, 'vigente', not g.anulada and g.saldo > 0 and g.vence >= (now() at time zone public.tz())::date, 'created_at', g.created_at)
+$$;
+create or replace function public.giftcard_crear(p_monto int, p_para text default null, p_de text default null, p_medio text default 'efectivo') returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; g public.bar_giftcards; c text;
+begin
+  me := public.yo_activo();
+  if me.role <> 'owner' then raise exception 'Solo el dueño vende gift cards'; end if;
+  if not public.bar_tiene('giftcards', me.barberia_id) then raise exception 'Gift cards es un módulo 🧩: actívalo en Más → Módulos'; end if;
+  if coalesce(p_monto, 0) not between 1000 and 1000000 then raise exception 'Monto entre $1.000 y $1.000.000'; end if;
+  if (select count(*) from public.bar_giftcards where barberia_id = me.barberia_id and created_at > now() - interval '1 day') >= 50 then raise exception 'Máximo 50 gift cards por día'; end if;
+  loop
+    c := 'GC' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 6));
+    exit when not exists (select 1 from public.bar_giftcards where codigo = c);
+  end loop;
+  insert into public.bar_giftcards (barberia_id, codigo, monto, saldo, para, de, vence, creada_por)
+  values (me.barberia_id, c, p_monto, p_monto, left(nullif(trim(p_para), ''), 60), left(nullif(trim(p_de), ''), 60),
+          (now() at time zone public.tz())::date + 365, me.id) returning * into g;
+  insert into public.caja (barberia_id, barbero_id, servicio, monto, medio, cliente_nombre, nota, created_by)
+  values (me.barberia_id, me.id, '🎁 Gift card ' || c, p_monto, case when p_medio = 'transferencia' then 'transferencia' else 'efectivo' end,
+          g.de, 'Gift card para ' || coalesce(g.para, '—'), me.id);
+  return public.giftcard_json(g);
+end $$;
+create or replace function public.giftcard_lista() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if me.role <> 'owner' then raise exception 'Solo el dueño'; end if;
+  return (select coalesce(jsonb_agg(public.giftcard_json(g) order by g.created_at desc), '[]') from
+    (select * from public.bar_giftcards where barberia_id = me.barberia_id order by created_at desc limit 100) g);
+end $$;
+create or replace function public.giftcard_buscar(p_codigo text) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles; g public.bar_giftcards;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  select * into g from public.bar_giftcards where barberia_id = me.barberia_id and codigo = upper(regexp_replace(coalesce(p_codigo, ''), '[^A-Za-z0-9]', '', 'g'));
+  if g.id is null then raise exception 'No existe una gift card con ese código'; end if;
+  return public.giftcard_json(g);
+end $$;
+create or replace function public.giftcard_canjear(p_codigo text, p_monto int) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; g public.bar_giftcards;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  if not public.bar_tiene('giftcards', me.barberia_id) then raise exception 'Gift cards es un módulo 🧩: actívalo en Más → Módulos'; end if;
+  select * into g from public.bar_giftcards where barberia_id = me.barberia_id and codigo = upper(regexp_replace(coalesce(p_codigo, ''), '[^A-Za-z0-9]', '', 'g')) for update;
+  if g.id is null then raise exception 'No existe una gift card con ese código'; end if;
+  if g.anulada then raise exception 'Esta gift card está anulada'; end if;
+  if g.vence < (now() at time zone public.tz())::date then raise exception 'Esta gift card venció el %', to_char(g.vence, 'DD/MM/YYYY'); end if;
+  if coalesce(p_monto, 0) <= 0 then raise exception 'Escribe cuánto se descuenta'; end if;
+  if p_monto > g.saldo then raise exception 'Le queda $% de saldo', replace(to_char(g.saldo, 'FM999,999,999'), ',', '.'); end if;
+  update public.bar_giftcards set saldo = saldo - p_monto where id = g.id returning * into g;
+  insert into public.bar_giftcard_usos (giftcard_id, monto, por) values (g.id, p_monto, me.id);
+  return public.giftcard_json(g);
+end $$;
+create or replace function public.giftcard_anular(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if me.role <> 'owner' then raise exception 'Solo el dueño'; end if;
+  update public.bar_giftcards set anulada = true where id = p_id and barberia_id = me.barberia_id;
+end $$;
+
+-- 🔁 Membresía: plan mensual de cortes por cliente (ej. 4 al mes). Cobrar/renovar suma meses y entra a la Caja.
+create table if not exists public.bar_membresias (
+  id          uuid primary key default gen_random_uuid(),
+  barberia_id uuid not null references public.barberias (id) on delete cascade,
+  cliente_id  uuid references public.profiles (id) on delete set null,
+  nombre      text not null,
+  tel         text,
+  cortes      int not null check (cortes between 1 and 31),
+  precio      int not null default 0 check (precio between 0 and 1000000),
+  hasta       date not null,
+  activa      boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+create index if not exists bar_membresias_idx on public.bar_membresias (barberia_id, activa);
+alter table public.bar_membresias enable row level security;
+create table if not exists public.bar_membresia_usos (
+  id           uuid primary key default gen_random_uuid(),
+  membresia_id uuid not null references public.bar_membresias (id) on delete cascade,
+  por          uuid references public.profiles (id) on delete set null,
+  created_at   timestamptz not null default now()
+);
+create index if not exists bar_membresia_usos_idx on public.bar_membresia_usos (membresia_id, created_at);
+alter table public.bar_membresia_usos enable row level security;
+create or replace function public.membresia_json(m public.bar_membresias, plata boolean) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('id', m.id, 'nombre', m.nombre, 'tel', m.tel, 'cliente_id', m.cliente_id, 'cortes', m.cortes,
+    'precio', case when plata then m.precio end, 'hasta', m.hasta, 'activa', m.activa,
+    'vigente', m.activa and m.hasta >= (now() at time zone public.tz())::date,
+    'usados', u.n, 'quedan', greatest(0, m.cortes - u.n))
+  from (select count(*)::int n from public.bar_membresia_usos x where x.membresia_id = m.id
+        and x.created_at >= date_trunc('month', now() at time zone public.tz()) at time zone public.tz()) u
+$$;
+-- p = {id?, cliente_id?, nombre, tel, cortes, precio, meses (cobrar ahora; 0 = solo editar), medio}
+create or replace function public.membresia_guardar(p jsonb) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; m public.bar_membresias; meses int := greatest(0, least(12, coalesce(nullif(p ->> 'meses', '')::int, 0)));
+  cli uuid := nullif(p ->> 'cliente_id', '')::uuid; hoy date := (now() at time zone public.tz())::date;
+begin
+  me := public.yo_activo();
+  if me.role <> 'owner' then raise exception 'Solo el dueño'; end if;
+  if not public.bar_tiene('membresia', me.barberia_id) then raise exception 'Membresía es un módulo 🧩: actívalo en Más → Módulos'; end if;
+  if cli is not null and not exists (select 1 from public.profiles where id = cli and barberia_id = me.barberia_id and role = 'client') then cli := null; end if;
+  if nullif(p ->> 'id', '') is null then
+    if length(trim(coalesce(p ->> 'nombre', ''))) < 2 then raise exception 'Escribe el nombre del cliente'; end if;
+    if (select count(*) from public.bar_membresias where barberia_id = me.barberia_id and activa) >= 300 then raise exception 'Máximo 300 membresías activas'; end if;
+    insert into public.bar_membresias (barberia_id, cliente_id, nombre, tel, cortes, precio, hasta)
+    values (me.barberia_id, cli, left(trim(p ->> 'nombre'), 60), nullif(public.tel_norm(p ->> 'tel'), ''),
+            greatest(1, least(31, coalesce(nullif(p ->> 'cortes', '')::int, 4))), greatest(0, least(1000000, coalesce(nullif(p ->> 'precio', '')::int, 0))),
+            hoy - 1) returning * into m;
+  else
+    update public.bar_membresias set
+      nombre = coalesce(left(nullif(trim(p ->> 'nombre'), ''), 60), nombre),
+      tel = case when p ? 'tel' then nullif(public.tel_norm(p ->> 'tel'), '') else tel end,
+      cliente_id = case when p ? 'cliente_id' then cli else cliente_id end,
+      cortes = case when p ? 'cortes' then greatest(1, least(31, (p ->> 'cortes')::int)) else cortes end,
+      precio = case when p ? 'precio' then greatest(0, least(1000000, coalesce(nullif(p ->> 'precio', '')::int, 0))) else precio end,
+      activa = case when p ? 'activa' then coalesce((p ->> 'activa')::boolean, true) else activa end
+    where id = (p ->> 'id')::uuid and barberia_id = me.barberia_id returning * into m;
+    if m.id is null then raise exception 'Membresía no encontrada'; end if;
+  end if;
+  if meses > 0 then
+    update public.bar_membresias set activa = true, hasta = (greatest(hasta, hoy - 1) + make_interval(months => meses))::date
+    where id = m.id returning * into m;
+    if m.precio > 0 then
+      insert into public.caja (barberia_id, barbero_id, servicio, monto, medio, cliente_id, cliente_nombre, nota, created_by)
+      values (me.barberia_id, me.id, '🔁 Membresía ' || m.cortes || ' cortes' || case when meses > 1 then ' x' || meses || ' meses' else '' end,
+              m.precio * meses, case when p ->> 'medio' = 'transferencia' then 'transferencia' else 'efectivo' end, m.cliente_id, m.nombre, 'Membresía', me.id);
+    end if;
+  end if;
+  return public.membresia_json(m, true);
+end $$;
+create or replace function public.membresia_lista() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  return (select coalesce(jsonb_agg(public.membresia_json(m, me.role = 'owner') order by m.activa desc, m.nombre), '[]')
+          from public.bar_membresias m where m.barberia_id = me.barberia_id and (me.role = 'owner' or m.activa));
+end $$;
+create or replace function public.membresia_usar(p_id uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; m public.bar_membresias; j jsonb;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  if not public.bar_tiene('membresia', me.barberia_id) then raise exception 'Membresía es un módulo 🧩: actívalo en Más → Módulos'; end if;
+  select * into m from public.bar_membresias where id = p_id and barberia_id = me.barberia_id for update;
+  if m.id is null then raise exception 'Membresía no encontrada'; end if;
+  j := public.membresia_json(m, false);
+  if not (j ->> 'vigente')::boolean then raise exception 'La membresía de % está vencida: cobra el mes para renovarla', m.nombre; end if;
+  if (j ->> 'quedan')::int <= 0 then raise exception '% ya usó sus % cortes de este mes', m.nombre, m.cortes; end if;
+  insert into public.bar_membresia_usos (membresia_id, por) values (m.id, me.id);
+  return public.membresia_json(m, me.role = 'owner');
+end $$;
+-- El cliente ve su membresía (solo si su barbería tiene el módulo).
+create or replace function public.mi_membresia() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if me.role <> 'client' or not public.bar_tiene('membresia', me.barberia_id) then return null; end if;
+  return (select public.membresia_json(m, true) from public.bar_membresias m
+          where m.barberia_id = me.barberia_id and m.activa and (m.cliente_id = me.id or (m.cliente_id is null and length(m.tel) >= 8 and m.tel = public.tel_norm(me.telefono)))
+          order by m.hasta desc limit 1);
+end $$;
+
+-- 🛍️ Productos y stock: se venden en la Caja (pomadas, ceras…) y el stock baja solo.
+create table if not exists public.bar_productos (
+  id          uuid primary key default gen_random_uuid(),
+  barberia_id uuid not null references public.barberias (id) on delete cascade,
+  nombre      text not null,
+  precio      int not null check (precio between 0 and 1000000),
+  stock       int not null default 0 check (stock between 0 and 100000),
+  activo      boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+create index if not exists bar_productos_idx on public.bar_productos (barberia_id, activo);
+alter table public.bar_productos enable row level security;
+create or replace function public.productos_lista() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  -- El barbero no ve montos (v2.0): vende al precio que puso el dueño.
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'nombre', x.nombre, 'stock', x.stock, 'activo', x.activo,
+            'precio', case when me.role = 'owner' then x.precio end) order by x.activo desc, x.nombre), '[]')
+          from public.bar_productos x where x.barberia_id = me.barberia_id and (me.role = 'owner' or x.activo));
+end $$;
+create or replace function public.producto_guardar(p jsonb) returns void
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if me.role <> 'owner' then raise exception 'Solo el dueño'; end if;
+  if not public.bar_tiene('productos', me.barberia_id) then raise exception 'Productos es un módulo 🧩: actívalo en Más → Módulos'; end if;
+  if nullif(p ->> 'id', '') is null then
+    if length(trim(coalesce(p ->> 'nombre', ''))) < 2 then raise exception 'Escribe el nombre del producto'; end if;
+    if (select count(*) from public.bar_productos where barberia_id = me.barberia_id) >= 100 then raise exception 'Máximo 100 productos'; end if;
+    insert into public.bar_productos (barberia_id, nombre, precio, stock)
+    values (me.barberia_id, left(trim(p ->> 'nombre'), 60), greatest(0, least(1000000, coalesce(nullif(p ->> 'precio', '')::int, 0))),
+            greatest(0, least(100000, coalesce(nullif(p ->> 'stock', '')::int, 0))));
+  else
+    update public.bar_productos set
+      nombre = coalesce(left(nullif(trim(p ->> 'nombre'), ''), 60), nombre),
+      precio = case when p ? 'precio' then greatest(0, least(1000000, coalesce(nullif(p ->> 'precio', '')::int, 0))) else precio end,
+      stock = case when p ? 'stock' then greatest(0, least(100000, coalesce(nullif(p ->> 'stock', '')::int, 0))) else stock end,
+      activo = case when p ? 'activo' then coalesce((p ->> 'activo')::boolean, true) else activo end
+    where id = (p ->> 'id')::uuid and barberia_id = me.barberia_id;
+    if not found then raise exception 'Producto no encontrado'; end if;
+  end if;
+end $$;
+create or replace function public.producto_vender(p_id uuid, p_cant int default 1, p_medio text default 'efectivo') returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; x public.bar_productos; n int := coalesce(p_cant, 1);
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
+  if not public.bar_tiene('productos', me.barberia_id) then raise exception 'Productos es un módulo 🧩: actívalo en Más → Módulos'; end if;
+  if n not between 1 and 100 then raise exception 'Cantidad no válida'; end if;
+  select * into x from public.bar_productos where id = p_id and barberia_id = me.barberia_id and activo for update;
+  if x.id is null then raise exception 'Producto no encontrado'; end if;
+  if x.stock < n then raise exception 'No alcanza: quedan % de %', x.stock, x.nombre; end if;
+  update public.bar_productos set stock = stock - n where id = x.id returning * into x;
+  insert into public.caja (barberia_id, barbero_id, servicio, monto, medio, nota, created_by)
+  values (me.barberia_id, me.id, left('🛍️ ' || x.nombre || case when n > 1 then ' x' || n else '' end, 80), x.precio * n,
+          case when p_medio = 'transferencia' then 'transferencia' else 'efectivo' end, 'Producto', me.id);
+  return jsonb_build_object('nombre', x.nombre, 'stock', x.stock);
+end $$;
+
+-- ⏳ Lista de espera: cuántos esperan hoy y mañana (para el Inicio del equipo).
+create or replace function public.espera_resumen() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles; hoy date := (now() at time zone public.tz())::date;
+begin
+  me := public.yo_activo();
+  if not public.es_staff(me) or not public.bar_tiene('espera', me.barberia_id) then return null; end if;
+  return (select jsonb_build_object('hoy', count(*) filter (where e.fecha = hoy), 'manana', count(*) filter (where e.fecha = hoy + 1),
+            'nombres', coalesce(jsonb_agg(public.nombre_de(c) order by e.fecha) filter (where e.fecha = hoy), '[]'))
+          from public.lista_espera e join public.profiles c on c.id = e.cliente_id
+          where e.barberia_id = me.barberia_id and not e.avisado and e.fecha between hoy and hoy + 1
+            and (me.role = 'owner' or e.barbero_id is null or e.barbero_id = me.id));
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -5910,7 +6292,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.bar_giftcard_usos', 'public.bar_giftcards', 'public.bar_membresia_usos', 'public.bar_membresias', 'public.bar_portafolio', 'public.bar_productos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_bloqueos', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;

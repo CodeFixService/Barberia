@@ -235,8 +235,9 @@
   // G39 🧩: o la barbería compró el módulo que lo trae (recordatorios, sellos, campañas = no vuelven + cumpleaños).
   // G53: módulos NUEVOS (espera, resenas…) NO vienen en Premium: los dice cuenta.barberia.sueltos (bar_sueltos en la base).
   const MODULO_DE = { recordatorios: 'recordatorios', recordar_wsp: 'recordatorios', sellos: 'sellos', recuperar: 'campanas', cumpleanos: 'campanas',
-    espera: 'espera', resenas: 'resenas' };
-  const NUEVOS = ['espera', 'resenas'];
+    espera: 'espera', resenas: 'resenas', antifalta: 'antifalta', portafolio: 'portafolio', giftcards: 'giftcards', membresia: 'membresia',
+    productos: 'productos', agenda_redes: 'agenda_redes' };
+  const NUEVOS = ['espera', 'resenas', 'antifalta', 'portafolio', 'giftcards', 'membresia', 'productos', 'agenda_redes'];
   const barberiaTiene = (clave) => {
     const b = (cuenta && cuenta.barberia) || {};
     if (NUEVOS.includes(clave)) return !!(b.sueltos && b.sueltos[clave]);

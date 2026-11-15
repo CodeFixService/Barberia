@@ -25,6 +25,8 @@
   const ACTIVA = ['esperando_abono', 'en_revision', 'por_aprobar', 'agendada', 'confirmada'];
   const REVISION = ['en_revision', 'por_aprobar'];
   const tiene = (k) => K.barberiaTiene(k);
+  const MOD53 = { portafolio: ['portafolio', 'Portafolio'], redes: ['agenda_redes', 'Reservas por WhatsApp e Instagram'], productos: ['productos', 'Productos y stock'],
+    giftcards: ['giftcards', 'Gift cards'], membresias: ['membresia', 'Membresía'] };
   const estrellas = (n) => n && n.total ? '<span class="nota">' + n.promedio + '</span>' : '';
   const alertaNegra = (ln) => ln ? '<div class="alerta-negra">⚠️ <span>Lista negra' + (ln.motivo ? ': ' + esc(ln.motivo) : '') + '</span></div>' : '';
 
@@ -57,7 +59,7 @@
     if (v === 'agenda' && q.get('r')) { mostrar('agenda'); abrirReserva(q.get('r'), true); return; }
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
-    if (['plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo', 'modulos'].includes(v)) {
+    if (['portafolio', 'redes', 'productos', 'giftcards', 'membresias', 'plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo', 'modulos'].includes(v)) {
       mostrar('mas'); abrirSeccion(v === 'ajustes' ? 'negocio' : v); return;
     }
     mostrar(VISTAS[v] ? v : 'hoy');
@@ -77,6 +79,9 @@
     const esperando = d.reservas.filter((r) => r.detalle && mias(r) && r.estado === 'esperando_abono');
     let caja = [];
     try { caja = await K.rpc('ver_caja', { p_desde: f, p_hasta: f, p_barbero: dueno() && tiene('caja_reportes') ? null : yo.id }); } catch (e) { /* nada */ }
+    // G53b ⏳ cuántos esperan una hora hoy y mañana (módulo Lista de espera)
+    let esp = null;
+    if (tiene('espera')) try { esp = await K.rpc('espera_resumen'); } catch (e) { /* nada */ }
     const b = bar();
     let html = '';
     if (yo.clave_temporal) html += '<div class="banner alerta"><div class="grow"><b>🔑 Cambia tu clave temporal</b> en Más → Mi cuenta.</div></div>';
@@ -89,6 +94,9 @@
       '<div class="card"><small>Atendidas hoy</small><b>' + deHoy.filter((r) => r.estado === 'atendida').length + '</b></div>' +
       (dueno() ? '<div class="card"><small>Caja de hoy</small><b>' + C.plata(caja.reduce((t, k) => t + (k.monto || 0) + (k.propina || 0), 0)) + '</b></div>'
         : '<div class="card"><small>Mis cortes hoy</small><b>' + caja.length + '</b></div>') + '</div>';
+    if (esp && (esp.hoy || esp.manana)) html += '<div class="card" id="cEspera"><b>⏳ Lista de espera:</b> ' + esp.hoy + ' hoy' + (esp.manana ? ' · ' + esp.manana + ' mañana' : '') +
+      (esp.nombres.length ? '<div class="sub muted">' + esc(esp.nombres.slice(0, 5).join(', ')) + (esp.nombres.length > 5 ? '…' : '') + '</div>' : '') +
+      '<div class="sub muted chico">Si se libera una hora, les avisamos solos.</div></div>';
     // 1. Abonos por revisar (lo más urgente)
     if (P2.revision.length) {
       html += '<div class="sec-tit">🧾 Abonos por revisar (' + P2.revision.length + ')</div>' + P2.revision.map((r) =>
@@ -574,7 +582,8 @@
     el.innerHTML = '<div class="card" style="padding:12px"><div class="seg"><button data-r="hoy">Hoy</button><button data-r="semana">Semana</button><button data-r="mes">Mes</button><button data-r="mesant">Mes pasado</button></div>' +
       (verTodos && B.barberos.length > 1 ? '<div class="chips" style="margin-top:8px"><button class="chip" data-c="*">👥 Todos</button>' + B.barberos.map((b) => '<button class="chip" data-c="' + b.id + '">' + esc(b.id === yo.id ? 'Yo' : b.nombre.split(' ')[0]) + '</button>').join('') + '</div>' : '') +
       '</div><div id="cajaZona"><p class="muted centro">Cargando…</p></div>' +
-      '<div class="btns"><button class="grande full" id="bAnotar">+ Anotar corte</button></div>';
+      '<div class="btns"><button class="grande full" id="bAnotar">+ Anotar corte</button></div>' +
+      (tiene('productos') ? '<div class="btns"><button class="gris full" id="bVenderProd">🛍️ Vender producto</button></div>' : '');
     el.querySelectorAll('[data-r]').forEach((b) => {
       b.classList.toggle('on', b.dataset.r === cajaRango);
       if (!reportes && b.dataset.r !== 'hoy') P.bloquear(b, 'Reportes de caja');
@@ -582,6 +591,7 @@
     });
     el.querySelectorAll('[data-c]').forEach((b) => { b.classList.toggle('on', b.dataset.c === cajaQuien); b.onclick = () => { cajaQuien = b.dataset.c; caja(); }; });
     $('bAnotar').onclick = () => anotar();
+    if ($('bVenderProd')) $('bVenderProd').onclick = () => elegirProducto();
     const [d1, d2] = rangos[cajaRango];
     let l = [];
     try { l = await K.rpc('ver_caja', { p_desde: d1, p_hasta: d2, p_barbero: cajaQuien === '*' ? null : cajaQuien }); }
@@ -692,6 +702,12 @@
       ['volver', '👋', 'Clientes que no vuelven', 'Recupéralos con una oferta'],
       ['calificaciones', '⭐', 'Calificaciones', bar().calificacion && bar().calificacion.total ? bar().calificacion.promedio + ' ★ (' + bar().calificacion.total + ')' : 'Lo que dicen tus clientes'],
       ['enlace', '🔗', 'Enlace y QR', 'Para que tus clientes reserven'],
+      // G53b 🧩 módulos nuevos (sin el módulo abren la demo ▶️)
+      ['portafolio', '🖼️', 'Portafolio', 'Fotos de tus cortes en tu link'],
+      ['redes', '🤖', 'WhatsApp e Instagram', 'Respuestas listas para reservar'],
+      ['productos', '🛍️', 'Productos y stock', 'Vende pomadas en la caja'],
+      ['giftcards', '🎁', 'Gift cards', 'Tarjetas de regalo con código'],
+      ['membresias', '🔁', 'Membresías', 'Plan mensual de cortes'],
       ['invitar', '🤝', 'Invita una barbería', K.regla('dias_referido') ? 'Gana ' + K.regla('dias_referido') + ' días de Premium' : 'Comparte la app'],
       ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
       ...(bar().modulos ? [['modulos', '🧩', 'Módulos', premium() ? 'Incluidos + nuevos con -20%' : 'Activa solo lo que necesitas']] : []),
@@ -704,6 +720,8 @@
       ['caja', '💵', 'Mi caja', 'Tus cortes'],
       ['estadisticas', '📊', 'Mis estadísticas', 'Tus cortes y clientes'],
       ['milink', '🔳', 'Mi link y QR', 'Tus clientes te reservan directo'],
+      ...[['portafolio', '🖼️', 'Portafolio', 'Sube fotos de tus cortes'], ['productos', '🛍️', 'Productos', 'Vende en tu caja'],
+        ['giftcards', '🎁', 'Gift cards', 'Canjear un código'], ['membresias', '🔁', 'Membresías', 'Marcar un corte']].filter((i) => tiene(MOD53[i[0]][0])),
       ['volver', '👋', 'Clientes que no vuelven', 'Escríbeles en 1 toque'],
       ['perfil', '👤', 'Mi cuenta', 'Foto, clave, notificaciones'],
       ['soporte', '🛟', 'Soporte CodeFix', 'Escríbenos']
@@ -711,6 +729,7 @@
     // Menú Más común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (seccion()).
     // Mi cuenta (perfil) y Soporte ya vienen en el menú común (Configuración y Cuenta y ayuda).
     const G = dueno() ? { negocio: 'Tu barbería', horario: 'Tu barbería', tiempos: 'Tu barbería', servicios: 'Tu barbería', links: 'Tu barbería', ofertas: 'Tu barbería', equipo: 'Tu barbería', enlace: 'Tu barbería',
+      portafolio: 'Tu barbería', redes: 'Tu barbería', productos: 'Ventas y clientes', giftcards: 'Ventas y clientes', membresias: 'Ventas y clientes',
       caja: 'Ventas y clientes', estadisticas: 'Ventas y clientes', resumen: 'Ventas y clientes', volver: 'Ventas y clientes', calificaciones: 'Ventas y clientes',
       plan: 'Tu plan', modulos: 'Tu plan', invitar: 'Tu plan', verificar: 'Tu plan', respaldo: 'Configuración' } : {};
     const K2 = { plan: 'premium', invitar: 'invitar' };
@@ -754,11 +773,13 @@
     if (s === 'soporte') { if (window.CFX_AYUDA) window.CFX_AYUDA.chat(); return; }  // chat común de soporte (llega al Centro de Mando)
     if (s === 'clientes') { mostrar('clientes'); return; }
     if (s === 'verificar') { CFX_VERIFICAR.abrir({ rpc: K.rpc }); return; }
-    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'modulos', 'resumen', 'invitar', 'respaldo'];
+    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'modulos', 'resumen', 'invitar', 'respaldo', 'redes'];
     if (!dueno() && soloDueno.includes(s)) { mas(); return; }
+    if (MOD53[s] && !tiene(MOD53[s][0])) { P.upsell(MOD53[s][1], MOD53[s][0]); return; }
     if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); mas(); }
     const F = { equipo: secEquipo, servicios: secServicios, ofertas: secOfertas, estadisticas: secEstadisticas, negocio: secNegocio, horario: secHorario, links: secLinks,
       respaldo: secRespaldo, modulos: secModulos, caja, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
+      portafolio: secPortafolio, redes: secRedes, productos: secProductos, giftcards: secGiftcards, membresias: secMembresias,
       milink: () => P.compartir({ el: seccion('🔳 Mi link y QR'), link: K.linkBarberia(bar().codigo, yo.id), archivo: 'qr-' + primerNombre(yo.nombre),
         texto: 'Con este link o QR tus clientes reservan <b>directo contigo</b> en ' + esc(bar().nombre) + ' (sin cuenta o con su cuenta).',
         mensaje: '💈 Reserva tu hora conmigo en ' + bar().nombre }), plan: () => P.plan(seccion('💎 Mi plan')),
@@ -1172,6 +1193,207 @@
     }, '✅ Guardado');
   }
 
+  /* ---------- G53b 🧩 Módulos nuevos (cada uno se abre solo si la barbería lo tiene; si no, demo ▶️) ---------- */
+  const medioSeg = (m) => '<div class="seg" data-medios><button type="button" data-md="efectivo" class="' + (m === 'transferencia' ? '' : 'on') + '">💵 Efectivo</button>' +
+    '<button type="button" data-md="transferencia" class="' + (m === 'transferencia' ? 'on' : '') + '">🏦 Transferencia</button></div>';
+  const medioDe = (el) => { const b = el.querySelector('[data-md].on'); return b ? b.dataset.md : 'efectivo'; };
+  const medioOn = (el) => el.querySelectorAll('[data-md]').forEach((b) => b.onclick = () => el.querySelectorAll('[data-md]').forEach((x) => x.classList.toggle('on', x === b)));
+
+  // 🖼️ Portafolio: fotos de tus mejores cortes en tu link de reservas.
+  async function secPortafolio() {
+    const z = seccion('🖼️ Portafolio');
+    z.innerHTML = '<p class="muted">Sube fotos de tus mejores cortes: salen en tu link de reservas. Máximo 24.</p><div id="pfZona"><p class="muted">Cargando…</p></div>' +
+      '<div class="btns"><button class="grande full" id="bPf">📷 Subir foto</button></div>';
+    $('bPf').onclick = async () => {
+      const f = await C.elegirImagen('vitrina');
+      if (!f) return;
+      const t = await C.pedir('✂️ ¿Qué corte es?', { texto: 'Opcional: sale debajo de la foto.', placeholder: 'Ej: Degradado con barba', max: 60, si: 'Subir' });
+      if (t === null) return;
+      await C.accion($('bPf'), () => K.rpc('portafolio_agregar', { p_foto: f, p_titulo: t }), '🖼️ Foto subida');
+      secPortafolio();
+    };
+    let l = [];
+    try { l = await K.rpc('portafolio_lista'); } catch (e) { if ($('pfZona')) $('pfZona').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (!$('pfZona')) return;
+    $('pfZona').innerHTML = l.length ? '<div class="pf-grid">' + l.map((f) => '<figure><img src="' + esc(f.foto) + '" alt="' + esc(f.titulo || 'Corte') + '" loading="lazy">' +
+      (f.titulo ? '<figcaption>' + esc(f.titulo) + '</figcaption>' : '') + (dueno() || f.mia ? '<button class="icono" data-del="' + f.id + '" aria-label="Borrar">🗑️</button>' : '') + '</figure>').join('') + '</div>'
+      : '<div class="card centro"><p>Aún no hay fotos.</p><p class="muted chico">Tus clientes eligen mejor cuando ven tu trabajo.</p></div>';
+    $('pfZona').querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+      if (!await C.confirmar('¿Borrar esta foto del portafolio?', { si: 'Borrar', peligro: true })) return;
+      await C.accion(b, () => K.rpc('portafolio_borrar', { p_id: b.dataset.del }), '🗑️ Borrada');
+      secPortafolio();
+    });
+  }
+
+  // 🤖 Reservas por WhatsApp e Instagram: link + respuestas listas para copiar.
+  function secRedes() {
+    const z = seccion('🤖 WhatsApp e Instagram');
+    const link = linkClientes(), n = bar().nombre;
+    const T = [
+      ['💬 Respuesta rápida de WhatsApp', 'WhatsApp Business → Herramientas → Respuestas rápidas → + → atajo /reservar', '¡Hola! 💈 Reserva tu hora en ' + n + ' aquí, en 1 minuto y sin llamar: ' + link],
+      ['🌙 Mensaje de ausencia', 'WhatsApp Business → Herramientas → Mensaje de ausencia', '¡Hola! Ahora estamos atendiendo ✂️ Para no esperar, reserva tu hora directo aquí: ' + link],
+      ['👋 Mensaje de bienvenida', 'WhatsApp Business → Herramientas → Mensaje de bienvenida', '¡Bienvenido a ' + n + '! 💈 Mira horas libres y reserva aquí: ' + link],
+      ['📸 Bio de Instagram', 'Instagram → Editar perfil → Enlaces → Agregar enlace', '💈 ' + n + ' · Reserva tu hora 👇 ' + link],
+      ['📩 Respuesta a mensajes de Instagram', 'Instagram → Configuración → Herramientas para empresas → Respuestas guardadas', '¡Hola! 🙌 Reserva tu hora aquí y elige barbero y horario: ' + link]
+    ];
+    z.innerHTML = '<p class="muted">Copia y pega estas respuestas: tus clientes reservan solos desde tus redes y tú no contestas uno por uno.</p>' +
+      T.map(([t, d, x], i) => '<div class="card"><h2>' + t + '</h2><p class="muted chico" style="margin-top:-6px">' + esc(d) + '</p>' +
+        '<textarea readonly rows="3">' + esc(x) + '</textarea><div class="btns"><button class="small" data-cp="' + i + '">📋 Copiar</button></div></div>').join('') +
+      '<div class="card"><h2>📅 Botón "Reservar" en Instagram</h2><p class="muted chico" style="margin-top:-6px">Instagram → Editar perfil → Botones de acción → Reservar → pega tu link.</p>' +
+      '<input readonly value="' + esc(link) + '"><div class="btns"><button class="small" data-cp="link">📋 Copiar link</button></div></div>';
+    z.querySelectorAll('[data-cp]').forEach((b) => b.onclick = () => C.copiar(b.dataset.cp === 'link' ? link : T[+b.dataset.cp][2]));
+  }
+
+  // 🛍️ Productos y stock (dueño: crea y repone · equipo: vende en la caja).
+  async function secProductos() {
+    const z = seccion('🛍️ Productos y stock');
+    z.innerHTML = '<p class="muted">' + (dueno() ? 'Pomadas, ceras, shampoo… Al vender, entra a la caja y el stock baja solo.' : 'Vende un producto: entra a tu caja y el stock baja solo.') + '</p>' +
+      '<div id="prZona"><p class="muted">Cargando…</p></div>' + (dueno() ? '<div class="btns"><button class="grande full" id="bPrNuevo">+ Agregar producto</button></div>' : '');
+    if ($('bPrNuevo')) $('bPrNuevo').onclick = () => editarProducto(null);
+    let l = [];
+    try { l = await K.rpc('productos_lista'); } catch (e) { if ($('prZona')) $('prZona').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (!$('prZona')) return;
+    $('prZona').innerHTML = l.length ? '<ul class="list">' + l.map((x) => '<li' + (x.activo ? '' : ' style="opacity:.55"') + '><div class="grow"><b>' + esc(x.nombre) + '</b><div class="sub muted">' +
+      (x.precio != null ? C.plata(x.precio) + ' · ' : '') + (x.stock <= 2 ? '<span style="color:var(--bad)">⚠️ quedan ' + x.stock + '</span>' : 'Stock: ' + x.stock) + (x.activo ? '' : ' · oculto') + '</div></div>' +
+      (x.activo ? '<button class="small" data-v="' + x.id + '"' + (x.stock > 0 ? '' : ' disabled') + '>Vender</button>' : '') + (dueno() ? '<button class="small gris" data-e="' + x.id + '">Editar</button>' : '') + '</li>').join('') + '</ul>'
+      : '<div class="card centro"><p>Aún no hay productos.</p></div>';
+    $('prZona').querySelectorAll('[data-v]').forEach((b) => b.onclick = () => venderProducto(l.find((x) => x.id === b.dataset.v), secProductos));
+    $('prZona').querySelectorAll('[data-e]').forEach((b) => b.onclick = () => editarProducto(l.find((x) => x.id === b.dataset.e)));
+  }
+  function editarProducto(x) {
+    const h = C.hoja('<h2>' + (x ? '✏️ ' + esc(x.nombre) : '🛍️ Nuevo producto') + '</h2><label>Nombre</label><input data-n maxlength="60" placeholder="Ej: Pomada mate" value="' + esc(x ? x.nombre : '') + '">' +
+      '<div class="row"><div><label>Precio</label><input data-p type="number" inputmode="numeric" min="0" value="' + (x ? x.precio : '') + '"></div>' +
+      '<div><label>Stock</label><input data-s type="number" inputmode="numeric" min="0" value="' + (x ? x.stock : '') + '"></div></div>' +
+      (x ? '<label class="check"><input type="checkbox" data-a' + (x.activo ? ' checked' : '') + '> <span>Visible para vender</span></label>' : '') +
+      '<div class="btns"><button class="grande full" data-ok>Guardar</button></div>');
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      const p = { id: x ? x.id : '', nombre: h.q('[data-n]').value, precio: h.q('[data-p]').value, stock: h.q('[data-s]').value };
+      if (x) p.activo = h.q('[data-a]').checked;
+      await K.rpc('producto_guardar', { p });
+      h.cerrar(); secProductos();
+    }, '✅ Guardado');
+  }
+  function venderProducto(x, luego) {
+    if (!x) return;
+    const h = C.hoja('<h2>🛍️ Vender ' + esc(x.nombre) + '</h2><p class="muted" style="margin-top:-6px">Quedan ' + x.stock + '.' + (x.precio != null ? ' Precio ' + C.plata(x.precio) + ' c/u.' : '') + '</p>' +
+      '<label>Cantidad</label><input data-c type="number" inputmode="numeric" min="1" max="' + x.stock + '" value="1"><label>¿Cómo pagó?</label>' + medioSeg() +
+      '<div class="btns"><button class="grande full" data-ok>💵 Vender</button></div><p class="cfx-nota-btn">Entra a la caja de hoy y el stock baja solo.</p>');
+    medioOn(h);
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      const r = await K.rpc('producto_vender', { p_id: x.id, p_cant: +h.q('[data-c]').value || 1, p_medio: medioDe(h) });
+      h.cerrar();
+      if (r.stock <= 2) C.toast('⚠️ Quedan ' + r.stock + ' de ' + r.nombre + ': repón stock', 4500);
+      if (luego) luego();
+    }, '🛍️ Vendido');
+  }
+  async function elegirProducto() {
+    let l = [];
+    try { l = (await K.rpc('productos_lista')).filter((x) => x.activo && x.stock > 0); } catch (e) { C.toast('⚠️ ' + e.message); return; }
+    if (!l.length) { C.toast(dueno() ? 'Agrega productos con stock en Más → Productos y stock' : 'No hay productos con stock'); return; }
+    const h = C.hoja('<h2>🛍️ ¿Qué producto?</h2><ul class="list">' + l.map((x) => '<li><div class="grow"><b>' + esc(x.nombre) + '</b><div class="sub muted">Quedan ' + x.stock +
+      (x.precio != null ? ' · ' + C.plata(x.precio) : '') + '</div></div><button class="small" data-v="' + x.id + '">Elegir</button></li>').join('') + '</ul>');
+    h.qa('[data-v]').forEach((b) => b.onclick = () => { h.cerrar(); venderProducto(l.find((x) => x.id === b.dataset.v), caja); });
+  }
+
+  // 🎁 Gift cards (dueño: vende · equipo: canjea con el código).
+  async function secGiftcards() {
+    const z = seccion('🎁 Gift cards');
+    z.innerHTML = '<div class="card"><h2>🔎 Canjear</h2><p class="muted chico" style="margin-top:-6px">El cliente te muestra su código. Descuenta lo que gastó: el corte anótalo en la caja solo por la diferencia (la plata entró al vender la gift card).</p>' +
+      '<div class="row"><div style="flex:2"><label>Código</label><input id="gcCod" maxlength="12" placeholder="GC1A2B3C" autocapitalize="characters"></div>' +
+      '<div><label>Monto</label><input id="gcMon" type="number" inputmode="numeric" min="1" placeholder="$"></div></div>' +
+      '<div class="btns"><button class="gris" id="bGcVer">Ver saldo</button><button id="bGcCanje">Descontar</button></div><div id="gcRes"></div></div>' +
+      (dueno() ? '<div class="btns"><button class="grande full" id="bGcNueva">🎁 Vender gift card</button></div><div id="gcLista"><p class="muted">Cargando…</p></div>' : '');
+    const res = (g) => { $('gcRes').innerHTML = '<p class="' + (g.vigente ? '' : 'err') + '"><b>' + esc(g.codigo) + '</b> · saldo <b>' + C.plata(g.saldo) + '</b> de ' + C.plata(g.monto) +
+      (g.para ? ' · para ' + esc(g.para) : '') + ' · ' + (g.anulada ? 'anulada' : g.vigente ? 'vence ' + P.fechaCorta(g.vence) : g.saldo ? 'vencida' : 'sin saldo') + '</p>'; };
+    $('bGcVer').onclick = (ev) => C.accion(ev.target, async () => res(await K.rpc('giftcard_buscar', { p_codigo: $('gcCod').value })));
+    $('bGcCanje').onclick = (ev) => C.accion(ev.target, async () => {
+      const g = await K.rpc('giftcard_canjear', { p_codigo: $('gcCod').value, p_monto: +$('gcMon').value || 0 });
+      res(g); $('gcMon').value = ''; if (dueno()) listaGc();
+    }, '🎁 Descontado');
+    if (!dueno()) return;
+    $('bGcNueva').onclick = () => {
+      const h = C.hoja('<h2>🎁 Vender gift card</h2><label>Monto</label><input data-m type="number" inputmode="numeric" min="1000" step="1000" placeholder="Ej: 15000">' +
+        '<div class="row"><div><label>Para <span class="opc">(opcional)</span></label><input data-para maxlength="60" placeholder="Ej: Pedro"></div>' +
+        '<div><label>De <span class="opc">(opcional)</span></label><input data-de maxlength="60" placeholder="Ej: Ana"></div></div><label>¿Cómo pagó?</label>' + medioSeg() +
+        '<div class="btns"><button class="grande full" data-ok>Crear y cobrar</button></div><p class="cfx-nota-btn">Entra a la caja de hoy. Vale 12 meses.</p>');
+      medioOn(h);
+      h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+        const g = await K.rpc('giftcard_crear', { p_monto: +h.q('[data-m]').value || 0, p_para: h.q('[data-para]').value, p_de: h.q('[data-de]').value, p_medio: medioDe(h) });
+        h.cerrar(); listaGc(); verGc(g);
+      }, '🎁 Gift card creada');
+    };
+    listaGc();
+  }
+  function verGc(g) {
+    const msg = '🎁 ' + (g.para ? g.para + ', tienes' : 'Tienes') + ' una gift card de ' + C.plata(g.monto) + ' en ' + bar().nombre + (g.de ? ' de parte de ' + g.de : '') +
+      '. Código: ' + g.codigo + '. Reserva tu hora: ' + linkClientes();
+    const h = C.hoja('<h2>🎁 ' + esc(g.codigo) + '</h2><div class="card centro"><div style="font-size:30px;font-weight:800;letter-spacing:2px">' + esc(g.codigo) + '</div>' +
+      '<p class="muted">' + C.plata(g.saldo) + ' de saldo · vence ' + P.fechaCorta(g.vence) + '</p></div>' +
+      '<div class="btns"><button class="gris" data-cp>📋 Copiar mensaje</button><a class="btn wsp" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(msg) + '">💬 Enviar por WhatsApp</a></div>' +
+      (g.vigente ? '<div class="btns"><button class="gris small" data-an>Anular</button></div>' : ''));
+    h.q('[data-cp]').onclick = () => C.copiar(msg);
+    if (h.q('[data-an]')) h.q('[data-an]').onclick = async () => {
+      if (!await C.confirmar('¿Anular la gift card ' + g.codigo + '? Ya no se podrá canjear.', { si: 'Anular', peligro: true })) return;
+      await C.accion(h.q('[data-an]'), () => K.rpc('giftcard_anular', { p_id: g.id }), 'Anulada'); h.cerrar(); listaGc();
+    };
+  }
+  async function listaGc() {
+    let l = [];
+    try { l = await K.rpc('giftcard_lista'); } catch (e) { if ($('gcLista')) $('gcLista').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (!$('gcLista')) return;
+    $('gcLista').innerHTML = l.length ? '<div class="card"><h2>🧾 Vendidas</h2><ul class="list">' + l.map((g) => '<li' + (g.vigente ? '' : ' style="opacity:.55"') + '><div class="grow"><b>' + esc(g.codigo) + '</b>' +
+      '<div class="sub muted">' + (g.para ? esc(g.para) + ' · ' : '') + C.plata(g.saldo) + ' de ' + C.plata(g.monto) + '</div></div><button class="small gris" data-g="' + g.id + '">Ver</button></li>').join('') + '</ul></div>'
+      : '<p class="muted centro">Aún no vendes gift cards. Son el regalo perfecto para cumpleaños y Navidad 🎄</p>';
+    $('gcLista').querySelectorAll('[data-g]').forEach((b) => b.onclick = () => verGc(l.find((g) => g.id === b.dataset.g)));
+  }
+
+  // 🔁 Membresías: plan mensual de cortes (dueño: crea y cobra · equipo: marca el corte usado).
+  async function secMembresias() {
+    const z = seccion('🔁 Membresías');
+    z.innerHTML = '<p class="muted">' + (dueno() ? 'Plan mensual por cliente (ej. 4 cortes al mes): plata segura cada mes. Al cobrar, entra a la caja.' : 'Cuando atiendas a un cliente con membresía, marca su corte.') + '</p>' +
+      '<div id="mbZona"><p class="muted">Cargando…</p></div>' + (dueno() ? '<div class="btns"><button class="grande full" id="bMbNueva">+ Nueva membresía</button></div>' : '');
+    if ($('bMbNueva')) $('bMbNueva').onclick = () => editarMembresia(null);
+    let l = [];
+    try { l = await K.rpc('membresia_lista'); } catch (e) { if ($('mbZona')) $('mbZona').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
+    if (!$('mbZona')) return;
+    $('mbZona').innerHTML = l.length ? '<ul class="list">' + l.map((m) => '<li' + (m.vigente ? '' : ' style="opacity:.65"') + '><div class="grow"><b>' + esc(m.nombre) + '</b><div class="sub muted">' +
+      (m.vigente ? 'Quedan <b>' + m.quedan + '</b> de ' + m.cortes + ' este mes · hasta ' + P.fechaCorta(m.hasta) : '<span style="color:var(--bad)">' + (m.activa ? 'Vencida: cobra el mes' : 'Pausada') + '</span>') + '</div></div>' +
+      (m.vigente && m.quedan ? '<button class="small" data-u="' + m.id + '">✂️ Usar</button>' : '') + (dueno() ? '<button class="small gris" data-e="' + m.id + '">' + (m.vigente ? 'Editar' : '💵 Cobrar') + '</button>' : '') + '</li>').join('') + '</ul>'
+      : '<div class="card centro"><p>Aún no hay membresías.</p>' + (dueno() ? '<p class="muted chico">Ofrécela a tus clientes fijos: ellos ahorran y tú aseguras la plata del mes.</p>' : '') + '</div>';
+    $('mbZona').querySelectorAll('[data-u]').forEach((b) => b.onclick = async () => {
+      const m = l.find((x) => x.id === b.dataset.u);
+      if (!await C.confirmar('¿Marcar 1 corte de ' + m.nombre + '? Le quedarán ' + (m.quedan - 1) + ' este mes.', { si: '✂️ Usar' })) return;
+      await C.accion(b, () => K.rpc('membresia_usar', { p_id: m.id }), '✂️ Corte marcado');
+      secMembresias();
+    });
+    $('mbZona').querySelectorAll('[data-e]').forEach((b) => b.onclick = () => editarMembresia(l.find((x) => x.id === b.dataset.e)));
+  }
+  async function editarMembresia(m) {
+    await cargarClientes();
+    const h = C.hoja('<h2>' + (m ? '🔁 ' + esc(m.nombre) : '🔁 Nueva membresía') + '</h2>' +
+      '<label>Cliente</label><input data-n maxlength="60" list="mbCli" placeholder="Nombre" value="' + esc(m ? m.nombre : '') + '"><datalist id="mbCli">' +
+      (clientes || []).filter((c) => c.id).map((c) => '<option value="' + esc(c.nombre) + '">').join('') + '</datalist>' +
+      '<label>WhatsApp <span class="opc">(opcional)</span></label><input data-t inputmode="tel" value="' + esc(m ? m.tel || '' : '') + '">' +
+      '<div class="row"><div><label>Cortes al mes</label><input data-c type="number" inputmode="numeric" min="1" max="31" value="' + (m ? m.cortes : 4) + '"></div>' +
+      '<div><label>Precio al mes</label><input data-p type="number" inputmode="numeric" min="0" value="' + (m ? m.precio : '') + '"></div></div>' +
+      '<label>¿Cobrar ahora?</label><div class="seg" data-meses><button type="button" data-mes="0"' + (m && m.vigente ? ' class="on"' : '') + '>No</button><button type="button" data-mes="1"' + (m && m.vigente ? '' : ' class="on"') + '>1 mes</button><button type="button" data-mes="3">3 meses</button></div>' +
+      '<label>¿Cómo pagó?</label>' + medioSeg() +
+      (m ? '<label class="check"><input type="checkbox" data-a' + (m.activa ? ' checked' : '') + '> <span>Activa</span></label>' : '') +
+      '<div class="btns"><button class="grande full" data-ok>Guardar</button></div><p class="cfx-nota-btn">Lo que cobres entra a la caja de hoy. Los cortes se reinician cada mes.</p>');
+    medioOn(h);
+    h.qa('[data-mes]').forEach((b) => b.onclick = () => h.qa('[data-mes]').forEach((x) => x.classList.toggle('on', x === b)));
+    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+      const nom = h.q('[data-n]').value.trim();
+      const cli = (clientes || []).find((c) => c.id && c.nombre.toLowerCase() === nom.toLowerCase());
+      const p = { id: m ? m.id : '', nombre: nom, tel: h.q('[data-t]').value || (cli && cli.telefono) || '', cortes: h.q('[data-c]').value, precio: h.q('[data-p]').value,
+        meses: +(h.q('[data-mes].on') || {}).dataset.mes || 0, medio: medioDe(h) };
+      if (cli) p.cliente_id = cli.id;
+      if (m) p.activa = h.q('[data-a]').checked;
+      await K.rpc('membresia_guardar', { p });
+      h.cerrar(); secMembresias();
+    }, '✅ Guardado');
+  }
+
   /* ----- Horario y bloqueos (dueño) ----- */
   async function secHorario() {
     const z = seccion('🕐 Horario');
@@ -1253,7 +1475,13 @@
       '<label>⭐ Abono para clientes Premium <span class="opc">(opcional: menor que el normal, o 0 = sin abono)</span></label>' +
       '<input id="tAbP" type="number" inputmode="numeric" min="0" max="100000" placeholder="Igual que el normal" value="' + (b.abono_premium == null ? '' : b.abono_premium) + '">' +
       '<p class="muted chico">Un beneficio para que tus clientes se hagan Premium: reservan pagando menos abono (o nada).</p>' +
-      '<div class="btns"><button class="grande full" id="bGuardarL">Guardar</button></div></div>';
+      '<div class="btns"><button class="grande full" id="bGuardarL">Guardar</button></div></div>' +
+      // G53b 💳 módulo Anti-falta
+      '<div class="card" id="cAntifalta"><h2>💳 Anti-falta</h2><p class="muted chico" style="margin-top:-6px">Para los clientes que reservan y no llegan (cuenta las faltas de los últimos 12 meses). Vacío o 0 = no se usa.</p>' +
+      '<label>Abono obligatorio si ya faltó 1 vez</label><input id="afAbono" type="number" inputmode="numeric" min="0" max="100000" placeholder="Ej: 5000" value="' + (((b.antifalta || {}).abono) || '') + '">' +
+      '<label>No puede reservar solo desde la falta n.º</label><input id="afFaltas" type="number" inputmode="numeric" min="0" max="20" placeholder="Ej: 3" value="' + (((b.antifalta || {}).faltas) || '') + '">' +
+      '<p class="muted chico">Bloqueado, le pedimos que te escriba por WhatsApp. Las faltas se marcan con "No vino" en la agenda.</p>' +
+      '<div class="btns"><button class="full" id="bGuardarAf">Guardar anti-falta</button></div></div>';
     z.querySelectorAll('input[name="pagoActivo"]').forEach((r) => r.onchange = () => {
       z.querySelectorAll('[data-pago]').forEach((c) => {
         const on = c.dataset.pago === r.value;
@@ -1268,6 +1496,10 @@
       yo = await K.rpc('guardar_barberia', { p: { pagos: { activo, p1: leer(1), p2: leer(2) }, datos_transferencia: $('tTransf').value, abono_premium: $('tAbP').value } });
       secLinks();
     }, '✅ Links guardados');
+    if (!tiene('antifalta')) P.bloquear($('cAntifalta'), 'Anti-falta', 'antifalta');
+    $('bGuardarAf').onclick = (ev) => C.accion(ev.target, async () => {
+      yo = await K.rpc('guardar_barberia', { p: { antifalta_abono: $('afAbono').value, antifalta_faltas: $('afFaltas').value } });
+    }, '✅ Anti-falta guardado');
   }
 
   /* ----- Calificaciones que dejaron los clientes (dueño) ----- */
