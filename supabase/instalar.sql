@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.88'::text $$;
+language sql immutable as $$ select '2.89'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -6563,7 +6563,8 @@ language sql immutable as $$
          ('mantencion', '⏰ Recordatorio de mantención', 'Cada X meses le avisamos al cliente que le toca mantención: vuelve solo.'),
          ('stock', '📦 Repuestos y stock', 'Stock de repuestos que baja solo con cada orden y pedido a tu proveedor por WhatsApp con un toque.'),
          ('certificadas', '🏷️ Bicis usadas certificadas', 'Vende bicis usadas con informe de 50 puntos, fotos y garantía: se publican en tu página y te escriben por WhatsApp.'),
-         ('tradein', '🔄 Parte de pago', 'Calculadora: cuánto ofrecer por la bici usada del cliente para que se lleve una nueva o un arreglo.')
+         ('tradein', '🔄 Parte de pago', 'Calculadora: cuánto ofrecer por la bici usada del cliente para que se lleve una nueva o un arreglo.'),
+         ('pasaporte', '🪪 Pasaporte de la bici', 'Sticker QR para el cuadro: historial de mantenciones, dueño y aviso de robo. Quien la escanea sabe si es robada.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb
