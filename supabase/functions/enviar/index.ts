@@ -7,7 +7,34 @@
 import webpush from 'npm:web-push@3.6.7';
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4';
 
-const VERSION = '1.1';
+// ---------- G61 a · 📲 Push insistente (núcleo push.sql): cada aviso lleva su "grupo"; el celular confirma al recibirlo
+// (service worker → cfx_push_recibido). Sin confirmación se reenvía a 1, 2, 5, 10, 15, 30 min y luego cada 1 h, hasta 48 h.
+// deno-lint-ignore no-explicit-any
+type Rpc = { rpc: (f: string, a?: Record<string, unknown>) => any };
+type SubPush = { endpoint: string; p256dh: string; auth: string };
+const ACK_URL = (Deno.env.get('SUPABASE_URL') || '') + '/rest/v1/rpc/cfx_push_recibido';
+const ACK_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
+const grupos = () => { const m = new Map<string, string>(); return (k: string) => { if (!m.has(k)) m.set(k, crypto.randomUUID()); return m.get(k)!; }; };
+function conAck(payload: string, grupo: string) {
+  try { const o = JSON.parse(payload); o.ack = grupo; o.ackUrl = ACK_URL; o.ackKey = ACK_KEY; return JSON.stringify(o); } catch { return payload; }
+}
+async function anotarPush(s: Rpc, lista: (SubPush & { grupo: string; payload: string })[]) {
+  if (!lista.length) return;
+  try { await s.rpc('cfx_push_anotar', { p_lista: lista.map((x) => ({ grupo: x.grupo, endpoint: x.endpoint, p256dh: x.p256dh, auth: x.auth, payload: x.payload })) }); } catch { /* sin push.sql todavía */ }
+}
+async function reintentarPush(s: Rpc, preparar: () => Promise<boolean>) {
+  let data: (SubPush & { payload: string })[] | null = null;
+  try { const r = await s.rpc('cfx_push_tomar'); data = r.error ? null : r.data; } catch { return 0; }
+  if (!data?.length || !(await preparar())) return 0;
+  let n = 0;
+  await Promise.allSettled(data.map(async (e) => {
+    try { await webpush.sendNotification({ endpoint: e.endpoint, keys: { p256dh: e.p256dh, auth: e.auth } }, e.payload, { TTL: 86400, urgency: 'high' }); n++; }
+    catch (err) { const c = (err as { statusCode?: number })?.statusCode; if (c === 404 || c === 410) await s.rpc('cfx_push_muerto', { p_endpoint: e.endpoint }); }
+  }));
+  return n;
+}
+
+const VERSION = '1.2';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -34,6 +61,7 @@ async function enviarPush() {
   const { data: secretos } = await s.rpc('secretos');
   if (!secretos?.vapid_public || !secretos?.vapid_private) return { enviados: 0, error: 'Faltan las claves push (Admin → Ajustes)' };
   webpush.setVapidDetails('mailto:soporte@codefix.app', secretos.vapid_public, secretos.vapid_private);
+  const reenviados = await reintentarPush(s, async () => true);
   let enviados = 0, vueltas = 0;
   while (vueltas++ < 5) {
     const { data, error } = await s.rpc('tomar_push');
@@ -43,7 +71,8 @@ async function enviarPush() {
     const ok: string[] = [], sin: string[] = [], fallo: string[] = [];
     await Promise.all(lista.map(async (n) => {
       if (!n.subs?.length) { sin.push(n.id); return; }
-      const payload = JSON.stringify({ title: n.titulo, body: n.cuerpo, url: n.url, tag: n.tipo === 'chat' ? 'chat-' + n.url : n.id });
+      const g = crypto.randomUUID(), payload = conAck(JSON.stringify({ title: n.titulo, body: n.cuerpo, url: n.url, tag: n.tipo === 'chat' ? 'chat-' + n.url : n.id }), g);
+      await anotarPush(s, n.subs.map((t) => ({ endpoint: t.endpoint, p256dh: t.p256dh, auth: t.auth, grupo: g, payload })));
       const res = await Promise.allSettled(n.subs.map((t) =>
         webpush.sendNotification({ endpoint: t.endpoint, keys: { p256dh: t.p256dh, auth: t.auth } }, payload, { TTL: 86400, urgency: 'high' })
       ));
@@ -59,7 +88,7 @@ async function enviarPush() {
     }));
     await s.rpc('terminar_push', { p_ok: ok, p_sin: sin, p_fallo: fallo });
   }
-  return { enviados };
+  return { enviados, reenviados };
 }
 
 type Nuevo = { email?: string; password?: string; nombre?: string; tipo?: string; telefono?: string; barberia?: string };
