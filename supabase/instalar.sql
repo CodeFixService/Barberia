@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.85'::text $$;
+language sql immutable as $$ select '2.86'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -7970,6 +7970,107 @@ begin
   perform cron.schedule('cfx-auto', '*/10 * * * *', 'select public.auto_actualizar()');
 exception when others then
   raise notice 'Actualización automática no activada (%). Activa pg_cron en Supabase y vuelve a correr este archivo.', sqlerrm;
+end $$;
+
+-- G65 🏭 De fábrica: la barbería nueva ya trae los cortes y servicios más pedidos, por categoría (solo ajusta precios).
+-- FREE opera completo (G39) → 40 servicios (antes 8). Solo si seguía el valor de fábrica.
+update public.planes set free = 40 where grupo = 'barberia' and clave = 'servicios' and free = 8;
+
+create or replace function public.bar_fabrica_agregar(b uuid) returns int
+language plpgsql security definer set search_path = '' as $$
+declare lim int := 40; n int; agregados int := 0; x record;
+begin
+  select greatest(free, 40) into lim from public.planes where grupo = 'barberia' and clave = 'servicios';
+  select count(*) into n from public.servicios where barberia_id = b;
+  for x in select * from (values
+    (1, 'Corte clásico', 10000, 30, 'Cortes', 'Tijera y máquina, terminación a navaja.'),
+    (2, 'Degradado (fade)', 12000, 40, 'Cortes', 'Low, mid o high fade.'),
+    (3, 'Skin fade', 13000, 45, 'Cortes', 'Degradado a piel con navaja.'),
+    (4, 'Taper fade', 12000, 40, 'Cortes', 'Degradado solo en patillas y nuca.'),
+    (5, 'Burst fade', 13000, 45, 'Cortes', 'Degradado en curva alrededor de la oreja.'),
+    (6, 'Corte a tijera', 12000, 40, 'Cortes', 'Todo a tijera, ideal pelo largo o medio.'),
+    (7, 'Buzz cut (rapado)', 8000, 20, 'Cortes', 'Rapado parejo a máquina.'),
+    (8, 'Crop francés', 12000, 40, 'Cortes', 'Flequillo corto y texturizado.'),
+    (9, 'Pompadour / Quiff', 13000, 45, 'Cortes', 'Volumen arriba con lados cortos.'),
+    (10, 'Mullet', 13000, 45, 'Cortes', 'Corto adelante y largo atrás.'),
+    (11, 'Corte + diseño', 15000, 50, 'Cortes', 'Corte con líneas o dibujo a navaja.'),
+    (12, 'Arreglo de barba', 7000, 20, 'Barba', 'Perfilado y emparejado.'),
+    (13, 'Barba con toalla caliente', 10000, 30, 'Barba', 'Afeitado de contornos a navaja con toalla caliente.'),
+    (14, 'Afeitado clásico', 10000, 30, 'Barba', 'Afeitado completo a navaja.'),
+    (15, 'Perfilado de barba', 5000, 15, 'Barba', 'Solo líneas y contorno.'),
+    (16, 'Corte + barba', 16000, 50, 'Combos', 'El combo más pedido.'),
+    (17, 'Corte + barba + cejas', 18000, 60, 'Combos', 'Servicio completo.'),
+    (18, 'Corte + lavado', 13000, 40, 'Combos', 'Incluye lavado y peinado.'),
+    (19, 'Corte niño', 8000, 30, 'Niños', 'Hasta 12 años.'),
+    (20, 'Corte niño + diseño', 10000, 40, 'Niños', 'Con línea o dibujo.'),
+    (21, 'Perfilado de cejas', 3000, 10, 'Extras', 'A navaja o pinza.'),
+    (22, 'Lavado y peinado', 4000, 15, 'Extras', 'Con producto de terminación.'),
+    (23, 'Mascarilla negra', 5000, 15, 'Extras', 'Limpieza facial de puntos negros.'),
+    (24, 'Diseño / líneas', 3000, 10, 'Extras', 'Línea o dibujo a navaja.'),
+    (25, 'Depilación de nariz y oídos', 3000, 10, 'Extras', 'Con cera.'),
+    (26, 'Decoloración', 25000, 90, 'Color', 'Platinado o rubio.'),
+    (27, 'Tinte de pelo', 18000, 60, 'Color', 'Color parejo.'),
+    (28, 'Tinte de barba', 8000, 20, 'Color', 'Cubre canas o aviva el color.'),
+    (29, 'Mechas / visos', 25000, 90, 'Color', 'Reflejos en la parte de arriba.'),
+    (30, 'Permanente / rizos', 30000, 90, 'Color', 'Ondas o rizos que duran.'),
+    (31, 'Alisado / keratina', 30000, 90, 'Color', 'Pelo liso y sin frizz.')
+  ) as f(o, nombre, precio, minutos, cat, descr) order by o loop
+    exit when n >= lim;
+    if not exists (select 1 from public.servicios s where s.barberia_id = b and lower(s.nombre) = lower(x.nombre)) then
+      insert into public.servicios (barberia_id, nombre, precio, duracion, categoria, descripcion, visible, orden)
+      values (b, x.nombre, x.precio, x.minutos, x.cat, x.descr, true, x.o);
+      n := n + 1; agregados := agregados + 1;
+    end if;
+  end loop;
+  return agregados;
+end $$;
+revoke all on function public.bar_fabrica_agregar(uuid) from public, anon, authenticated;
+
+create or replace function public.barberias_fabrica_tg() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin perform public.bar_fabrica_agregar(new.id); return new; end $$;
+drop trigger if exists barberias_fabrica on public.barberias;
+create trigger barberias_fabrica after insert on public.barberias for each row execute function public.barberias_fabrica_tg();
+
+-- El dueño trae de vuelta los que borró (Más → Servicios → ✨ De fábrica).
+create or replace function public.servicios_fabrica() returns int
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles;
+begin
+  me := public.yo_activo();
+  if me.role <> 'owner' then raise exception 'Solo el dueño administra los servicios'; end if;
+  return public.bar_fabrica_agregar(me.barberia_id);
+end $$;
+revoke all on function public.servicios_fabrica() from public, anon;
+grant execute on function public.servicios_fabrica() to authenticated;
+
+-- 🛍️ Productos típicos (módulo Productos): parten con stock 0 y el precio sugerido.
+create or replace function public.productos_fabrica() returns int
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; n int := 0; x record;
+begin
+  me := public.yo_activo();
+  if me.role <> 'owner' then raise exception 'Solo el dueño'; end if;
+  if not public.bar_tiene('productos', me.barberia_id) then raise exception 'Productos es un módulo 🧩: actívalo en Más → Módulos'; end if;
+  for x in select * from (values ('Pomada mate', 12000), ('Pomada brillante', 12000), ('Cera para el pelo', 10000), ('Gel fijador', 6000),
+    ('Polvo texturizador', 12000), ('Spray fijador', 9000), ('Aceite para barba', 12000), ('Bálsamo para barba', 12000), ('Shampoo para barba', 10000),
+    ('Shampoo', 9000), ('Acondicionador', 9000), ('After shave', 10000), ('Peineta', 3000), ('Cepillo para barba', 8000), ('Minoxidil', 20000)) as f(nombre, precio) loop
+    if (select count(*) from public.bar_productos where barberia_id = me.barberia_id) >= 100 then exit; end if;
+    if not exists (select 1 from public.bar_productos p where p.barberia_id = me.barberia_id and lower(p.nombre) = lower(x.nombre)) then
+      insert into public.bar_productos (barberia_id, nombre, precio, stock) values (me.barberia_id, x.nombre, x.precio, 0);
+      n := n + 1;
+    end if;
+  end loop;
+  return n;
+end $$;
+revoke all on function public.productos_fabrica() from public, anon;
+grant execute on function public.productos_fabrica() to authenticated;
+
+-- Barberías que todavía no tienen ningún servicio: se les cargan una sola vez.
+do $$ declare t record; begin
+  for t in select id from public.barberias x where not exists (select 1 from public.servicios s where s.barberia_id = x.id) loop
+    perform public.bar_fabrica_agregar(t.id);
+  end loop;
 end $$;
 
 select 'Barbería instalada ✅ versión ' || public.db_version() ||

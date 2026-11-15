@@ -29,6 +29,9 @@ Reservas con abono para barberías: agenda, caja, clientes, link/QR para reserva
 - `supabase/instalar.sql` (~7.300 l; db_version() l.21; notas_version l.25 = solo categorías) · `supabase/functions/enviar` (push y QR, 1.1).
 - Pruebas: `supabase/pruebas/correr.sh` (SQL completa), SaaS/pruebas `g53b_barberia.js`, `g53_barberia.js`, `g39_barberia.js`, `bar_ui.js`, `bar_pagos.js`, `node celular.js barberia`, central.js.
 
+## 🏭 G65 De fábrica (3.02 · bd 2.86) — prueba SaaS/pruebas/g65_barberia.js
+- bar_fabrica_agregar(b): 31 servicios con categoría (Cortes, Barba, Combos, Niños, Color, Extras) · trigger barberias_fabrica · RPC servicios_fabrica() (dueño, botón #bFabSer en #servicios) · productos_fabrica() (módulo productos, #bPrFab, 15 con stock 0) · FREE servicios 40. prueba.sql borra los de fábrica al inicio (parte limpia).
+
 ## Planes y módulos (G39)
 - Planes en tabla `planes` (grupo barberia/cliente; límites y opciones sí/no) → SQL `tiene()/limite()`, JS `K.tiene/K.barberiaTiene`.
 - FREE: agenda, servicios, link de reservas, caja de cortes, 🧾 comprobante. PREMIUM: más barberos/clientes, estadísticas, colores, reportes de caja, comisiones…

@@ -76,6 +76,11 @@ select pg_temp.crear('dueno@test.cl', 'b2@test.cl', 'Barbero 2', 'barber');
 select pg_temp.debe_fallar($$select pg_temp.crear('dueno@test.cl', 'b3@test.cl', 'Barbero 3', 'barber')$$, 'máximo de 3 barberos');
 
 -- 2. Configuración del dueño
+-- G65 🏭 la barbería nació con los servicios de fábrica; esta prueba parte limpia con los suyos.
+reset role;
+select pg_temp.ok((select count(*) from public.servicios) = 31 and exists (select 1 from public.servicios where nombre = 'Skin fade' and categoria = 'Cortes'), 'G65: la barbería nueva trae 31 servicios de fábrica');
+delete from public.servicios;
+-- 2. Configuración del dueño
 select pg_temp.como('dueno@test.cl');
 select public.guardar_barberia(jsonb_build_object('abono', 4000, 'datos_transferencia', 'Banco X', 'horario',
   '[{"e":"a","i":"08:00","f":"22:00"},{"e":"a","i":"08:00","f":"22:00"},{"e":"a","i":"08:00","f":"22:00"},{"e":"a","i":"08:00","f":"22:00"},{"e":"a","i":"08:00","f":"22:00"},{"e":"c","i":"08:00","f":"22:00"},{"e":"c","i":"08:00","f":"22:00"}]'::jsonb));

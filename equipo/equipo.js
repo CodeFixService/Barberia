@@ -1009,12 +1009,19 @@
     await cargarBarberia();
     const lim = K.limite('servicios', premium());
     z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + B.servicios.length + ' / ' + (lim >= 100 ? '∞' : lim) + ' servicios</b><div class="muted chico">Los clientes los ven con precio y duración</div></div>' +
-      '<button id="bNuevoSer">+ Nuevo</button></div></div>' + (B.servicios.length ? B.servicios.map((s, i) =>
+      '<button id="bNuevoSer">+ Nuevo</button></div>' +
+      '<p class="muted chico" style="margin:8px 0 0">Vienen los cortes más pedidos: toca ✏️ para cambiar el precio u ocultarlo.</p>' +
+      '<div class="btns"><button class="gris" id="bFabSer">✨ Servicios de fábrica</button></div></div>' + (B.servicios.length ? B.servicios.map((s, i) =>
         '<div class="serv" style="' + (s.visible ? '' : 'opacity:.55') + '"><span class="foto" style="' + C.fondo(s.foto) + '">' + (s.foto ? '' : '✂️') + '</span>' +
         '<div class="grow"><b>' + esc(s.nombre) + (s.visible ? '' : ' <span class="pill">oculto</span>') + '</b><span class="sub muted">' + s.duracion + ' min' + (s.categoria ? ' · ' + esc(s.categoria) : '') +
         (s.barberos && s.barberos.length ? ' · solo ' + s.barberos.map((id) => (barbero(id) || {}).nombre || '').join(', ') : '') + '</span></div>' +
         '<div style="text-align:right"><div class="precio-s">' + C.plata(s.precio) + '</div><div class="orden"><button class="gris" data-up="' + i + '"' + (i ? '' : ' disabled') + '>↑</button> <button class="gris" data-ed="' + s.id + '">✏️</button></div></div></div>').join('')
       : '<div class="card empty"><span class="ico">✂️</span>Agrega tu primer servicio: corte, barba, cejas…</div>');
+    $('bFabSer').onclick = (ev) => C.accion(ev.target, async () => {
+      const n = await K.rpc('servicios_fabrica');
+      C.toast(n ? '✨ Se agregaron ' + n + ': ajusta tus precios' : '✨ Ya tienes todos los de fábrica');
+      secServicios();
+    });
     $('bNuevoSer').onclick = () => {
       if (B.servicios.length >= lim) return premium() ? C.toast('Máximo alcanzado') : P.upsell('Servicios ilimitados');
       editarServicio(null);
@@ -1039,7 +1046,8 @@
       '<label>Duración</label><div class="durs">' + durs.map((d) => '<button type="button" class="chip" data-dur="' + d + '">' + d + ' min</button>').join('') + '</div>' +
       '<input data-d type="number" min="5" max="480" step="5" value="' + (s ? s.duracion : 30) + '" style="margin-top:8px">' +
       '<details style="margin-top:12px"' + (s && (s.categoria || s.descripcion) ? ' open' : '') + '><summary class="muted">Opcional: categoría y descripción</summary>' +
-      '<label>Categoría</label><input data-c maxlength="30" placeholder="Ej: Cortes, Barba, Color" value="' + esc(s ? s.categoria || '' : '') + '">' +
+      '<label>Categoría</label><input data-c maxlength="30" list="catSer" autocomplete="off" placeholder="Elige o escribe" value="' + esc(s ? s.categoria || '' : '') + '">' +
+      '<datalist id="catSer">' + ['Cortes', 'Barba', 'Combos', 'Niños', 'Color', 'Extras'].map((c) => '<option value="' + c + '">').join('') + '</datalist>' +
       '<label>Descripción</label><input data-desc maxlength="200" value="' + esc(s ? s.descripcion || '' : '') + '"></details>' +
       '<label class="check"><input type="checkbox" data-v' + (!s || s.visible ? ' checked' : '') + '> Visible para los clientes</label>' +
       '<div id="sPrem"><label>Foto ⭐</label><div class="btns" style="margin-top:0"><button type="button" class="gris small" data-foto>📷 ' + (s && s.foto ? 'Cambiar foto' : 'Poner foto') + '</button></div>' +
@@ -1248,7 +1256,12 @@
   async function secProductos() {
     const z = seccion('🛍️ Productos y stock');
     z.innerHTML = '<p class="muted">' + (dueno() ? 'Pomadas, ceras, shampoo… Al vender, entra a la caja y el stock baja solo.' : 'Vende un producto: entra a tu caja y el stock baja solo.') + '</p>' +
-      '<div id="prZona"><p class="muted">Cargando…</p></div>' + (dueno() ? '<div class="btns"><button class="grande full" id="bPrNuevo">+ Agregar producto</button></div>' : '');
+      '<div id="prZona"><p class="muted">Cargando…</p></div>' + (dueno() ? '<div class="btns"><button class="grande full" id="bPrNuevo">+ Agregar producto</button><button class="gris full" id="bPrFab">✨ Productos típicos</button></div>' : '');
+    if ($('bPrFab')) $('bPrFab').onclick = (ev) => C.accion(ev.target, async () => {
+      const n = await K.rpc('productos_fabrica');
+      C.toast(n ? '✨ Se agregaron ' + n + ' (stock 0): edita precio y stock' : '✨ Ya tienes todos los típicos');
+      secProductos();
+    });
     if ($('bPrNuevo')) $('bPrNuevo').onclick = () => editarProducto(null);
     let l = [];
     try { l = await K.rpc('productos_lista'); } catch (e) { if ($('prZona')) $('prZona').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
