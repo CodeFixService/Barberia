@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '2.90'::text $$;
+language sql immutable as $$ select '2.91'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -6565,7 +6565,8 @@ language sql immutable as $$
          ('certificadas', '🏷️ Bicis usadas certificadas', 'Vende bicis usadas con informe de 50 puntos, fotos y garantía: se publican en tu página y te escriben por WhatsApp.'),
          ('tradein', '🔄 Parte de pago', 'Calculadora: cuánto ofrecer por la bici usada del cliente para que se lleve una nueva o un arreglo.'),
          ('pasaporte', '🪪 Pasaporte de la bici', 'Sticker QR para el cuadro: historial de mantenciones, dueño y aviso de robo. Quien la escanea sabe si es robada.'),
-         ('domicilio', '🚐 Mecánico a domicilio', 'El cliente reserva con su dirección (+ recargo de visita); armas la ruta del día y le avisas “Voy en camino”.')
+         ('domicilio', '🚐 Mecánico a domicilio', 'El cliente reserva con su dirección (+ recargo de visita); armas la ruta del día y le avisas “Voy en camino”.'),
+         ('garantias', '🛡️ Garantías', 'Garantía del trabajo, repuestos o bici usada, con vencimiento: el cliente la ve en su link y la usa en 1 toque.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb
