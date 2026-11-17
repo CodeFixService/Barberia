@@ -59,7 +59,7 @@
     if (v === 'agenda' && q.get('r')) { mostrar('agenda'); abrirReserva(q.get('r'), true); return; }
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
-    if (['portafolio', 'redes', 'productos', 'giftcards', 'membresias', 'plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo', 'modulos'].includes(v)) {
+    if (['portafolio', 'redes', 'productos', 'giftcards', 'membresias', 'plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo', 'modulos', 'promos'].includes(v)) {
       mostrar('mas'); abrirSeccion(v === 'ajustes' ? 'negocio' : v); return;
     }
     mostrar(VISTAS[v] ? v : 'hoy');
@@ -724,6 +724,7 @@
       ['productos', '🛍️', 'Productos y stock', 'Vende pomadas en la caja'],
       ['giftcards', '🎁', 'Gift cards', 'Tarjetas de regalo con código'],
       ['membresias', '🔁', 'Membresías', 'Plan mensual de cortes'],
+      ...(window.CFX_ANUNCIOS && CFX_ANUNCIOS.promos ? [['promos', '📣', 'Promo destacada', 'Tarjeta al abrir la app de tus clientes']] : []),
       ['invitar', '🤝', 'Invita una barbería', K.regla('dias_referido') ? 'Gana ' + K.regla('dias_referido') + ' días de Premium' : 'Comparte la app'],
       ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
       ...(bar().modulos ? [['modulos', '🧩', 'Módulos', premium() ? 'Incluidos + nuevos con -20%' : 'Activa solo lo que necesitas']] : []),
@@ -745,7 +746,7 @@
     // Menú Más común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (seccion()).
     // Mi cuenta (perfil) y Soporte ya vienen en el menú común (Configuración y Cuenta y ayuda).
     const G = dueno() ? { negocio: 'Tu barbería', horario: 'Tu barbería', tiempos: 'Tu barbería', servicios: 'Tu barbería', links: 'Tu barbería', ofertas: 'Tu barbería', equipo: 'Tu barbería', enlace: 'Tu barbería',
-      portafolio: 'Tu barbería', redes: 'Tu barbería', productos: 'Ventas y clientes', giftcards: 'Ventas y clientes', membresias: 'Ventas y clientes',
+      portafolio: 'Tu barbería', redes: 'Tu barbería', productos: 'Ventas y clientes', giftcards: 'Ventas y clientes', membresias: 'Ventas y clientes', promos: 'Ventas y clientes',
       caja: 'Ventas y clientes', boleta: 'Ventas y clientes', estadisticas: 'Ventas y clientes', resumen: 'Ventas y clientes', volver: 'Ventas y clientes', calificaciones: 'Ventas y clientes',
       plan: 'Tu plan', modulos: 'Tu plan', invitar: 'Tu plan', verificar: 'Tu plan', respaldo: 'Configuración' } : {};
     const K2 = { plan: 'premium', invitar: 'invitar' };
@@ -790,13 +791,14 @@
     if (s === 'soporte') { if (window.CFX_AYUDA) window.CFX_AYUDA.chat(); return; }  // chat común de soporte (llega al Centro de Mando)
     if (s === 'clientes') { mostrar('clientes'); return; }
     if (s === 'verificar') { CFX_VERIFICAR.abrir({ rpc: K.rpc }); return; }
-    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'modulos', 'resumen', 'invitar', 'respaldo', 'redes', 'boleta'];
+    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'modulos', 'resumen', 'invitar', 'respaldo', 'redes', 'boleta', 'promos'];
     if (!dueno() && soloDueno.includes(s)) { mas(); return; }
     if (MOD53[s] && !tiene(MOD53[s][0])) { P.upsell(MOD53[s][1], MOD53[s][0]); return; }
     if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); mas(); }
     const F = { equipo: secEquipo, servicios: secServicios, ofertas: secOfertas, estadisticas: secEstadisticas, negocio: secNegocio, horario: secHorario, links: secLinks,
       respaldo: secRespaldo, modulos: secModulos, caja, boleta: secBoleta, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
       portafolio: secPortafolio, redes: secRedes, productos: secProductos, giftcards: secGiftcards, membresias: secMembresias,
+      promos: () => CFX_ANUNCIOS.promos(seccion('📣 Promo destacada'), { rpc: K.rpc, probar: (k) => P.upsell('Promo destacada', k) }),  // G96 b (núcleo)
       milink: () => P.compartir({ el: seccion('🔳 Mi link y QR'), link: K.linkBarberia(bar().codigo, yo.id), archivo: 'qr-' + primerNombre(yo.nombre),
         texto: 'Con este link o QR tus clientes reservan <b>directo contigo</b> en ' + esc(bar().nombre) + ' (sin cuenta o con su cuenta).',
         mensaje: '💈 Reserva tu hora conmigo en ' + bar().nombre }), plan: () => P.plan(seccion('💎 Mi plan')),

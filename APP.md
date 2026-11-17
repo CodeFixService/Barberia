@@ -59,3 +59,4 @@ Auto-actualizar compara con `bd` de version.json (antes con `version` → se rei
 - ✅ G42e: utilidades Bootstrap ya enlazadas por el sincronizador.
 - ✅ Núcleo 2.79 (2.95 · bd 2.80): ▶️ con SVG, 📣 Campañas genérico, 💬 avisos propios (CFX_DIALOGO), "Cuenta y ayuda" ya no sale bajo Clientes.
 - G43: la tarjeta "🚀 Termina de armar tu negocio" ya sale en Inicio; afinar guiaPasos con campo exacto si Josué lo pide.
+- G96 b (3.24 · bd 3.03): 📣 Promo destacada (módulo 'promos' en bar_nuevos; núcleo CFX_ANUNCIOS.promos; Más → 📣, ruta #promos) · gancho cfx_promo_negocios_app = quienes reservaron o tienen barberia_id. Prueba: SaaS/pruebas/g96b.js.
