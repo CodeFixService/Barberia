@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '3.01'::text $$;
+language sql immutable as $$ select '3.02'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -7067,7 +7067,10 @@ language sql immutable as $$
          ('destacar', '⭐ Destacado en el mapa', 'Tus estacionamientos salen primero y resaltados en el mapa y la lista: más reservas.'),
          ('acceso', '🔑 Control de acceso con QR', 'Cada reserva trae su pase QR: lo escaneas al entrar y salir y ves si está vigente y su patente.'),
          ('descuentos', '🏷️ Descuento por estadía larga', 'Premia a quien reserva más tiempo: un % menos desde las horas, días o meses que elijas.'),
-         ('ganancias', '📊 Ganancias y ocupación', 'Cuánto ganaste por mes, ocupación de cada lugar, mejores días y planilla para Excel.')
+         ('ganancias', '📊 Ganancias y ocupación', 'Cuánto ganaste por mes, ocupación de cada lugar, mejores días y planilla para Excel.'),
+         -- G96: módulos de tienda (Despega primero).
+         ('suscripciones', '🔁 Compras recurrentes', 'Tu cliente recibe su pedido solo cada semana o cada mes (café, alimento, agua…): venta segura sin tener que pedirla.'),
+         ('proveedores', '📦 Stock mínimo y proveedores', 'Te avisa cuando un producto baja de su mínimo y arma el pedido a tu proveedor por WhatsApp con un toque.')
 $$;
 
 create or replace function public.cfx_venta() returns jsonb
@@ -7977,6 +7980,34 @@ begin
   return jsonb_build_object('comuna', z ->> 'comuna', 'costo', case when gratis then 0 else greatest(0, coalesce((z ->> 'precio')::numeric, 0)) end);
 end $$;
 
+-- G96 🛒 Carritos olvidados (módulo 'carrito'): el negocio ve quién dejó productos sin pedir y le escribe por WhatsApp con un toque.
+-- Gancho de la app: cfx_carrito_contacto_app(cliente uuid, negocio uuid) → {"nombre", "tel"} (null = no mostrar a ese cliente).
+alter table public.cfx_carritos add column if not exists wa_at timestamptz;
+create or replace function public.cfx_carritos_mios() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare n uuid := public.cfx_negocio_cuenta(auth.uid()); r record; c jsonb; out jsonb := '[]'::jsonb;
+begin
+  if n is null then raise exception 'Solo para negocios'; end if;
+  if not public.cfx_modulo_de('carrito', n) then raise exception '🛒 Recordar carrito es un módulo 🧩: actívalo en Más → Mi plan y módulos'; end if;
+  if to_regprocedure('public.cfx_carrito_contacto_app(uuid,uuid)') is null then return out; end if;
+  for r in select * from public.cfx_carritos where negocio = n and actualizado > now() - interval '14 days' order by actualizado desc limit 100 loop
+    execute 'select public.cfx_carrito_contacto_app($1, $2)' into c using r.cliente, n;
+    continue when c is null;
+    out := out || jsonb_build_object('cliente', r.cliente, 'nombre', c ->> 'nombre', 'tel', c ->> 'tel', 'items', r.items,
+      'actualizado', r.actualizado, 'avisado', r.avisado, 'wa_at', r.wa_at);
+  end loop;
+  return out;
+end $$;
+-- Al tocar 💬 WhatsApp queda anotado (para no escribirle dos veces).
+create or replace function public.cfx_carrito_wa(p_cliente uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare n uuid := public.cfx_negocio_cuenta(auth.uid());
+begin
+  if n is null or not public.cfx_modulo_de('carrito', n) then raise exception 'Sin permiso'; end if;
+  update public.cfx_carritos set wa_at = now() where negocio = n and cliente = p_cliente;
+end $$;
+revoke all on function public.cfx_carritos_mios(), public.cfx_carrito_wa(uuid) from public, anon;
+grant execute on function public.cfx_carritos_mios(), public.cfx_carrito_wa(uuid) to authenticated;
 revoke all on function public.cfx_carrito_vaciar(uuid, uuid), public.cfx_carrito_borrar(uuid), public.cfx_carritos_recordar(), public.cfx_comuna_norm(text),
   public.cfx_despacho_limpio(jsonb), public.cfx_despacho_costo(jsonb, text, text, numeric) from public, anon, authenticated;
 revoke all on function public.cfx_carrito_guardar(uuid, jsonb) from public, anon;
