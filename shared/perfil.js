@@ -131,7 +131,7 @@
         html += '<div class="banner alerta" style="margin-top:12px"><div class="grow"><b>❌ Tu último pago fue rechazado</b><br><span class="chico">' + esc(u.motivo || '') + '</span></div></div>';
       }
       if (a.role === 'owner' || a.role === 'client') html += '<div class="btns" style="flex-direction:column"><button class="oro full" data-pagar>💳 ' + (prem ? 'Renovar' : 'Pagar') + '</button></div>' +
-        '<p class="muted chico">Paga con link o transferencia y sube la foto del comprobante. ' + (prem ? 'Se suma desde tu fecha de término.' : 'Se activa apenas lo revisemos.') + '</p>';
+        '<p class="muted chico">Con Mercado Pago se activa al tiro; con link o transferencia sube el comprobante. ' + (prem ? 'Se suma desde tu fecha de término.' : '') + '</p>';
     }
     html += '<div class="btns" style="flex-direction:column">' +
       (!a.trial_used && !prem && prueba > 0 ? '<button class="ok full" data-prueba>🎁 Probar ' + prueba + ' días gratis</button>' : '') +
