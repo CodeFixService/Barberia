@@ -51,7 +51,7 @@ planes, planes_info, profiles, barberias, bar_portafolio, bar_giftcards, bar_gif
 Auto-actualizar compara con `bd` de version.json (antes con `version` → se reinstalaba cada 10 min; arreglado en 2.79).
 
 ## 🧠 Del núcleo: falta aplicar aquí
-- ✅ G37 (2.94): comprobante.js + impresora.js en OPCIONAL; Caja → tocar un corte → 🧾 Comprobante (logo con CFX_COMPROBANTE_DATOS; sin RUT sale igual, G31). Boleta SII: no (solo Despega).
+- ✅ G37 (2.94): comprobante.js + impresora.js en OPCIONAL; Caja → tocar un corte → 🧾 Comprobante (logo con CFX_COMPROBANTE_DATOS; sin RUT sale igual, G31). Boleta SII: ✅ G92 (3.19 · bd 2.98) núcleo boleta.js/boleta.sql · gancho cfx_boleta_negocio_app = barbería del dueño · bar_caja_boleta(p_id, p_folio) + bar_caja_boleta_ver · Más → 🧾 Boleta SII (secBoleta) · Caja → corte → [data-bolsii].
 - ✅ G39 + R1 (2.94 · bd 2.79): ver "Planes y módulos". Josué prende la venta en CM → Apps → 🧩.
 - ✅ G42 🔐: links de pago del negocio con CFX_URL (cliente/, r/).
 - ✅ G42e: utilidades Bootstrap ya enlazadas por el sincronizador.

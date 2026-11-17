@@ -644,8 +644,23 @@
       '<label>Nota</label><input data-nota maxlength="200" value="' + esc(k ? k.nota || '' : '') + '"></details>' +
       (dueno() && !k && B.barberos.length > 1 ? '<label>Barbero</label><select data-b>' + B.barberos.map((b) => '<option value="' + b.id + '"' + (b.id === yo.id ? ' selected' : '') + '>' + esc(b.nombre) + '</option>').join('') + '</select>' : '') +
       '<div class="btns"><button class="full" data-ok>Guardar</button>' + (k ? '<button class="danger" data-del>Borrar</button>' : '') + '</div>' +
-      (k && plata && window.CFX_COMPROBANTE ? '<div class="btns"><button class="gris full" data-comp>🧾 Comprobante para el cliente</button></div>' : ''));
-    if (h.q('[data-comp]')) h.q('[data-comp]').onclick = () => comprobante(k);
+      (k && plata && window.CFX_COMPROBANTE ? '<div class="btns"><button class="gris full" data-comp>🧾 Comprobante para el cliente</button></div>' : '') +
+      (k && dueno() && window.CFX_BOLETA ? '<div class="btns"><button class="gris full" data-bolsii>🧾 Boleta SII</button></div><p class="muted chico" data-bolv></p>' : ''));
+    if (h.q('[data-comp]')) h.q('[data-comp]').onclick = async () => { let b = null; try { b = await K.rpc('bar_caja_boleta_ver', { p_id: k.id }); } catch (e) { /* sin boleta */ } comprobante(k, b); };
+    // G92 🧾 Boleta SII (núcleo boleta.js): manual (anotas el N° del SII) u OpenFactura (sale sola). Una por corte.
+    if (h.q('[data-bolsii]')) {
+      K.rpc('bar_caja_boleta_ver', { p_id: k.id }).then((b) => { if (b && b.folio) { h.q('[data-bolsii]').textContent = '🧾 Boleta N° ' + b.folio; h.q('[data-bolv]').textContent = 'Ya tiene boleta: va en el comprobante.'; } }).catch(() => {});
+      h.q('[data-bolsii]').onclick = async (ev) => {
+        const E = await CFX_BOLETA.estado(K.rpc);
+        if (!E.conectado) { if (await CFX_DIALOGO.confirmar('Para dar boleta SII, primero completa los datos de tu empresa en Más → 🧾 Boleta SII. ¿Ir ahora?')) abrirSeccion('boleta'); return; }
+        ev.currentTarget.disabled = true;
+        try { const x = await CFX_BOLETA.emitir(K.rpc, 'bar_caja_boleta', { p_id: k.id }, { monto: C.plata(k.monto + (k.propina || 0)) });
+          if (x && x.ok) { h.q('[data-bolsii]').textContent = '🧾 Boleta N° ' + x.folio; h.q('[data-bolv]').textContent = '✅ Boleta lista: va en el comprobante.'; C.toast('🧾 Boleta N° ' + x.folio); }
+          else if (x) C.toast('⚠️ ' + x.error); }
+        catch (e) { C.toast(e.message); }
+        ev.currentTarget.disabled = false;
+      };
+    }
     let medio = k ? k.medio : 'efectivo';
     const pintarMedio = () => h.qa('[data-m]').forEach((b) => b.classList.toggle('on', b.dataset.m === medio));
     pintarMedio();
@@ -697,6 +712,7 @@
       ['ofertas', '🏷️', 'Ofertas', 'Promos para tus clientes'],
       ['equipo', '💈', 'Mi equipo', 'Barberos y permisos'],
       ['caja', '💵', 'Caja', 'Cortes, ventas y comisiones'],
+      ['boleta', '🧾', 'Boleta SII', 'Datos de tu empresa · manual o automática'],
       ['estadisticas', '📊', 'Estadísticas', 'Ventas, servicios, horas'],
       ['resumen', '📈', 'Resumen del mes', 'Cuánto ganaste y tu mejor día'],
       ['volver', '👋', 'Clientes que no vuelven', 'Recupéralos con una oferta'],
@@ -730,7 +746,7 @@
     // Mi cuenta (perfil) y Soporte ya vienen en el menú común (Configuración y Cuenta y ayuda).
     const G = dueno() ? { negocio: 'Tu barbería', horario: 'Tu barbería', tiempos: 'Tu barbería', servicios: 'Tu barbería', links: 'Tu barbería', ofertas: 'Tu barbería', equipo: 'Tu barbería', enlace: 'Tu barbería',
       portafolio: 'Tu barbería', redes: 'Tu barbería', productos: 'Ventas y clientes', giftcards: 'Ventas y clientes', membresias: 'Ventas y clientes',
-      caja: 'Ventas y clientes', estadisticas: 'Ventas y clientes', resumen: 'Ventas y clientes', volver: 'Ventas y clientes', calificaciones: 'Ventas y clientes',
+      caja: 'Ventas y clientes', boleta: 'Ventas y clientes', estadisticas: 'Ventas y clientes', resumen: 'Ventas y clientes', volver: 'Ventas y clientes', calificaciones: 'Ventas y clientes',
       plan: 'Tu plan', modulos: 'Tu plan', invitar: 'Tu plan', verificar: 'Tu plan', respaldo: 'Configuración' } : {};
     const K2 = { plan: 'premium', invitar: 'invitar' };
     const L = items.filter((i) => i[0] !== 'perfil' && i[0] !== 'soporte').map((i) => ({ k: K2[i[0]] || i[0], ico: i[1], t: i[2], d: i[3], grupo: G[i[0]] || 'Tu trabajo', accion: () => abrirSeccion(i[0]) }))
@@ -755,10 +771,11 @@
   }
   // 🧾 G37: comprobante de un corte de la caja (núcleo: comprobante.js). Logo de la barbería; sin RUT sale igual (G31).
   window.CFX_COMPROBANTE_DATOS = async () => ({ logo: bar().logo || '' });
-  function comprobante(k) {
+  function secBoleta() { const z = seccion('🧾 Boleta SII'); z.innerHTML = '<div class="card" data-bolz></div>'; CFX_BOLETA.ajustes(z.querySelector('[data-bolz]'), { rpc: K.rpc }); }
+  function comprobante(k, bol) {
     CFX_COMPROBANTE.abrir({ negocio: bar().nombre, fecha: k.fecha, numero: String(k.id).slice(-6).toUpperCase(), cliente: k.cliente || '',
       tel: k.cliente_tel || '', items: [{ cant: 1, nombre: k.servicio, precio: k.monto }].concat(k.propina ? [{ cant: 1, nombre: 'Propina', precio: k.propina }] : []),
-      total: k.monto + (k.propina || 0), medio: k.medio });
+      total: k.monto + (k.propina || 0), medio: k.medio, boleta: bol && bol.folio ? bol : null });
   }
   // Cada sección se abre en una hoja desde abajo (núcleo), encima del menú Más, que no se mueve.
   // Si la sección se vuelve a dibujar (p. ej. después de guardar), usa la misma hoja.
@@ -773,12 +790,12 @@
     if (s === 'soporte') { if (window.CFX_AYUDA) window.CFX_AYUDA.chat(); return; }  // chat común de soporte (llega al Centro de Mando)
     if (s === 'clientes') { mostrar('clientes'); return; }
     if (s === 'verificar') { CFX_VERIFICAR.abrir({ rpc: K.rpc }); return; }
-    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'modulos', 'resumen', 'invitar', 'respaldo', 'redes'];
+    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'modulos', 'resumen', 'invitar', 'respaldo', 'redes', 'boleta'];
     if (!dueno() && soloDueno.includes(s)) { mas(); return; }
     if (MOD53[s] && !tiene(MOD53[s][0])) { P.upsell(MOD53[s][1], MOD53[s][0]); return; }
     if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); mas(); }
     const F = { equipo: secEquipo, servicios: secServicios, ofertas: secOfertas, estadisticas: secEstadisticas, negocio: secNegocio, horario: secHorario, links: secLinks,
-      respaldo: secRespaldo, modulos: secModulos, caja, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
+      respaldo: secRespaldo, modulos: secModulos, caja, boleta: secBoleta, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
       portafolio: secPortafolio, redes: secRedes, productos: secProductos, giftcards: secGiftcards, membresias: secMembresias,
       milink: () => P.compartir({ el: seccion('🔳 Mi link y QR'), link: K.linkBarberia(bar().codigo, yo.id), archivo: 'qr-' + primerNombre(yo.nombre),
         texto: 'Con este link o QR tus clientes reservan <b>directo contigo</b> en ' + esc(bar().nombre) + ' (sin cuenta o con su cuenta).',
