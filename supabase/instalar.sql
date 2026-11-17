@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '3.03'::text $$;
+language sql immutable as $$ select '3.04'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -586,6 +586,7 @@ begin
       'direccion', b.direccion, 'whatsapp', b.whatsapp,
       -- v2.0: el barbero no ve montos ni links de pago (solo el dueño y los clientes).
       'abono', case when me.role <> 'barber' then b.abono end, 'link_pago', case when me.role <> 'barber' then b.link_pago end,
+      'mp', me.role <> 'barber' and public.cfx_mp_neg_activo(b.owner_id),  -- G98 ⚡
       'abono_texto', case when me.role <> 'barber' then case when b.pago_activo = 2 then b.pago2_texto else b.pago1_texto end end,
       'datos_transferencia', case when me.role <> 'barber' then b.datos_transferencia end, 'bienvenida', b.bienvenida, 'horario', b.horario,
       'calificacion', public.nota_barberia(b.id),
@@ -1691,6 +1692,9 @@ alter table public.reservas drop constraint if exists reservas_devolucion_check;
 alter table public.reservas add constraint reservas_devolucion_check check (devolucion in ('pendiente', 'devuelta', 'no_llego'));
 -- v2.1: devolución de un abono que nadie alcanzó a verificar (se canceló mientras estaba en revisión).
 alter table public.reservas add column if not exists sin_verificar boolean not null default false;
+-- G98 ⚡ abono con el Mercado Pago de la barbería (núcleo mp_negocio.sql).
+alter table public.reservas add column if not exists mp_desde timestamptz;
+alter table public.reservas add column if not exists mp_pago text;
 
 -- Una misma hora no se puede tomar dos veces (también mientras espera el abono o está en revisión).
 do $$
@@ -1767,6 +1771,10 @@ create or replace function public.liberar_vencidas() returns int
 language plpgsql security definer set search_path = '' as $$
 declare r record; n int := 0;
 begin
+  -- G98 ⚡ antes de liberar: si abrió Mercado Pago, se pregunta una última vez si pagó.
+  for r in select id from public.reservas where estado = 'esperando_abono' and expira_at < now() and mp_desde is not null loop
+    perform public.cfx_mp_neg_revisar('reserva:' || r.id);
+  end loop;
   for r in update public.reservas set estado = 'anulada', anulada_at = now(), motivo = 'No se abonó a tiempo'
            where estado = 'esperando_abono' and expira_at < now() returning * loop
     n := n + 1;
@@ -2154,7 +2162,7 @@ begin
     raise exception 'Tienes % falta(s) sin avisar. Para reservar, escríbele a la barbería por WhatsApp.', af ->> 'faltas';
   end if;
   if (af ->> 'abono')::int > b.abono then b.abono := (af ->> 'abono')::int; end if;
-  if b.abono > 0 and b.link_pago is null and b.datos_transferencia is null then
+  if b.abono > 0 and b.link_pago is null and b.datos_transferencia is null and not public.cfx_mp_neg_activo(b.owner_id) then
     raise exception 'La barbería aún no configura cómo recibir el abono. Escríbele por WhatsApp.';
   end if;
   perform public.liberar_vencidas();
@@ -2199,7 +2207,7 @@ begin
   t := case when r.estado = 'en_revision' then '🧾 Revisa el abono para aceptar la hora' else '📅 Nueva reserva' end;
   cu := coalesce(public.nombre_de(c), coalesce(r.cliente_nombre, 'Cliente') || ' (sin cuenta)') || ' · ' || public.fecha_txt(r.inicio) || ' · ' ||
         coalesce((select string_agg(x ->> 'nombre', ' + ') from jsonb_array_elements(r.servicios) x), '') ||
-        case when r.pagado_con = 'saldo' then ' · abono con saldo a favor' when r.comprobante is not null then ' · 🧾 con comprobante' else '' end ||
+        case when r.pagado_con = 'saldo' then ' · abono con saldo a favor' when r.mp_pago is not null then ' · ⚡ abono pagado con Mercado Pago' when r.comprobante is not null then ' · 🧾 con comprobante' else '' end ||
         case when ln is not null then ' · ⚠️ LISTA NEGRA' else '' end;
   perform public.avisar(r.cliente_id, r.barbero_id, 'reserva', t, cu, 'agenda?r=' || r.id, r.id);
   if own <> r.barbero_id then perform public.avisar(r.cliente_id, own, 'reserva', t, cu, 'agenda?r=' || r.id, r.id); end if;
@@ -2261,7 +2269,7 @@ begin
   me := public.yo_activo();
   return (select coalesce(jsonb_agg(x order by x.inicio desc), '[]'::jsonb) from (
     select r.id, r.inicio, r.fin, case when r.estado = 'confirmada' then 'agendada' when r.estado = 'por_aprobar' then 'en_revision' else r.estado end as estado,
-           r.servicios, r.total, r.abono, r.pagado_con, r.expira_at, r.consultar,
+           r.servicios, r.total, r.abono, r.pagado_con, r.expira_at, r.consultar, r.token,
            r.motivo, r.abono_destino, r.devolucion, r.sin_verificar, r.created_at, r.confirmada_at, r.comprobante_at, r.reagendada, r.barbero_id,
            public.nombre_de(p) as barbero, p.avatar as barbero_avatar, p.foto as barbero_foto,
            public.politica(r) as politica, public.reagendable(r) as reagendable,
@@ -2399,6 +2407,7 @@ begin
     'barberia', jsonb_build_object('codigo', b.codigo, 'nombre', b.nombre, 'logo', b.logo, 'color', case when public.barberia_premium(b.id) then b.color end,
       'direccion', b.direccion, 'whatsapp', b.whatsapp,
       'link_pago', case when r.estado = 'esperando_abono' then b.link_pago end,
+      'mp', r.estado = 'esperando_abono' and public.cfx_mp_neg_activo(b.owner_id),
       'abono_texto', case when r.estado = 'esperando_abono' then case when b.pago_activo = 2 then b.pago2_texto else b.pago1_texto end end,
       'datos_transferencia', case when r.estado = 'esperando_abono' then b.datos_transferencia end),
     'dias_max', public.limite('dias', false));
@@ -6752,7 +6761,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.bar_giftcard_usos', 'public.bar_giftcards', 'public.bar_membresia_usos', 'public.bar_membresias', 'public.bar_portafolio', 'public.bar_productos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_anuncio_vistos', 'public.cfx_anuncios', 'public.cfx_bloqueos', 'public.cfx_boleta_cuentas', 'public.cfx_boletas', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_clave_temporal', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_pruebas_usadas', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.bar_giftcard_usos', 'public.bar_giftcards', 'public.bar_membresia_usos', 'public.bar_membresias', 'public.bar_portafolio', 'public.bar_productos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_anuncio_vistos', 'public.cfx_anuncios', 'public.cfx_bloqueos', 'public.cfx_boleta_cuentas', 'public.cfx_boletas', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_clave_temporal', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_mp_neg_cobros', 'public.cfx_mp_negocio', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_pruebas_usadas', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -8863,6 +8872,176 @@ begin
 end $$;
 revoke all on function public.cfx_anuncios_publicar(uuid, text, jsonb), public.cfx_anuncios_quitar(uuid), public.cfx_anuncios_admin(), public.cfx_anuncios_ver(), public.cfx_anuncio_marcar(uuid, text) from public, anon;
 grant execute on function public.cfx_anuncios_publicar(uuid, text, jsonb), public.cfx_anuncios_quitar(uuid), public.cfx_anuncios_admin(), public.cfx_anuncios_ver(), public.cfx_anuncio_marcar(uuid, text) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- G98 ⚡ MERCADO PAGO PROPIO DE CADA NEGOCIO (cobrar a SUS clientes: abonos, arriendos, órdenes…). La plata llega directo al negocio.
+--   El dueño pega su Access Token una vez (cfx_mp_neg_guardar; nadie lo puede leer después, ni el equipo ni la app).
+--   La app crea un cobro con cfx_mp_neg_cobro(negocio, ref, título, monto, volver, vence) → url de Mercado Pago.
+--   Al volver (cfx_mp_neg_revisar(ref)) o cada 1 min (cron 'cfx-mp-neg') la BASE consulta a Mercado Pago: aprobado + CLP + monto
+--   completo + n° de pago usado 1 sola vez → marca el cobro pagado y llama al gancho de la app cfx_mp_neg_pagado_app(ref, pago, monto).
+--   ref = '<tipo>:<id>' (ej. 'reserva:uuid'); la app decide qué hacer al pagarse (agendar, extender, etc.).
+--   Despega tiene su propio mp_cuentas (pedidos) desde antes: no se toca.
+-- ---------------------------------------------------------------------
+create table if not exists public.cfx_mp_negocio (
+  negocio    uuid primary key,
+  token      text not null,
+  nick       text,
+  activo     boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+alter table public.cfx_mp_negocio enable row level security;
+revoke all on public.cfx_mp_negocio from anon, authenticated;
+
+create table if not exists public.cfx_mp_neg_cobros (
+  id         uuid primary key default gen_random_uuid(),
+  negocio    uuid not null,
+  ref        text not null,
+  titulo     text,
+  monto      int not null check (monto > 0),
+  vence      timestamptz,
+  pago       text unique,
+  pagado_at  timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists cfx_mp_neg_cobros_ref on public.cfx_mp_neg_cobros (ref, created_at desc);
+create index if not exists cfx_mp_neg_cobros_pend on public.cfx_mp_neg_cobros (created_at) where pago is null;
+alter table public.cfx_mp_neg_cobros enable row level security;
+revoke all on public.cfx_mp_neg_cobros from anon, authenticated;
+
+-- El negocio de quien llama, solo si es el dueño (null si no).
+create or replace function public.cfx_mp_neg_mio() returns uuid
+language sql stable security definer set search_path = '' as $$
+  select n from (select public.cfx_negocio_cuenta(auth.uid()) n) x where n is not null and public.cfx_negocio_dueno(n) = auth.uid()
+$$;
+
+create or replace function public.cfx_mp_neg_activo(p_negocio uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.cfx_mp_negocio where negocio = p_negocio and activo)
+$$;
+
+create or replace function public.cfx_mp_neg_estado() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object('dueno', n is not null, 'conectado', m.negocio is not null, 'activo', coalesce(m.activo, false), 'nick', m.nick, 'fin', right(m.token, 4))
+  from (select public.cfx_mp_neg_mio() n) x left join public.cfx_mp_negocio m on m.negocio = x.n
+$$;
+
+-- El dueño conecta (token), activa/pausa (p_activo) o desconecta (sin token y p_activo null).
+create or replace function public.cfx_mp_neg_guardar(p_token text, p_activo boolean) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare n uuid := public.cfx_mp_neg_mio(); tk text := nullif(regexp_replace(coalesce(p_token, ''), '\s', '', 'g'), ''); r jsonb;
+begin
+  if n is null then raise exception 'Solo el dueño del negocio'; end if;
+  if tk is null then
+    if p_activo is null then delete from public.cfx_mp_negocio where negocio = n;
+    else
+      update public.cfx_mp_negocio set activo = p_activo, updated_at = now() where negocio = n;
+      if not found and p_activo then raise exception 'Pega tu Access Token de Mercado Pago'; end if;
+    end if;
+    return public.cfx_mp_neg_estado();
+  end if;
+  if tk !~ '^(APP_USR|TEST)-[A-Za-z0-9-]{20,}$' or length(tk) > 300 then raise exception 'Ese no es un Access Token: empieza con APP_USR-'; end if;
+  r := public.cfx_mp_api(tk, 'GET', '/users/me');
+  if coalesce((r ->> 'status')::int, 0) = 0 then raise exception 'No se pudo conectar con Mercado Pago. Intenta de nuevo.'; end if;
+  if (r ->> 'status')::int <> 200 then raise exception 'Mercado Pago no aceptó el token: copia el Access Token de producción'; end if;
+  insert into public.cfx_mp_negocio (negocio, token, nick, activo)
+  values (n, tk, left(coalesce(r #>> '{body,nickname}', r #>> '{body,email}', ''), 80), coalesce(p_activo, true))
+  on conflict (negocio) do update set token = excluded.token, nick = excluded.nick, activo = excluded.activo, updated_at = now();
+  return public.cfx_mp_neg_estado();
+end $$;
+
+-- La app pide el cobro (solo desde sus funciones; no se llama directo). Devuelve { ok, url } o { ok: false, error }.
+create or replace function public.cfx_mp_neg_cobro(p_negocio uuid, p_ref text, p_titulo text, p_monto int, p_volver text, p_vence timestamptz default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare tk text; c public.cfx_mp_neg_cobros; r jsonb; v text := left(coalesce(p_volver, ''), 500);
+begin
+  select token into tk from public.cfx_mp_negocio where negocio = p_negocio and activo;
+  if tk is null then return jsonb_build_object('ok', false, 'error', 'Este negocio no tiene Mercado Pago activo'); end if;
+  if coalesce(p_monto, 0) < 1 then return jsonb_build_object('ok', false, 'error', 'Monto no válido'); end if;
+  if p_vence is not null and p_vence < now() + interval '1 minute' then return jsonb_build_object('ok', false, 'error', 'Se pasó el tiempo para pagar'); end if;
+  if exists (select 1 from public.cfx_mp_neg_cobros where ref = p_ref and pago is not null) then return jsonb_build_object('ok', false, 'error', 'Esto ya está pagado'); end if;
+  if v !~ '^https://[^\s"<>]+$' then v := null; end if;
+  insert into public.cfx_mp_neg_cobros (negocio, ref, titulo, monto, vence) values (p_negocio, left(p_ref, 120), left(coalesce(p_titulo, 'Pago'), 120), p_monto, p_vence)
+  returning * into c;
+  r := public.cfx_mp_api(tk, 'POST', '/checkout/preferences', jsonb_build_object(
+    'items', jsonb_build_array(jsonb_build_object('id', c.id, 'title', c.titulo, 'quantity', 1, 'currency_id', 'CLP', 'unit_price', c.monto)),
+    'external_reference', c.id::text,
+    'payment_methods', jsonb_build_object('excluded_payment_types', jsonb_build_array(jsonb_build_object('id', 'ticket'))))
+    || case when p_vence is null then '{}'::jsonb else jsonb_build_object('expires', true,
+         'expiration_date_to', to_char(p_vence at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS".000+00:00"')) end
+    || case when v is null then '{}'::jsonb else jsonb_build_object('back_urls', jsonb_build_object('success', v, 'pending', v, 'failure', v), 'auto_return', 'approved') end);
+  if coalesce((r ->> 'status')::int, 0) not in (200, 201) or r #>> '{body,init_point}' is null then
+    delete from public.cfx_mp_neg_cobros where id = c.id;
+    return jsonb_build_object('ok', false, 'error', 'Mercado Pago no respondió. Intenta de nuevo o usa otro medio de pago.');
+  end if;
+  return jsonb_build_object('ok', true, 'url', r #>> '{body,init_point}');
+end $$;
+
+-- Pregunta a Mercado Pago por UN cobro; si está aprobado (CLP, monto completo, n° no usado) lo marca y llama al gancho de la app.
+create or replace function public.cfx_mp_neg_confirmar(p_id uuid) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare c public.cfx_mp_neg_cobros; tk text; r jsonb; pg jsonb;
+begin
+  select * into c from public.cfx_mp_neg_cobros where id = p_id for update skip locked;
+  if c.id is null then return false; end if;
+  if c.pago is not null then return true; end if;
+  select token into tk from public.cfx_mp_negocio where negocio = c.negocio;
+  if tk is null then return false; end if;
+  r := public.cfx_mp_api(tk, 'GET', '/v1/payments/search?sort=date_created&criteria=desc&external_reference=' || c.id::text);
+  select e into pg from jsonb_array_elements(coalesce(r #> '{body,results}', '[]'::jsonb)) e
+  where e ->> 'status' = 'approved' and e ->> 'external_reference' = c.id::text
+    and coalesce(e ->> 'currency_id', 'CLP') = 'CLP' and (e ->> 'transaction_amount')::numeric >= c.monto
+    and not exists (select 1 from public.cfx_mp_neg_cobros u where u.pago = left(e ->> 'id', 40)) limit 1;
+  if pg is null then return false; end if;
+  update public.cfx_mp_neg_cobros set pago = left(pg ->> 'id', 40), pagado_at = now() where id = c.id;
+  if to_regprocedure('public.cfx_mp_neg_pagado_app(text, text, integer)') is not null then
+    execute 'select public.cfx_mp_neg_pagado_app($1, $2, $3)' using c.ref, left(pg ->> 'id', 40), c.monto;
+  end if;
+  return true;
+end $$;
+
+-- Al volver de Mercado Pago: revisa los cobros de esa referencia (la app lo llama dentro de su propia función, con su control de acceso).
+create or replace function public.cfx_mp_neg_revisar(p_ref text) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare i uuid;
+begin
+  if exists (select 1 from public.cfx_mp_neg_cobros where ref = p_ref and pago is not null) then return true; end if;
+  for i in select id from public.cfx_mp_neg_cobros where ref = p_ref and pago is null and created_at > now() - interval '3 days' order by created_at desc limit 5 loop
+    if public.cfx_mp_neg_confirmar(i) then return true; end if;
+  end loop;
+  return false;
+end $$;
+
+create or replace function public.cfx_mp_neg_pagado(p_ref text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.cfx_mp_neg_cobros where ref = p_ref and pago is not null)
+$$;
+
+-- Cada 1 min: cobros abiertos de los últimos 2 días (por si la persona no volvió a la página).
+create or replace function public.cfx_mp_neg_revisar_pendientes() returns int
+language plpgsql security definer set search_path = '' as $$
+declare i uuid; n int := 0;
+begin
+  for i in select id from public.cfx_mp_neg_cobros c where pago is null and created_at > now() - interval '2 days'
+             and (vence is null or vence > now() - interval '30 minutes')
+             and not exists (select 1 from public.cfx_mp_neg_cobros p where p.ref = c.ref and p.pago is not null)
+           order by created_at desc limit 40 loop
+    if public.cfx_mp_neg_confirmar(i) then n := n + 1; end if;
+  end loop;
+  delete from public.cfx_mp_neg_cobros where pago is null and created_at < now() - interval '30 days';
+  return n;
+end $$;
+
+revoke all on function public.cfx_mp_neg_mio(), public.cfx_mp_neg_activo(uuid), public.cfx_mp_neg_cobro(uuid, text, text, int, text, timestamptz),
+  public.cfx_mp_neg_confirmar(uuid), public.cfx_mp_neg_revisar(text), public.cfx_mp_neg_pagado(text), public.cfx_mp_neg_revisar_pendientes() from public, anon, authenticated;
+revoke all on function public.cfx_mp_neg_estado(), public.cfx_mp_neg_guardar(text, boolean) from public, anon;
+grant execute on function public.cfx_mp_neg_estado(), public.cfx_mp_neg_guardar(text, boolean) to authenticated;
+do $$
+begin
+  perform cron.unschedule(jobid) from cron.job where jobname = 'cfx-mp-neg';
+  perform cron.schedule('cfx-mp-neg', '* * * * *', 'select public.cfx_mp_neg_revisar_pendientes()');
+exception when others then
+  raise notice 'Revisión de Mercado Pago de los negocios no programada (%).', sqlerrm;
+end $$;
 -- <<< CFX núcleo
 
 -- G95 🎁 Prueba por botón: quien ya tuvo su prueba (o el regalo al crear la barbería) queda anotado por correo (no se borra).
@@ -9085,6 +9264,54 @@ language sql stable security definer set search_path = '' as $$
       or exists (select 1 from public.profiles p where p.id = u and p.role = 'client' and p.barberia_id = b.id))), '[]')
 $$;
 revoke all on function public.cfx_promo_negocios_app(uuid) from public, anon, authenticated;
+
+-- G98 ⚡ ABONO CON EL MERCADO PAGO DE LA BARBERÍA (núcleo mp_negocio.sql): el dueño lo conecta en Más → Links de pago.
+-- El cliente toca "⚡ Pagar abono con Mercado Pago" en su reserva (/r/ o la app) → al confirmarlo la BASE con Mercado Pago, la hora queda AGENDADA sola.
+create or replace function public.reserva_mp_pagar(p_token text, p_volver text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas := public.reserva_por_token(p_token); b public.barberias; x jsonb;
+begin
+  if r.estado <> 'esperando_abono' or r.expira_at < now() then return jsonb_build_object('ok', false, 'error', 'Esta reserva ya no espera abono'); end if;
+  select * into b from public.barberias where id = r.barberia_id;
+  x := public.cfx_mp_neg_cobro(b.owner_id, 'reserva:' || r.id, left('Abono ' || coalesce(b.nombre, 'barbería') || ' · ' || public.fecha_txt(r.inicio), 120),
+                               r.abono, p_volver, r.expira_at);
+  if (x ->> 'ok')::boolean then update public.reservas set mp_desde = coalesce(mp_desde, now()) where id = r.id; end if;
+  return x;
+end $$;
+create or replace function public.reserva_mp_revisar(p_token text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas := public.reserva_por_token(p_token);
+begin
+  if r.mp_desde is not null and r.estado = 'esperando_abono' then perform public.cfx_mp_neg_revisar('reserva:' || r.id); end if;
+  return public.reserva_ver(p_token);
+end $$;
+-- Gancho del núcleo: Mercado Pago confirmó el abono. Si la hora ya se había liberado y otro la tomó → devolución pendiente (el dueño la ve).
+create or replace function public.cfx_mp_neg_pagado_app(p_ref text, p_pago text, p_monto int) returns void
+language plpgsql security definer set search_path = '' as $$
+declare r public.reservas; v_id uuid;
+begin
+  if p_ref !~ '^reserva:[0-9a-f-]{36}$' then return; end if;
+  v_id := substr(p_ref, 9)::uuid;
+  select * into r from public.reservas where reservas.id = v_id for update;
+  if r.id is null or r.mp_pago is not null then return; end if;
+  if r.estado = 'esperando_abono' or (r.estado = 'anulada' and r.motivo = 'No se abonó a tiempo') then
+    begin
+      update public.reservas set estado = 'agendada', pagado_con = 'link', mp_pago = p_pago, confirmada_at = now(), expira_at = null,
+        anulada_at = null, motivo = null, comprobante_at = now() where reservas.id = r.id returning * into r;
+      perform public.notificar_reserva(r);
+      perform public.avisar(null, r.cliente_id, 'reserva', '✅ Tu hora quedó agendada', public.fecha_txt(r.inicio) || ' · ⚡ abono pagado con Mercado Pago', 'horas', r.id);
+      return;
+    exception when others then null;  -- la hora ya la tomó otra persona
+    end;
+  end if;
+  update public.reservas set mp_pago = p_pago, pagado_con = coalesce(pagado_con, 'link'), abono_destino = 'devolucion', devolucion = 'pendiente'
+  where reservas.id = r.id;
+  perform public.avisar(null, (select owner_id from public.barberias where barberias.id = r.barberia_id), 'reserva', '⚡ Abono que llegó tarde',
+    coalesce(r.cliente_nombre, 'Un cliente') || ' pagó ' || public.pesos(p_monto) || ' por Mercado Pago cuando la hora ya estaba libre: devuélvelo.', 'agenda?r=' || r.id, r.id);
+end $$;
+revoke all on function public.cfx_mp_neg_pagado_app(text, text, int) from public, anon, authenticated;
+revoke all on function public.reserva_mp_pagar(text, text), public.reserva_mp_revisar(text) from public;
+grant execute on function public.reserva_mp_pagar(text, text), public.reserva_mp_revisar(text) to anon, authenticated;
 
 select 'Barbería instalada ✅ versión ' || public.db_version() ||
        ' · liberada y avisada a ' || coalesce((select avisados from public.actualizaciones where version = public.db_version()

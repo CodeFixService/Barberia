@@ -60,3 +60,4 @@ Auto-actualizar compara con `bd` de version.json (antes con `version` → se rei
 - ✅ Núcleo 2.79 (2.95 · bd 2.80): ▶️ con SVG, 📣 Campañas genérico, 💬 avisos propios (CFX_DIALOGO), "Cuenta y ayuda" ya no sale bajo Clientes.
 - G43: la tarjeta "🚀 Termina de armar tu negocio" ya sale en Inicio; afinar guiaPasos con campo exacto si Josué lo pide.
 - G96 b (3.24 · bd 3.03): 📣 Promo destacada (módulo 'promos' en bar_nuevos; núcleo CFX_ANUNCIOS.promos; Más → 📣, ruta #promos) · gancho cfx_promo_negocios_app = quienes reservaron o tienen barberia_id. Prueba: SaaS/pruebas/g96b.js.
+- G98 (3.25 · bd 3.04): ⚡ abono con el Mercado Pago de la barbería (núcleo mp_negocio.sql): reserva_mp_pagar/reserva_mp_revisar(token) · gancho cfx_mp_neg_pagado_app → agendada (pagado_con 'link', mp_pago) · liberar_vencidas pregunta a MP antes · /r/ y cliente.js botón ⚡ (mis_horas trae token) · dueño: Más → 💳 Links de pago (#cMpNeg, CFX_PAGOS.mpNegocio). Prueba: SaaS/pruebas/g98.js.

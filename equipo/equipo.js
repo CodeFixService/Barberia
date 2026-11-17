@@ -708,7 +708,7 @@
       ['horario', '🕐', 'Horario', 'Lunes a domingo y bloqueos'],
       ['tiempos', '⏱️', 'Mis tiempos', 'Cuánto dura cada corte y tu descanso'],
       ['servicios', '✂️', 'Servicios y precios', 'Tu catálogo'],
-      ['links', '💳', 'Links de pago', 'Abono: 2 links y transferencia'],
+      ['links', '💳', 'Links de pago', 'Abono: ⚡ Mercado Pago, links y transferencia'],
       ['ofertas', '🏷️', 'Ofertas', 'Promos para tus clientes'],
       ['equipo', '💈', 'Mi equipo', 'Barberos y permisos'],
       ['caja', '💵', 'Caja', 'Cortes, ventas y comisiones'],
@@ -1508,6 +1508,7 @@
       '<input id="tAbP" type="number" inputmode="numeric" min="0" max="100000" placeholder="Igual que el normal" value="' + (b.abono_premium == null ? '' : b.abono_premium) + '">' +
       '<p class="muted chico">Un beneficio para que tus clientes se hagan Premium: reservan pagando menos abono (o nada).</p>' +
       '<div class="btns"><button class="grande full" id="bGuardarL">Guardar</button></div></div>' +
+      '<div class="card" id="cMpNeg" hidden></div>' +  // G98 ⚡ Mercado Pago propio (núcleo pagos.js)
       // G53b 💳 módulo Anti-falta
       '<div class="card" id="cAntifalta"><h2>💳 Anti-falta</h2><p class="muted chico" style="margin-top:-6px">Para los clientes que reservan y no llegan (cuenta las faltas de los últimos 12 meses). Vacío o 0 = no se usa.</p>' +
       '<label>Abono obligatorio si ya faltó 1 vez</label><input id="afAbono" type="number" inputmode="numeric" min="0" max="100000" placeholder="Ej: 5000" value="' + (((b.antifalta || {}).abono) || '') + '">' +
@@ -1529,6 +1530,7 @@
       secLinks();
     }, '✅ Links guardados');
     if (!tiene('antifalta')) P.bloquear($('cAntifalta'), 'Anti-falta', 'antifalta');
+    if (window.CFX_PAGOS && CFX_PAGOS.mpNegocio) CFX_PAGOS.mpNegocio($('cMpNeg'), { rpc: (n, x) => K.rpc(n, x), para: 'el abono de su hora' });
     $('bGuardarAf').onclick = (ev) => C.accion(ev.target, async () => {
       yo = await K.rpc('guardar_barberia', { p: { antifalta_abono: $('afAbono').value, antifalta_faltas: $('afFaltas').value } });
     }, '✅ Anti-falta guardado');
