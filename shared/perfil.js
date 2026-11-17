@@ -105,7 +105,9 @@
     const s = await K.ajustes();
     const grupo = K.grupoDe(a.role);
     const info = K.planInfo(grupo, 'premium');
-    const prueba = grupo === 'cliente' ? K.plan('cliente', 'prueba_dias', true) : 0;
+    // G95: barbería y cliente prueban con el botón 🎁 (núcleo: una vez por correo). Base vieja: solo el cliente, con sus días.
+    const pp = a && 'prueba_pro' in a ? a.prueba_pro || {} : null;
+    const prueba = pp ? (pp.puede ? pp.dias : 0) : grupo === 'cliente' ? K.plan('cliente', 'prueba_dias', true) : 0;
     const esDueno = a.role === 'owner';
     const prem = a.is_premium;
     // Precios y pago: los mismos de las 6 apps (núcleo: cfx_pago_estado y pagos.js; se editan en el Centro de Mando → Pagos).

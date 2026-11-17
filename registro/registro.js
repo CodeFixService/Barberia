@@ -1,4 +1,4 @@
-/* Registro abierto de barberías (link o QR de CodeFix, de un socio o de otra barbería): crea la barbería con sus días de Premium de regalo. */
+/* Registro abierto de barberías (link o QR de CodeFix, de un socio o de otra barbería): crea la barbería (parte Free; G95: prueba Premium con botón). */
 (async function () {
   'use strict';
   const C = Core, K = Cuenta;
@@ -15,7 +15,7 @@
   try { yo = await K.refrescar(); } catch (e) { yo = null; }
   await K.ajustes();
   if (ref) { try { quien = await K.rpc('ref_publico', { p_ref: ref }); } catch (e) { quien = null; } }
-  const regalo = K.regla('dias_regalo');
+  const regalo = 0;  // G95: ya no hay regalo al crear la barbería; la prueba Premium es con el botón 🎁 (una vez)
   const abierto = K.regla('registro_barberias') > 0;
 
   let html = '<div class="card hero"><div class="logo-grande" style="' + (quien && quien.logo ? C.fondo(quien.logo) : '') + '">' + (quien && quien.logo ? '' : '💈') + '</div>' +
@@ -23,7 +23,7 @@
     (quien ? '<p class="muted" style="margin:0 0 6px">🤝 Te invitó <b>' + esc(quien.nombre) + '</b></p>' : '') +
     '<p class="muted" style="margin:0">Tus clientes reservan solos con tu link o QR, pagan el abono y tú lo apruebas en un toque.</p>' +
     '<ul class="ventajas"><li>📅 Agenda por barbero, sin choques de horas</li><li>💳 Abono con comprobante: menos "no vino"</li><li>💵 Caja de cortes y equipo</li>' +
-    (regalo ? '<li>⭐ <b>' + regalo + ' días de Premium de regalo</b>, después sigues gratis o pagas</li>' : '<li>🆓 Plan Free para siempre</li>') + '</ul></div>';
+    (regalo ? '<li>⭐ <b>' + regalo + ' días de Premium de regalo</b>, después sigues gratis o pagas</li>' : '<li>🆓 Plan Free para siempre · 🎁 prueba Premium gratis cuando quieras</li>') + '</ul></div>';
   if (yo) {
     html += '<div class="card centro"><p style="margin-top:0">Ya entraste como <b>' + esc(yo.nombre || yo.email) + '</b>.</p><a class="btn full" href="../' + K.paginaDe(yo.role) + '">📲 Abrir mi app</a></div>';
     mostrar(html); C.marca(true); return;

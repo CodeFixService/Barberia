@@ -50,6 +50,8 @@ planes, planes_info, profiles, barberias, bar_portafolio, bar_giftcards, bar_gif
 `shared/core.js` l.11 + `version.json` (version, bd, notas = SOLO categorías) + `db_version()` en instalar.sql. Ahora: 3.00 · bd 2.84 · enviar 1.2.
 Auto-actualizar compara con `bd` de version.json (antes con `version` → se reinstalaba cada 10 min; arreglado en 2.79).
 
+- G95 (3.22 · bd 3.01): la barbería parte FREE (sin dias_regalo) · probar_premium → núcleo cfx_pro_probar (barbería y cliente, 1 vez por correo) · mi_cuenta.prueba_pro → botón 🎁 en Mi plan (shared/perfil.js) · trial_used de antes → cfx_pruebas_usadas. Prueba: SaaS/pruebas/g95.js.
+
 ## 🧠 Del núcleo: falta aplicar aquí
 - ✅ G37 (2.94): comprobante.js + impresora.js en OPCIONAL; Caja → tocar un corte → 🧾 Comprobante (logo con CFX_COMPROBANTE_DATOS; sin RUT sale igual, G31). Boleta SII: ✅ G92 (3.19 · bd 2.98) núcleo boleta.js/boleta.sql · gancho cfx_boleta_negocio_app = barbería del dueño · bar_caja_boleta(p_id, p_folio) + bar_caja_boleta_ver · Más → 🧾 Boleta SII (secBoleta) · Caja → corte → [data-bolsii].
 - ✅ G39 + R1 (2.94 · bd 2.79): ver "Planes y módulos". Josué prende la venta en CM → Apps → 🧩.
