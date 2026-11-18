@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '3.14'::text $$;
+language sql immutable as $$ select '3.15'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -9842,6 +9842,11 @@ where clave = 'modulos_venta' and valor #>> '{packs,crecer,modulos,4}' = 'carrit
 -- G53: el Completo ahora trae también los módulos nuevos (⏳ ⭐ …): texto y precio nuevos, solo si sigue el de fábrica.
 update public.cfx_config set valor = jsonb_set(jsonb_set(valor, '{packs,completo,detalle}', '"Todos los módulos, también los nuevos"'), '{packs,completo,precio}', '2990')
 where clave = 'modulos_venta' and valor #>> '{packs,completo,detalle}' = 'Recordatorios, sellos y campañas' and valor #>> '{packs,completo,precio}' = '1990';
+-- G112 b: 3 packs iguales en todas las apps (🌱 Básico · ⭐ Normal · 💎 Completo). Solo si siguen los de fábrica.
+update public.cfx_config set valor = jsonb_set(jsonb_set(valor, '{packs,completo,destacado}', 'false'), '{packs,crecer}',
+    jsonb_build_object('nombre', '⭐ Normal', 'detalle', 'Que no falten, vuelvan y te recomienden', 'precio', 2490, 'destacado', true,
+                       'modulos', jsonb_build_array('recordatorios', 'sellos', 'campanas', 'antifalta', 'espera', 'resenas')))
+where clave = 'modulos_venta' and valor #> '{packs,crecer}' is null and valor #>> '{packs,basico,detalle}' = 'Que tus clientes no falten y vuelvan';
 
 -- R1 (G25): todo Premium tiene fecha de término (mensual 30 días, regalo los días que se den) y se corta solo al vencer;
 -- nunca queda "permanente" (solo el administrador).
