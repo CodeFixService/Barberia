@@ -407,7 +407,7 @@
     const h = C.hoja('<h2>💳 Abona para asegurar tu hora</h2><div class="reloj" data-reloj="' + hr.expira_at + '">--:--</div>' +
       '<p class="muted centro chico" style="margin-top:0">tienes este tiempo para abonar ' + C.plata(hr.abono || b.abono) + '</p>' +
       '<div class="card" style="box-shadow:none"><b>1. Paga ' + C.plata(hr.abono || b.abono) + '</b>' + (b.abono_texto ? '<div class="muted chico">' + esc(b.abono_texto) + '</div>' : '') + '<div class="btns" style="flex-direction:column">' +
-      (b.mp && hr.token ? '<button class="ok full" data-mp>⚡ Pagar con Mercado Pago</button><p class="muted chico centro" style="margin:2px 0 6px">Se aprueba solo: sin comprobante.</p>' : '') +
+      (b.mp && hr.token ? (window.CFX_PAGOS && CFX_PAGOS.botonesNegocio ? CFX_PAGOS.botonesNegocio(b.medios, 'ok full') : '<button class="ok full" data-mp="mp">⚡ Pagar con Mercado Pago</button>') + '<p class="muted chico centro" style="margin:2px 0 6px">Se aprueba solo: sin comprobante.</p>' : '') +
       (b.link_pago ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(CFX_URL(b.link_pago)) + '" data-link>💳 Pagar con link de pago</a>' : '') +
       (b.datos_transferencia ? '<button class="gris full" data-tr>🏦 Transferencia: ver datos</button><div class="hidden muted" data-trd style="white-space:pre-line;padding:10px;background:var(--field);border-radius:12px">' + esc(b.datos_transferencia) +
         '<br><button class="small alt" data-copiar style="margin-top:8px">📋 Copiar datos</button></div>' : '') +
@@ -418,12 +418,12 @@
       '<p class="muted chico centro">Si cambiaste de idea, cierra esta ventana: la hora se libera sola.</p>');
     relojes();
     // G98 ⚡ Mercado Pago de la barbería: paga y vuelve a su reserva (/r/), donde se confirma sola.
-    if (h.q('[data-mp]')) h.q('[data-mp]').onclick = (ev) => C.accion(ev.target, async () => {
+    h.querySelectorAll('[data-mp]').forEach((bt) => { bt.onclick = (ev) => C.accion(ev.target, async () => {
       const volver = new URL('../r/?t=' + encodeURIComponent(hr.token) + '&mp=1', location.href).href;
-      const x = await K.rpc('reserva_mp_pagar', { p_token: hr.token, p_volver: volver });
-      if (!x || !x.ok) throw new Error((x && x.error) || 'No se pudo abrir Mercado Pago');
+      const x = await K.rpc('reserva_mp_pagar', { p_token: hr.token, p_volver: volver, ...(bt.dataset.mp === 'flow' ? { p_medio: 'flow' } : {}) });
+      if (!x || !x.ok) throw new Error((x && x.error) || 'No se pudo abrir el pago');
       location.href = x.url;
-    });
+    }); });
     if (h.q('[data-link]')) h.q('[data-link]').onclick = () => { medio = 'link'; };
     if (h.q('[data-tr]')) h.q('[data-tr]').onclick = () => { medio = 'transferencia'; h.q('[data-trd]').classList.toggle('hidden'); };
     if (h.q('[data-copiar]')) h.q('[data-copiar]').onclick = () => C.copiar(b.datos_transferencia + '\nMonto: ' + C.plata(hr.abono || b.abono));

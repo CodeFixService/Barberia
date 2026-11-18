@@ -84,7 +84,7 @@
     if (R.estado === 'esperando_abono') {
       html += '<div class="card"><h2>1. Paga ' + C.plata(R.abono) + '</h2>' + (b.abono_texto ? '<p class="muted chico" style="margin-top:-6px">' + esc(b.abono_texto) + '</p>' : '') +
         '<div class="btns" style="flex-direction:column">' +
-        (b.mp ? '<button class="ok full" data-mp>⚡ Pagar con Mercado Pago</button><p class="muted chico centro" style="margin:2px 0 6px">Se aprueba solo: sin comprobante.</p>' : '') +
+        (b.mp ? (window.CFX_PAGOS && CFX_PAGOS.botonesNegocio ? CFX_PAGOS.botonesNegocio(b.medios, 'ok full') : '<button class="ok full" data-mp="mp">⚡ Pagar con Mercado Pago</button>') + '<p class="muted chico centro" style="margin:2px 0 6px">Se aprueba solo: sin comprobante.</p>' : '') +
         (b.link_pago ? '<a class="btn oro full" target="_blank" rel="noopener" href="' + esc(CFX_URL(b.link_pago)) + '" data-link>💳 Pagar con link de pago</a>' : '') +
         (b.datos_transferencia ? '<button class="gris full" data-tr>🏦 Transferencia: ver datos</button><div class="hidden" data-trd style="white-space:pre-line;padding:10px;background:var(--field);border-radius:12px">' +
           esc(b.datos_transferencia) + '<br><button class="small alt" data-copiar style="margin-top:8px">📋 Copiar datos</button></div>' : '') + '</div></div>' +
@@ -135,11 +135,11 @@
       timer = setInterval(tick, 1000);
     }
     let medio = b.link_pago ? 'link' : 'transferencia', foto = null;
-    if (q('[data-mp]')) q('[data-mp]').onclick = (ev) => C.accion(ev.target, async () => {
-      const x = await K.rpc('reserva_mp_pagar', { p_token: token, p_volver: location.href.split('&')[0] + '&mp=1' });
-      if (!x || !x.ok) throw new Error((x && x.error) || 'No se pudo abrir Mercado Pago');
+    app.querySelectorAll('[data-mp]').forEach((bt) => { bt.onclick = (ev) => C.accion(ev.target, async () => {
+      const x = await K.rpc('reserva_mp_pagar', { p_token: token, p_volver: location.href.split('&')[0] + '&mp=1', ...(bt.dataset.mp === 'flow' ? { p_medio: 'flow' } : {}) });
+      if (!x || !x.ok) throw new Error((x && x.error) || 'No se pudo abrir el pago');
       location.href = x.url;
-    });
+    }); });
     if (q('[data-link]')) q('[data-link]').onclick = () => { medio = 'link'; };
     if (q('[data-tr]')) q('[data-tr]').onclick = () => { medio = 'transferencia'; q('[data-trd]').classList.toggle('hidden'); };
     if (q('[data-copiar]')) q('[data-copiar]').onclick = () => C.copiar(b.datos_transferencia + '\nMonto: ' + C.plata(R.abono));
