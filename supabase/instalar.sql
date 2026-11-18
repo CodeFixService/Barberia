@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '3.10'::text $$;
+language sql immutable as $$ select '3.11'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -8185,17 +8185,19 @@ begin
   end loop;
   if jsonb_array_length(l) > 80 then raise exception 'Máximo 80 comunas'; end if;
   -- Resto de Chile (regiones y comunas que no están en la lista): 'no' | 'fijo' (un precio) | 'por_pagar' (lo paga quien recibe al courier).
+  -- G102 b 'courier' = la app cotiza con el courier (Despega: Chilexpress); precio = respaldo si el courier no responde (0 = por pagar).
   rm := coalesce(nullif(p #>> '{resto,modo}', ''), 'no');
-  if rm not in ('no', 'fijo', 'por_pagar') then raise exception 'Elige cómo despachas al resto de Chile'; end if;
+  if rm not in ('no', 'fijo', 'por_pagar', 'courier') then raise exception 'Elige cómo despachas al resto de Chile'; end if;
   if rm = 'fijo' and coalesce((p #>> '{resto,precio}')::numeric, -1) not between 0 and 200000 then raise exception 'El despacho al resto de Chile debe costar entre $0 y $200.000'; end if;
+  if rm = 'courier' and coalesce((p #>> '{resto,precio}')::numeric, 0) not between 0 and 200000 then raise exception 'El precio de respaldo debe ser entre $0 y $200.000'; end if;
   if not coalesce((p ->> 'retiro')::boolean, true) and jsonb_array_length(l) = 0 and rm = 'no' then raise exception 'Activa el retiro en tienda o agrega al menos una comuna de despacho'; end if;
   if coalesce((p ->> 'gratis_desde')::numeric, 0) not between 0 and 10000000 then raise exception 'Monto de despacho gratis no válido'; end if;
   return jsonb_build_object('retiro', coalesce((p ->> 'retiro')::boolean, true), 'gratis_desde', round(coalesce((p ->> 'gratis_desde')::numeric, 0)), 'zonas', l,
-    'resto', jsonb_build_object('modo', rm, 'precio', case when rm = 'fijo' then round((p #>> '{resto,precio}')::numeric) else 0 end));
+    'resto', jsonb_build_object('modo', rm, 'precio', case when rm in ('fijo', 'courier') then round(coalesce((p #>> '{resto,precio}')::numeric, 0)) else 0 end));
 end $$;
 
 -- La comuna va al final de la dirección ("…, Ñuñoa"). Sin zonas ni resto de Chile: se coordina con el negocio ($0 aquí).
--- Comuna fuera de la lista: con resto 'fijo' cobra ese precio; con 'por_pagar' $0 y por_pagar = true (lo paga quien recibe).
+-- Comuna fuera de la lista: con resto 'fijo' cobra ese precio; con 'por_pagar' $0 y por_pagar = true (lo paga quien recibe); con 'courier' la app cotiza (G102 b).
 create or replace function public.cfx_despacho_costo(p_cfg jsonb, p_entrega text, p_direccion text, p_monto numeric) returns jsonb
 language plpgsql immutable set search_path = '' as $$
 declare c jsonb := coalesce(p_cfg, '{}'::jsonb); com text; z jsonb; rm text := coalesce(nullif(p_cfg #>> '{resto,modo}', ''), 'no'); orig text;
@@ -8209,6 +8211,10 @@ begin
     if com = '' or position(',' in coalesce(p_direccion, '')) = 0 then return jsonb_build_object('error', 'Escribe la dirección y la comuna de despacho'); end if;
     if rm = 'fijo' then return jsonb_build_object('comuna', orig, 'costo', case when gratis then 0 else greatest(0, coalesce((c #>> '{resto,precio}')::numeric, 0)) end); end if;
     if rm = 'por_pagar' then return jsonb_build_object('comuna', orig, 'costo', 0, 'por_pagar', true); end if;
+    -- 'courier': la app reemplaza el costo con la tarifa (cotizar = true). Si la app no cotiza, vale el respaldo (o por pagar si es $0).
+    if rm = 'courier' then return jsonb_build_object('comuna', orig, 'cotizar', not gratis, 'respaldo', greatest(0, coalesce((c #>> '{resto,precio}')::numeric, 0)),
+      'costo', case when gratis then 0 else greatest(0, coalesce((c #>> '{resto,precio}')::numeric, 0)) end,
+      'por_pagar', not gratis and coalesce((c #>> '{resto,precio}')::numeric, 0) = 0); end if;
     return jsonb_build_object('error', 'Esta tienda no despacha a esa comuna. Elige otra comuna o retiro en tienda.');
   end if;
   return jsonb_build_object('comuna', z ->> 'comuna', 'costo', case when gratis then 0 else greatest(0, coalesce((z ->> 'precio')::numeric, 0)) end);
