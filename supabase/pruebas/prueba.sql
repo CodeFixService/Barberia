@@ -371,7 +371,7 @@ select pg_temp.ok(prueba.si($q$(select premium_until between now() + interval '4
 select pg_temp.ok(jsonb_array_length(public.admin_auditoria()) >= 3, 'registro de cambios del admin');
 reset role;
 select pg_temp.como('dueno@test.cl');
-select pg_temp.debe_fallar($$select public.probar_premium()$$, 'regalo');
+select pg_temp.debe_fallar($$select public.probar_premium()$$, 'Ya');  -- G95: ya no hay regalo; el dueño Premium no puede volver a probar
 reset role;
 update public.profiles set plan = 'free', premium_until = null, trial_used = false where email = 'beto@test.cl';
 select pg_temp.como('beto@test.cl');
@@ -528,8 +528,8 @@ select pg_temp.ok((public.ref_publico(prueba.ref()) ->> 'tipo') = 'socio', 'tamb
 reset role;
 insert into auth.users (email, raw_user_meta_data) values ('nueva@test.cl',
   jsonb_build_object('rol', 'barberia', 'barberia', 'Barbería Nueva', 'nombre', 'Nico', 'telefono', '+56 9 4444 5555', 'ref', (select codigo from public.barberias where nombre = 'Barbería Test')));
-select pg_temp.ok(prueba.si($q$(select b.registro_solo and b.referida_por = (select id from public.barberias where nombre = 'Barbería Test') and p.role = 'owner' and public.is_premium(p.id)
-  from public.barberias b join public.profiles p on p.id = b.owner_id where b.nombre = 'Barbería Nueva')$q$), 'la barbería se registra sola, parte con días de regalo y queda como referida');
+select pg_temp.ok(prueba.si($q$(select b.registro_solo and b.referida_por = (select id from public.barberias where nombre = 'Barbería Test') and p.role = 'owner' and not public.is_premium(p.id)
+  from public.barberias b join public.profiles p on p.id = b.owner_id where b.nombre = 'Barbería Nueva')$q$), 'la barbería se registra sola, parte en Free (G95) y queda como referida');
 select pg_temp.ok(prueba.si($q$exists (select 1 from public.avisos where para = prueba.id('dueno@test.cl') and titulo like '🤝%')$q$), 'a quien invitó le llega el aviso');
 select pg_temp.ok(prueba.si($q$exists (select 1 from public.avisos where para = prueba.id('socio@test.cl') and titulo like '💈 Barbería nueva%')$q$), 'al admin y a los socios les llega la barbería nueva');
 insert into auth.users (email, raw_user_meta_data) values ('socia@test.cl',
