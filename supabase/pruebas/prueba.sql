@@ -57,8 +57,8 @@ set client_min_messages = notice;
 -- 1. Cuentas
 insert into auth.users (email) values ('juanjosuecastilloloyola@gmail.com');
 select pg_temp.crear('juanjosuecastilloloyola@gmail.com', 'dueno@test.cl', 'Juan Dueño', 'owner', 'Barbería Test');
-select pg_temp.ok((select plan = 'premium' and premium_until > now() + interval '29 days' from public.profiles where email = 'dueno@test.cl')
-  and exists (select 1 from public.licenses where origen = 'regalo'), 'la barbería parte con 30 días de Premium de regalo (queda en el historial)');
+select pg_temp.ok((select plan = 'free' and premium_until is null from public.profiles where email = 'dueno@test.cl')
+  and not exists (select 1 from public.licenses where origen = 'regalo'), 'G95: la barbería parte en Free (sin Premium de regalo)');
 update public.profiles set plan = 'free', premium_until = null where email = 'dueno@test.cl';
 select pg_temp.crear('dueno@test.cl', 'pedro@test.cl', 'Pedro', 'barber');
 select pg_temp.crear('dueno@test.cl', 'ana@test.cl', 'Ana', 'client');

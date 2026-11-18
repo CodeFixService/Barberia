@@ -47,12 +47,12 @@ async function texto(p) { return p.evaluate(() => document.body.innerText); }
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] }).catch(() => chromium.launch());
   try {
-    // 1) Admin crea la barbería (parte con días de regalo)
+    // 1) Admin crea la barbería (G95: parte en Free)
     const adm = await nuevaPagina(browser, 'admin');
     await entrar(adm, 'juanjosuecastilloloyola@gmail.com', 'admin123');
     await adm.click('nav.tabs [data-v="barberias"]');
     await adm.click('#bNuevaB');
-    ok((await adm.textContent('.sheet')).includes('días de Premium de regalo'), 'al crear la barbería se ve que parte con días de regalo');
+    ok((await adm.textContent('.sheet')).includes('Parte en Free'), 'G95: al crear la barbería se ve que parte en Free');
     await adm.fill('.sheet [data-b]', 'Barbería El Bigote');
     await adm.fill('.sheet [data-n]', 'Juan Dueño');
     await adm.fill('.sheet [data-e]', 'dueno@bigote.cl');

@@ -94,7 +94,7 @@
       '<div class="card"><small>💈 Se registraron solas</small><b>' + (s.registradas_mes || 0) + '</b><small>este mes</small></div></div>';
     // v2.1: QR para que cualquier barbería cree su app (con el código del socio, si es socio).
     html += '<div class="card tap" id="cQrReg"><div class="flex"><span style="font-size:30px">🔳</span><div class="grow"><b>Link y QR para nuevas barberías</b>' +
-      '<div class="sub muted">Cualquier barbería crea su app sola' + (K.regla('dias_regalo') ? ', con ' + K.regla('dias_regalo') + ' días de Premium de regalo' : '') +
+      '<div class="sub muted">Cualquier barbería crea su app sola, parte en Free (🎁 prueba Premium 7 días con su botón)' +
       (esAdmin ? '' : '. Las que entren con tu link quedan a tu nombre') + (K.regla('registro_barberias') ? '' : ' · ⚠️ el registro está cerrado (Ajustes → Reglas)') + '.</div></div><span>›</span></div></div>';
     html += '<div id="cVencer"></div>';
     // Servidor
@@ -206,11 +206,10 @@
   }
 
   function nuevaBarberia() {
-    const regalo = K.regla('dias_regalo');
     const h = C.hoja('<h2>💈 Nueva barbería</h2><label>Nombre de la barbería</label><input data-b maxlength="80" placeholder="Ej: Barbería El Bigote">' +
       '<label>Nombre del dueño</label><input data-n maxlength="80"><label>Correo del dueño <span class="opc">(con este entra)</span></label><input data-e type="email" inputmode="email">' +
       '<label>WhatsApp de la barbería</label><input data-t inputmode="tel" placeholder="+56 9…">' +
-      '<p class="muted chico">' + (regalo ? 'Parte con <b>' + regalo + ' días de Premium de regalo</b> (lo cambias en Ajustes → Reglas); después sigue pagando o queda en Free.' : 'Parte en Free.') +
+      '<p class="muted chico">Parte en Free (G95); puede probar ⭐ Premium 7 días con el botón 🎁.' +
       ' Le dejamos el mensaje listo con su acceso.</p><p class="err" data-err></p>' +
       '<div class="btns"><button class="full" data-ok>Crear barbería</button></div>');
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
@@ -384,7 +383,7 @@
     ['minutos_devolucion', '💸 Minutos para cancelar con devolución del abono', 'Si cancela dentro de estos minutos desde que pagó, la barbería le devuelve el abono.'],
     ['horas_cancelacion', '🕐 Horas de anticipación para cancelar o reagendar con saldo a favor', 'Con menos de estas horas, pierde el abono.'],
     ['dias_saldo', '💰 Días que dura el saldo a favor (clientes sin cuenta)', ''],
-    ['dias_regalo', '🎁 Días de Premium de regalo al crear una barbería', '0 = parte en Free.'],
+    ['dias_regalo', '🎁 Días de Premium de regalo al crear una barbería', 'Ya no se usa: desde G95 todas parten en Free y prueban 7 días con el botón 🎁.'],
     ['dias_aviso', '⏳ Días antes del vencimiento para avisar (con botón para pagar)', ''],
     ['dias_comprobantes', '🧾 Días que se guardan los comprobantes', 'Después se borran solos (nunca los que están en revisión).'],
     ['dias_anuladas', '❌ Días que se guardan las horas anuladas', 'Las atendidas se guardan siempre (sellos y estadísticas).'],
