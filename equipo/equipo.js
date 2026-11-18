@@ -1389,7 +1389,7 @@
     try { l = await K.rpc('membresia_lista'); } catch (e) { if ($('mbZona')) $('mbZona').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; return; }
     if (!$('mbZona')) return;
     $('mbZona').innerHTML = l.length ? '<ul class="list">' + l.map((m) => '<li' + (m.vigente ? '' : ' style="opacity:.65"') + '><div class="grow"><b>' + esc(m.nombre) + '</b><div class="sub muted">' +
-      (m.vigente ? 'Quedan <b>' + m.quedan + '</b> de ' + m.cortes + ' este mes · hasta ' + P.fechaCorta(m.hasta) : '<span style="color:var(--bad)">' + (m.activa ? 'Vencida: cobra el mes' : 'Pausada') + '</span>') + '</div></div>' +
+      (m.vigente ? 'Quedan <b>' + m.quedan + '</b> de ' + m.cortes + ' este mes · hasta ' + P.fechaCorta(m.hasta) : '<span style="color:var(--bad)">' + (m.activa ? 'Vencida: cobra el mes' : 'Pausada') + '</span>') + autoTxt(m) + '</div></div>' +
       (m.vigente && m.quedan ? '<button class="small" data-u="' + m.id + '">✂️ Usar</button>' : '') + (dueno() ? '<button class="small gris" data-e="' + m.id + '">' + (m.vigente ? 'Editar' : '💵 Cobrar') + '</button>' : '') + '</li>').join('') + '</ul>'
       : '<div class="card centro"><p>Aún no hay membresías.</p>' + (dueno() ? '<p class="muted chico">Ofrécela a tus clientes fijos: ellos ahorran y tú aseguras la plata del mes.</p>' : '') + '</div>';
     $('mbZona').querySelectorAll('[data-u]').forEach((b) => b.onclick = async () => {
@@ -1399,6 +1399,12 @@
       secMembresias();
     });
     $('mbZona').querySelectorAll('[data-e]').forEach((b) => b.onclick = () => editarMembresia(l.find((x) => x.id === b.dataset.e)));
+  }
+  // G109 ⚡ el cliente la paga solo con tarjeta (suscripción de MP con el MP de la barbería).
+  function autoTxt(m) {
+    const a = m && m.auto;
+    return !a ? '' : a.estado === 'activa' ? '<div class="chico" style="color:var(--ok)">⚡ Se paga sola con tarjeta</div>'
+      : a.estado === 'pausada' ? '<div class="chico">⏸️ Pago automático pausado</div>' : '<div class="chico">⏳ Falta que autorice su tarjeta</div>';
   }
   async function editarMembresia(m) {
     await cargarClientes();
@@ -1411,9 +1417,16 @@
       '<label>¿Cobrar ahora?</label><div class="seg" data-meses><button type="button" data-mes="0"' + (m && m.vigente ? ' class="on"' : '') + '>No</button><button type="button" data-mes="1"' + (m && m.vigente ? '' : ' class="on"') + '>1 mes</button><button type="button" data-mes="3">3 meses</button></div>' +
       '<label>¿Cómo pagó?</label>' + medioSeg() +
       (m ? '<label class="check"><input type="checkbox" data-a' + (m.activa ? ' checked' : '') + '> <span>Activa</span></label>' : '') +
+      (m && m.auto ? '<div class="card" style="margin:10px 0">' + autoTxt(m) + '<p class="muted chico" style="margin:4px 0">Si cambias el precio o la pausas, se apaga y el cliente la vuelve a activar.</p><button type="button" class="small gris" data-noauto>Quitar pago automático</button></div>'
+        : '<p class="muted chico">⚡ Con tu Mercado Pago conectado, el cliente puede pagarla sola cada mes desde su app (Inicio → Tu membresía).</p>') +
       '<div class="btns"><button class="grande full" data-ok>Guardar</button></div><p class="cfx-nota-btn">Lo que cobres entra a la caja de hoy. Los cortes se reinician cada mes.</p>');
     medioOn(h);
     h.qa('[data-mes]').forEach((b) => b.onclick = () => h.qa('[data-mes]').forEach((x) => x.classList.toggle('on', x === b)));
+    if (h.q('[data-noauto]')) h.q('[data-noauto]').onclick = async (ev) => {
+      if (!await C.confirmar('¿Quitar el pago automático de ' + m.nombre + '? La membresía sigue; se la cobras tú.', { si: 'Quitar' })) return;
+      await C.accion(ev.target, () => K.rpc('membresia_mp_auto_quitar', { p_id: m.id }), 'Pago automático quitado');
+      h.cerrar(); secMembresias();
+    };
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
       const nom = h.q('[data-n]').value.trim();
       const cli = (clientes || []).find((c) => c.id && c.nombre.toLowerCase() === nom.toLowerCase());

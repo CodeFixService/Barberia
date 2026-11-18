@@ -149,7 +149,8 @@
       if (!m || !$('membresia')) return;
       $('membresia').innerHTML = '<div class="card"><h2>🔁 Tu membresía <span class="grow"></span><span class="pill">' + (m.vigente ? m.quedan + ' / ' + m.cortes : 'vencida') + '</span></h2>' +
         '<p class="muted" style="margin:0">' + (m.vigente ? 'Te quedan <b>' + m.quedan + '</b> corte' + (m.quedan === 1 ? '' : 's') + ' este mes · vigente hasta ' + P.fechaCorta(m.hasta) + '.'
-          : 'Venció el ' + P.fechaCorta(m.hasta) + '. Renuévala en la barbería.') + '</p></div>';
+          : 'Venció el ' + P.fechaCorta(m.hasta) + '. Renuévala en la barbería.') + '</p>' + autoMembresia(m) + '</div>';
+      enchufarAuto(m);
     }).catch(() => {});
     K.rpc('mis_sellos').then((s) => {
       if (!s) return;
@@ -159,6 +160,52 @@
     }).catch(() => {});
     Avisos.invitarPush(el);
   }
+
+  // G109 ⚡ Membresía que se paga sola (suscripción de Mercado Pago con el MP de la barbería).
+  function autoMembresia(m) {
+    const a = m.auto;
+    if (a && a.estado === 'activa') return '<div class="mbAuto" id="mbAuto"><p class="chico" style="margin:8px 0 4px">⚡ <b>Se paga sola cada mes</b> · ' + C.plata(a.monto) + ' a tu tarjeta</p>' +
+      '<button class="small gris" id="mbAutoNo">Quitar pago automático</button></div>';
+    if (a && a.estado === 'pausada') return '<div class="mbAuto" id="mbAuto"><p class="chico" style="margin:8px 0 4px">⏸️ Pago automático pausado en Mercado Pago</p><button class="small gris" id="mbAutoNo">Quitar</button></div>';
+    if (a && a.estado === 'pendiente') return '<div class="mbAuto" id="mbAuto"><p class="chico" style="margin:8px 0 4px">⏳ Falta autorizar tu tarjeta en Mercado Pago</p>' +
+      '<div class="btns"><button class="small" id="mbAutoRev">Ya autoricé</button><button class="small gris" id="mbAutoSi">Volver a Mercado Pago</button></div></div>';
+    if (!m.mp || !m.precio || !m.activa) return '';
+    return '<div class="mbAuto" id="mbAuto"><button class="ok full" id="mbAutoSi">⚡ Pagar sola cada mes (' + C.plata(m.precio) + ')</button>' +
+      '<p class="cfx-nota-btn">Autorizas tu tarjeta 1 vez en Mercado Pago y tu membresía se renueva sola. La quitas cuando quieras.</p></div>';
+  }
+  function enchufarAuto(m) {
+    const re = () => K.rpc('mi_membresia').then((x) => { if (x && $('mbAuto')) { $('mbAuto').outerHTML = autoMembresia(x); enchufarAuto(x); } }).catch(() => {});
+    if ($('mbAutoSi')) $('mbAutoSi').onclick = async (ev) => {
+      const correo = await C.pedir('⚡ Correo de tu Mercado Pago', { texto: 'El de la cuenta con que vas a pagar (Mercado Pago lo exige).', valor: (yo && yo.email) || '', max: 120, si: 'Seguir' });
+      if (!correo) return;
+      const volver = new URL('?mpm=' + m.id + '#inicio', location.href).href;
+      await C.accion(ev.target, async () => {
+        const x = await K.rpc('membresia_mp_auto', { p_id: m.id, p_email: correo, p_volver: volver });
+        if (!x || !x.ok) throw new Error((x && x.error) || 'No se pudo');
+        location.href = x.url;
+      });
+    };
+    if ($('mbAutoRev')) $('mbAutoRev').onclick = (ev) => C.accion(ev.target, async () => {
+      const a = await K.rpc('membresia_mp_auto_revisar', { p_id: m.id });
+      if (!a || a.estado !== 'activa') throw new Error('Mercado Pago aún no la autoriza. Prueba en un minuto.');
+      re();
+    }, '⚡ ¡Listo! Se paga sola');
+    if ($('mbAutoNo')) $('mbAutoNo').onclick = async (ev) => {
+      if (!await C.confirmar('¿Quitar el pago automático? Tu membresía sigue; la pagas en la barbería.', { si: 'Quitar' })) return;
+      await C.accion(ev.target, () => K.rpc('membresia_mp_auto_quitar', { p_id: m.id }), 'Pago automático quitado');
+      re();
+    };
+  }
+  // Al volver de Mercado Pago (?mpm=<id>): revisa y limpia la dirección.
+  (function volverMp() {
+    const id = new URLSearchParams(location.search).get('mpm');
+    if (!id) return;
+    history.replaceState(null, '', location.pathname + location.hash);
+    K.rpc('membresia_mp_auto_revisar', { p_id: id }).then((a) => {
+      if (a && a.estado === 'activa') C.toast('⚡ ¡Listo! Tu membresía se paga sola');
+      if ($('mbAuto')) K.rpc('mi_membresia').then((x) => { if (x && $('mbAuto')) { $('mbAuto').outerHTML = autoMembresia(x); enchufarAuto(x); } });
+    }).catch(() => {});
+  })();
 
   // Tarjeta de una hora con sus acciones.
   function tarjetaHora(h, compacta) {

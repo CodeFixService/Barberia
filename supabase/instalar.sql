@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '3.13'::text $$;
+language sql immutable as $$ select '3.14'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -4389,7 +4389,12 @@ begin
               m.precio * meses, case when p ->> 'medio' = 'transferencia' then 'transferencia' else 'efectivo' end, m.cliente_id, m.nombre, 'Membresía', me.id);
     end if;
   end if;
-  return public.membresia_json(m, true);
+  -- G109: pausada o con otro precio → se apaga el ⚡ pago automático (el cliente lo vuelve a activar con el precio nuevo).
+  if to_regclass('public.cfx_mp_neg_subs') is not null and exists (select 1 from public.cfx_mp_neg_subs s where s.ref = 'memb:' || m.id and s.estado <> 'cancelada'
+       and (not m.activa or s.monto <> m.precio)) then
+    perform public.cfx_mp_neg_sub_cancelar('memb:' || m.id);
+  end if;
+  return public.membresia_json(m, true) || jsonb_build_object('auto', public.cfx_mp_neg_sub_ver('memb:' || m.id));
 end $$;
 create or replace function public.membresia_lista() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
@@ -4397,7 +4402,7 @@ declare me public.profiles;
 begin
   me := public.yo_activo();
   if not public.es_staff(me) then raise exception 'Solo la barbería'; end if;
-  return (select coalesce(jsonb_agg(public.membresia_json(m, me.role = 'owner') order by m.activa desc, m.nombre), '[]')
+  return (select coalesce(jsonb_agg(public.membresia_json(m, me.role = 'owner') || jsonb_build_object('auto', public.cfx_mp_neg_sub_ver('memb:' || m.id)) order by m.activa desc, m.nombre), '[]')
           from public.bar_membresias m where m.barberia_id = me.barberia_id and (me.role = 'owner' or m.activa));
 end $$;
 create or replace function public.membresia_usar(p_id uuid) returns jsonb
@@ -4422,7 +4427,8 @@ declare me public.profiles;
 begin
   me := public.yo_activo();
   if me.role <> 'client' or not public.bar_tiene('membresia', me.barberia_id) then return null; end if;
-  return (select public.membresia_json(m, true) from public.bar_membresias m
+  return (select public.membresia_json(m, true) || jsonb_build_object('mp', public.cfx_mp_neg_mp((select owner_id from public.barberias b where b.id = m.barberia_id)), 'auto', public.cfx_mp_neg_sub_ver('memb:' || m.id))
+          from public.bar_membresias m
           where m.barberia_id = me.barberia_id and m.activa and (m.cliente_id = me.id or (m.cliente_id is null and length(m.tel) >= 8 and m.tel = public.tel_norm(me.telefono)))
           order by m.hasta desc limit 1);
 end $$;
@@ -10075,6 +10081,91 @@ end $$;
 revoke all on function public.cfx_mp_neg_pagado_app(text, text, int) from public, anon, authenticated;
 revoke all on function public.reserva_mp_pagar(text, text, text), public.reserva_mp_revisar(text) from public;
 grant execute on function public.reserva_mp_pagar(text, text, text), public.reserva_mp_revisar(text) to anon, authenticated;
+
+-- G109 🔁⚡ MEMBRESÍA QUE SE PAGA SOLA: el cliente autoriza su tarjeta 1 vez en el Mercado Pago PROPIO de la barbería
+--   (suscripción "preapproval", motor G106 del núcleo, ref 'memb:<id>'). Cada cobro aprobado → +1 mes + entra a la Caja.
+-- La membresía del cliente que llama (por cuenta o por su teléfono).
+create or replace function public._memb_mia(p_id uuid) returns public.bar_membresias
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles := public.yo_activo(); m public.bar_membresias;
+begin
+  select * into m from public.bar_membresias x where x.id = p_id and x.barberia_id = me.barberia_id and me.role = 'client'
+    and (x.cliente_id = me.id or (x.cliente_id is null and length(x.tel) >= 8 and x.tel = public.tel_norm(me.telefono)));
+  if m.id is null then raise exception 'Membresía no encontrada'; end if;
+  return m;
+end $$;
+create or replace function public.membresia_mp_auto(p_id uuid, p_email text, p_volver text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles := public.yo_activo(); m public.bar_membresias := public._memb_mia(p_id); hoy date := (now() at time zone public.tz())::date; dueno uuid;
+begin
+  if not public.bar_tiene('membresia', m.barberia_id) then raise exception 'Tu barbería ya no tiene membresías'; end if;
+  if not m.activa then raise exception 'Tu membresía está pausada: habla con la barbería'; end if;
+  if m.precio < 1 then raise exception 'Tu membresía no tiene precio: habla con la barbería'; end if;
+  select owner_id into dueno from public.barberias where id = m.barberia_id;  -- el negocio del MP es el dueño
+  if not public.cfx_mp_neg_mp(dueno) then raise exception 'La barbería no tiene ⚡ Mercado Pago conectado'; end if;
+  if m.cliente_id is null then update public.bar_membresias set cliente_id = me.id where id = m.id; end if;
+  -- Vigente → 1.er cobro 1 día antes de que venza; vencida → ahora.
+  return public.cfx_mp_neg_suscribir(dueno, 'memb:' || m.id,
+    left('Membresía ' || m.cortes || ' cortes/mes · ' || coalesce((select nombre from public.barberias where id = m.barberia_id), ''), 120),
+    m.precio, p_email, p_volver, case when m.hasta >= hoy then ((m.hasta - 1)::timestamp + interval '10 hours') at time zone public.tz() end);
+end $$;
+-- Al volver de MP (cliente) o al mirar (equipo de la barbería).
+create or replace function public.membresia_mp_auto_revisar(p_id uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles := public.yo_activo(); m public.bar_membresias;
+begin
+  if me.role = 'client' then m := public._memb_mia(p_id);
+  else select * into m from public.bar_membresias where id = p_id and barberia_id = me.barberia_id and public.es_staff(me); end if;
+  if m.id is null then raise exception 'Membresía no encontrada'; end if;
+  perform public.cfx_mp_neg_sub_revisar_ref('memb:' || m.id);
+  return public.cfx_mp_neg_sub_ver('memb:' || m.id);
+end $$;
+-- Apaga solo el pago automático (la membresía sigue; se cobra en la barbería como antes). Cliente o dueño.
+create or replace function public.membresia_mp_auto_quitar(p_id uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles := public.yo_activo(); m public.bar_membresias; dueno uuid;
+begin
+  if me.role = 'client' then m := public._memb_mia(p_id);
+  elsif me.role = 'owner' then select * into m from public.bar_membresias where id = p_id and barberia_id = me.barberia_id; end if;
+  if m.id is null then raise exception 'Membresía no encontrada'; end if;
+  if not public.cfx_mp_neg_sub_cancelar('memb:' || m.id) then raise exception 'Mercado Pago no respondió. Intenta de nuevo'; end if;
+  select owner_id into dueno from public.barberias where id = m.barberia_id;
+  perform public.avisar(me.id, dueno, 'aviso', '⚡ Pago automático apagado', m.nombre || ' pagará su membresía en la barbería como antes', 'membresias');
+  perform public.avisar(me.id, m.cliente_id, 'aviso', '⚡ Pago automático apagado', 'Tu membresía ya no se cobra sola a la tarjeta: págala en la barbería', 'inicio');
+end $$;
+-- Gancho del núcleo: evento de la suscripción ('activa' | 'cobro' | 'cancelada').
+create or replace function public.cfx_mp_neg_sub_app(p_ref text, p_evento text, p_pago text, p_monto int) returns void
+language plpgsql security definer set search_path = '' as $$
+declare m public.bar_membresias; dueno uuid; plata text := public.pesos(p_monto); hoy date := (now() at time zone public.tz())::date;
+begin
+  if p_ref !~ '^memb:[0-9a-f-]{36}$' then return; end if;
+  select * into m from public.bar_membresias where id = substr(p_ref, 6)::uuid for update;
+  if m.id is null then perform public.cfx_mp_neg_sub_cancelar(p_ref); return; end if;
+  select owner_id into dueno from public.barberias where id = m.barberia_id;
+  if p_evento = 'activa' then
+    perform public.avisar(null, dueno, 'aviso', '⚡ Membresía que se paga sola', m.nombre || ' paga ' || plata || ' cada mes a tu Mercado Pago, sin cobrarle a mano', 'membresias');
+    perform public.avisar(null, m.cliente_id, 'aviso', '⚡ Listo: tu membresía se paga sola', 'Mercado Pago cobrará ' || plata || ' cada mes y tu membresía se renueva sin hacer nada', 'inicio');
+    return;
+  elsif p_evento = 'cancelada' then
+    perform public.avisar(null, dueno, 'aviso', '⚡ Pago automático apagado', 'La membresía de ' || m.nombre || ' ya no se paga sola: cóbrala en la barbería', 'membresias');
+    perform public.avisar(null, m.cliente_id, 'aviso', '⚡ Pago automático apagado', 'Tu membresía ya no se cobra sola a la tarjeta', 'inicio');
+    return;
+  elsif p_evento <> 'cobro' then return;
+  end if;
+  if not m.activa or not public.bar_tiene('membresia', m.barberia_id) then
+    perform public.cfx_mp_neg_sub_cancelar(p_ref);
+    perform public.avisar(null, dueno, 'aviso', '⚡ Pago automático recibido: revísalo', plata || ' de ' || m.nombre || ': su membresía está pausada, no se sumó el mes. Actívala o devuélvelo desde tu Mercado Pago', 'membresias');
+    return;
+  end if;
+  update public.bar_membresias set hasta = (greatest(hasta, hoy - 1) + interval '1 month')::date where id = m.id returning * into m;
+  insert into public.caja (barberia_id, barbero_id, servicio, monto, medio, cliente_id, cliente_nombre, nota, created_by)
+  values (m.barberia_id, dueno, '🔁 Membresía ' || m.cortes || ' cortes', p_monto, 'transferencia', m.cliente_id, m.nombre, '⚡ Pago automático Mercado Pago', dueno);
+  perform public.avisar(null, dueno, 'aviso', '⚡ Membresía pagada sola', plata || ' de ' || m.nombre || ': sigue hasta el ' || to_char(m.hasta, 'DD-MM') || '. Ya está en la caja', 'membresias');
+  perform public.avisar(null, m.cliente_id, 'aviso', '✅ Membresía pagada', plata || ' cobrados a tu tarjeta. Tu membresía sigue hasta el ' || to_char(m.hasta, 'DD-MM'), 'inicio');
+end $$;
+revoke all on function public._memb_mia(uuid), public.cfx_mp_neg_sub_app(text, text, text, int) from public, anon, authenticated;
+revoke all on function public.membresia_mp_auto(uuid, text, text), public.membresia_mp_auto_revisar(uuid), public.membresia_mp_auto_quitar(uuid) from public, anon;
+grant execute on function public.membresia_mp_auto(uuid, text, text), public.membresia_mp_auto_revisar(uuid), public.membresia_mp_auto_quitar(uuid) to authenticated;
 
 select 'Barbería instalada ✅ versión ' || public.db_version() ||
        ' · liberada y avisada a ' || coalesce((select avisados from public.actualizaciones where version = public.db_version()
