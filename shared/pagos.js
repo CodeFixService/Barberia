@@ -515,7 +515,7 @@
    CFX_COBRO.elegir(el, ops, k, cb) → botones (solo lo permitido; con 1 sola opción, solo el texto) · cb(k)
    CFX_COBRO.sinMedios(el, { ir })  → aviso al DUEÑO: "⚠️ Tus clientes no pueden pagar en línea → Configurar"
    CFX_COBRO.enlace(el, { url, tel, tienda }) → comprador SIN cuenta: 📋 Copiar / 📲 Mandarme por WhatsApp el enlace del pedido
-   CFX_COBRO.wa(tel, url, tienda)   → link wa.me para "📲 Enviar enlace al cliente" (la tienda)
+   CFX_COBRO.wa(tel, texto)         → link wa.me con el texto listo (p. ej. "📲 Enviar enlace al cliente" de la tienda)
    CFX_COBRO.hilo(el, { rpc, ref }) → 💬 chat DEL PEDIDO (solo con cuenta; cfx_hilo_ver / cfx_hilo_enviar). Se borra a los 7 días de cerrado. */
 (function () {
   'use strict';
@@ -605,12 +605,12 @@
   }
 
   // h) Enlace del pedido para quien compra SIN cuenta (y para la tienda).
-  const wa = (tel, url, tienda) => 'https://wa.me/' + String(tel || '').replace(/\D/g, '') + '?text=' + encodeURIComponent('🧾 Mi pedido' + (tienda ? ' en ' + tienda : '') + ': ' + url);
+  const wa = (tel, texto) => 'https://wa.me/' + String(tel || '').replace(/\D/g, '') + '?text=' + encodeURIComponent(texto || '');
   function enlace(el, o) {
     if (!el || !o || !o.url) return;
     el.innerHTML = '<div class="cfx-enlace"><b>🔗 Guarda el enlace de tu pedido</b><span style="font-size:13px;color:var(--cfx-texto-2,#5b6472)">Con él ves el estado, pagas y subes el comprobante.</span>' +
       '<code>' + esc(o.url) + '</code><div class="ce-b"><button type="button" class="alt" data-ce="copiar">📋 Copiar enlace</button>' +
-      '<a class="btn ok" target="_blank" rel="noopener" href="' + esc(wa(o.tel, o.url, o.tienda)) + '">📲 Mandarme por WhatsApp</a></div></div>';
+      '<a class="btn ok" target="_blank" rel="noopener" href="' + esc(wa(o.tel, '🧾 Mi pedido' + (o.tienda ? ' en ' + o.tienda : '') + ': ' + o.url)) + '">📲 Mandarme por WhatsApp</a></div></div>';
     el.querySelector('[data-ce=copiar]').onclick = async () => {
       try { await navigator.clipboard.writeText(o.url); avisar('📋 Enlace copiado'); }
       catch (e) { if (window.CFX_DIALOGO) window.CFX_DIALOGO.pedir('Copia el enlace', o.url, { si: 'Cerrar' }); }
