@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '3.18'::text $$;
+language sql immutable as $$ select '3.19'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -7302,7 +7302,7 @@ grant execute on function public.cfx_es_socio(), public.cfx_socios_lista(), publ
 --   Nada se borra solo: las vacías se borran con un toque; las que tienen datos piden descargar el respaldo y escribir "sí".
 --   cfx_tablas() = las tablas que crea este archivo (la revisa pruebas/inventario.py --verificar).
 -- ---------------------------------------------------------------------
-create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.bar_giftcard_usos', 'public.bar_giftcards', 'public.bar_membresia_usos', 'public.bar_membresias', 'public.bar_portafolio', 'public.bar_productos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_anuncio_vistos', 'public.cfx_anuncios', 'public.cfx_bloqueos', 'public.cfx_boleta_cuentas', 'public.cfx_boletas', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_clave_temporal', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_estudio', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_flow_negocio', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_mp_avisos', 'public.cfx_mp_neg_cobros', 'public.cfx_mp_neg_sub_pagos', 'public.cfx_mp_neg_subs', 'public.cfx_mp_negocio', 'public.cfx_mp_sub_cobros', 'public.cfx_mp_subs', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_pruebas_usadas', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
+create or replace function public.cfx_tablas() returns text[] language sql immutable as $$ select array['public.actualizaciones', 'public.app_secrets', 'public.app_settings', 'public.auditoria', 'public.avisos', 'public.bar_giftcard_usos', 'public.bar_giftcards', 'public.bar_membresia_usos', 'public.bar_membresias', 'public.bar_portafolio', 'public.bar_productos', 'public.barberias', 'public.blocks', 'public.bloqueos', 'public.caja', 'public.calificaciones', 'public.cfx_analisis', 'public.cfx_anuncio_vistos', 'public.cfx_anuncios', 'public.cfx_bloqueos', 'public.cfx_boleta_cuentas', 'public.cfx_boletas', 'public.cfx_brechas', 'public.cfx_calificaciones', 'public.cfx_cargas', 'public.cfx_carritos', 'public.cfx_chat', 'public.cfx_clave_temporal', 'public.cfx_config', 'public.cfx_consent', 'public.cfx_consent_hist', 'public.cfx_cupones', 'public.cfx_derechos', 'public.cfx_descuentos', 'public.cfx_errores', 'public.cfx_estudio', 'public.cfx_exentos', 'public.cfx_fallas', 'public.cfx_flow_negocio', 'public.cfx_hilos', 'public.cfx_keys', 'public.cfx_legal', 'public.cfx_login_fallos', 'public.cfx_login_qr', 'public.cfx_mensajes', 'public.cfx_modulos_negocio', 'public.cfx_modulos_pruebas', 'public.cfx_mp_avisos', 'public.cfx_mp_neg_cobros', 'public.cfx_mp_neg_sub_pagos', 'public.cfx_mp_neg_subs', 'public.cfx_mp_negocio', 'public.cfx_mp_sub_cobros', 'public.cfx_mp_subs', 'public.cfx_pagos', 'public.cfx_pin', 'public.cfx_pruebas_usadas', 'public.cfx_push_entrega', 'public.cfx_ref_codigos', 'public.cfx_referidos', 'public.cfx_registro', 'public.cfx_reportes', 'public.cfx_salud', 'public.cfx_secretos', 'public.cfx_sellos', 'public.cfx_sellos_cfg', 'public.cfx_socios', 'public.cfx_verificaciones', 'public.cfx_versiones', 'public.licenses', 'public.lista_espera', 'public.lista_negra', 'public.messages', 'public.ofertas', 'public.pagos', 'public.planes', 'public.planes_info', 'public.profiles', 'public.push_subscriptions', 'public.reports', 'public.requests', 'public.reservas', 'public.servicios', 'public.textos', 'public.user_invites'] $$;
 create or replace function public.cfx_inventario() returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare r record; n bigint; out jsonb := '[]'::jsonb;
@@ -8155,6 +8155,112 @@ revoke all on function public.cfx_msg_restantes(uuid), public.cfx_msg_enviar(uui
 grant execute on function public.cfx_msg_restantes(uuid), public.cfx_msg_enviar(uuid, text), public.cfx_msg_lista(), public.cfx_msg_sin_leer(),
   public.cfx_msg_hilo(uuid), public.cfx_msg_bloquear(uuid, boolean), public.cfx_msg_reportar(uuid, text), public.cfx_msg_borrar(uuid),
   public.cfx_msg_reportes(), public.cfx_msg_resolver(uuid, boolean) to authenticated;
+
+-- ---------- G128 💬 Chat DEL PEDIDO (hilo ligado a una referencia, no aparece en Mensajes) ----------
+-- Solo para clientes CON cuenta y su tienda. Sin cuenta: el enlace /r/ + WhatsApp. Es parte del pedido (no es el módulo 'chat').
+-- A los 7 días de cerrado el pedido se borran sus mensajes (cron diario 'cfx-hilos'); el pedido queda como registro.
+-- Ganchos que pone cada app que lo usa (sin ganchos todo responde "no disponible"):
+--   cfx_hilo_app(ref, u) jsonb   {"ok": bool, "tienda": bool, "cerrado": timestamptz|null, "existe": bool}
+--                                 ¿u participa en el hilo ref? (u null = la limpieza pregunta si existe y cuándo cerró)
+--   cfx_hilo_aviso_app(ref, de, texto) void  push al otro lado (con el link al pedido)
+create table if not exists public.cfx_hilos (
+  id      uuid primary key default gen_random_uuid(),
+  ref     text not null check (char_length(ref) between 3 and 80),
+  de      uuid not null references auth.users (id) on delete cascade,
+  tienda  boolean not null default false,
+  texto   text not null check (char_length(texto) between 1 and 1000),
+  creado  timestamptz not null default now(),
+  leido   timestamptz
+);
+create index if not exists cfx_hilos_ref_idx on public.cfx_hilos (ref, creado);
+create index if not exists cfx_hilos_de_idx on public.cfx_hilos (de, creado);
+alter table public.cfx_hilos enable row level security;
+revoke all on public.cfx_hilos from anon, authenticated;
+
+create or replace function public.cfx_hilo_quien(p_ref text, u uuid) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare r jsonb;
+begin
+  if to_regprocedure('public.cfx_hilo_app(text,uuid)') is null or coalesce(p_ref, '') = '' then return jsonb_build_object('ok', false, 'existe', false); end if;
+  execute 'select public.cfx_hilo_app($1, $2)' into r using left(p_ref, 80), u;
+  return coalesce(r, jsonb_build_object('ok', false, 'existe', false));
+end $$;
+
+-- Ver el hilo (marca como leídos los del otro lado): {"ok", "abierto", "mensajes": [{id, mio, tienda, texto, creado, leido}]}.
+create or replace function public.cfx_hilo_ver(p_ref text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare q jsonb := public.cfx_hilo_quien(p_ref, auth.uid()); t boolean;
+begin
+  if auth.uid() is null or not coalesce((q ->> 'ok')::boolean, false) then return jsonb_build_object('ok', false, 'error', 'Chat no disponible para este pedido'); end if;
+  t := coalesce((q ->> 'tienda')::boolean, false);
+  update public.cfx_hilos set leido = now() where ref = p_ref and tienda <> t and leido is null;
+  return jsonb_build_object('ok', true, 'abierto', q ->> 'cerrado' is null, 'cerrado', q -> 'cerrado',
+    'mensajes', coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'mio', m.de = auth.uid(), 'tienda', m.tienda, 'texto', m.texto,
+      'creado', m.creado, 'leido', m.leido) order by m.creado)
+      from (select * from public.cfx_hilos where ref = p_ref order by creado desc limit 200) m), '[]'));
+end $$;
+
+-- Escribir: hasta 1000 caracteres, 60 al día por persona y 200 por pedido. Se puede hasta que se borra (7 días después de cerrar).
+create or replace function public.cfx_hilo_enviar(p_ref text, p_texto text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare q jsonb := public.cfx_hilo_quien(p_ref, auth.uid()); t text := trim(coalesce(p_texto, '')); i uuid;
+begin
+  if auth.uid() is null or not coalesce((q ->> 'ok')::boolean, false) then return jsonb_build_object('ok', false, 'error', 'Chat no disponible para este pedido'); end if;
+  if t = '' then return jsonb_build_object('ok', false, 'error', 'Escribe un mensaje'); end if;
+  if char_length(t) > 1000 then return jsonb_build_object('ok', false, 'error', 'Máximo 1000 caracteres por mensaje'); end if;
+  if (q ->> 'cerrado') is not null and (q ->> 'cerrado')::timestamptz < now() - interval '7 days' then
+    return jsonb_build_object('ok', false, 'error', 'Este pedido cerró hace más de 7 días');
+  end if;
+  if (select count(*) from public.cfx_hilos where de = auth.uid() and creado > now() - interval '1 day') >= 60 then
+    return jsonb_build_object('ok', false, 'error', 'Llegaste al máximo de 60 mensajes por día');
+  end if;
+  if (select count(*) from public.cfx_hilos where ref = p_ref) >= 200 then
+    return jsonb_build_object('ok', false, 'error', 'Este pedido llegó a 200 mensajes: sigue por WhatsApp');
+  end if;
+  insert into public.cfx_hilos (ref, de, tienda, texto) values (p_ref, auth.uid(), coalesce((q ->> 'tienda')::boolean, false), t) returning id into i;
+  if to_regprocedure('public.cfx_hilo_aviso_app(text,uuid,text)') is not null then
+    begin execute 'select public.cfx_hilo_aviso_app($1, $2, $3)' using p_ref, auth.uid(), t; exception when others then null; end;
+  end if;
+  return jsonb_build_object('ok', true, 'id', i);
+end $$;
+
+-- Sin leer por hilo, para las listas: [{ref, n}] (solo los refs donde participo; máx. 300).
+create or replace function public.cfx_hilos_sin_leer(p_refs text[]) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then return '[]'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('ref', z.ref, 'n', z.n)) from (
+    select r.ref, (select count(*)::int from public.cfx_hilos h where h.ref = r.ref and h.leido is null and h.tienda <> (w.q ->> 'tienda')::boolean) n
+    from (select distinct x as ref from unnest((coalesce(p_refs, '{}'::text[]))[1:300]) x
+          where exists (select 1 from public.cfx_hilos h where h.ref = x and h.leido is null)) r
+    cross join lateral (select public.cfx_hilo_quien(r.ref, auth.uid()) q) w
+    where coalesce((w.q ->> 'ok')::boolean, false)) z where z.n > 0), '[]');
+end $$;
+
+-- Cada noche: borra los mensajes de pedidos cerrados hace más de 7 días (o que ya no existen).
+create or replace function public.cfx_hilos_limpiar() returns int
+language plpgsql security definer set search_path = '' as $$
+declare r text; q jsonb; n int := 0; k int;
+begin
+  for r in select distinct ref from public.cfx_hilos loop
+    q := public.cfx_hilo_quien(r, null);
+    if not coalesce((q ->> 'existe')::boolean, false) or ((q ->> 'cerrado') is not null and (q ->> 'cerrado')::timestamptz < now() - interval '7 days') then
+      delete from public.cfx_hilos where ref = r;
+      get diagnostics k = row_count; n := n + k;
+    end if;
+  end loop;
+  return n;
+end $$;
+revoke all on function public.cfx_hilo_quien(text, uuid), public.cfx_hilos_limpiar() from public, anon, authenticated;
+revoke all on function public.cfx_hilo_ver(text), public.cfx_hilo_enviar(text, text), public.cfx_hilos_sin_leer(text[]) from public, anon;
+grant execute on function public.cfx_hilo_ver(text), public.cfx_hilo_enviar(text, text), public.cfx_hilos_sin_leer(text[]) to authenticated;
+do $$
+begin
+  perform cron.unschedule(jobid) from cron.job where jobname = 'cfx-hilos';
+  perform cron.schedule('cfx-hilos', '52 7 * * *', 'select public.cfx_hilos_limpiar()');
+exception when others then
+  raise notice 'Limpieza del chat de pedidos no programada (%).', sqlerrm;
+end $$;
 -- ---------- Calificaciones en dos direcciones (C15): el cliente califica al negocio y el negocio al cliente (módulo 'calificaciones') ----------
 -- Una calificación por "ref" (pedido, reserva, arriendo…) y por lado. Estrellas 1-5 y comentario opcional (300).
 -- Gancho que pone cada app que las usa (y 'calificaciones' en cfx_modulos_app()):
