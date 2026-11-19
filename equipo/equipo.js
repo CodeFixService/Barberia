@@ -97,6 +97,9 @@
     if (esp && (esp.hoy || esp.manana)) html += '<div class="card" id="cEspera"><b>⏳ Lista de espera:</b> ' + esp.hoy + ' hoy' + (esp.manana ? ' · ' + esp.manana + ' mañana' : '') +
       (esp.nombres.length ? '<div class="sub muted">' + esc(esp.nombres.slice(0, 5).join(', ')) + (esp.nombres.length > 5 ? '…' : '') + '</div>' : '') +
       '<div class="sub muted chico">Si se libera una hora, les avisamos solos.</div></div>';
+    // G128 b ⚠️ Pide abono y no tiene cómo cobrarlo: nadie puede reservar online (la base lo bloquea). Lo primero que ve el dueño.
+    const cobraAbono = !!(b.link_pago || b.datos_transferencia || b.mp || (b.medios && (b.medios.mp || b.medios.flow)));
+    if (dueno() && b.abono > 0 && !cobraAbono) html += '<div id="sinMedio"></div>';
     // 1. Abonos por revisar (lo más urgente)
     if (P2.revision.length) {
       html += '<div class="sec-tit">🧾 Abonos por revisar (' + P2.revision.length + ')</div>' + P2.revision.map((r) =>
@@ -137,7 +140,7 @@
       const falta = [
         [!!b.logo, '📷 Sube tu logo', 'negocio'],
         [B.servicios.length > 0, '✂️ Agrega tus servicios con precio', 'servicios'],
-        [!!((b.pagos && (b.pagos.p1.link || (b.pagos.p2 && b.pagos.p2.link))) || b.datos_transferencia), '💳 Pon tu link de pago o datos de transferencia del abono', 'links'],
+        [!!((b.pagos && (b.pagos.p1.link || (b.pagos.p2 && b.pagos.p2.link))) || b.datos_transferencia || b.mp || (b.medios && (b.medios.mp || b.medios.flow))), '💳 Pon cómo cobrar el abono: ⚡ Mercado Pago, link o transferencia', 'links'],
         [!!b.whatsapp, '💬 Pon el WhatsApp de la barbería', 'negocio'],
         [!!b.direccion, '📍 Pon tu dirección', 'negocio']
       ];
@@ -192,6 +195,8 @@
     el.querySelectorAll('[data-comp]').forEach((x) => x.onclick = () => verComprobante(x.dataset.comp));
     el.querySelectorAll('[data-ver]').forEach((x) => x.onclick = () => abrirReserva(x.dataset.ver));
     el.querySelectorAll('[data-ir]').forEach((x) => x.onclick = () => { mostrar('mas'); abrirSeccion(x.dataset.ir); });
+    if ($('sinMedio') && window.CFX_COBRO) CFX_COBRO.sinMedios($('sinMedio'), { titulo: 'Tus clientes no pueden reservar online.', texto: 'Pides abono de ' + C.plata(b.abono) + ' y aún no hay cómo pagarlo.',
+      alTocar: () => { mostrar('mas'); abrirSeccion('links'); } });
     if ($('chkAgenda')) $('chkAgenda').onchange = async (e) => {
       try { await K.rpc('set_agenda_abierta', { p_abierta: e.target.checked }); yo.agenda_abierta = e.target.checked; await cargarBarberia(); C.toast(e.target.checked ? '🟢 Agenda abierta' : '🔴 Agenda llena: no te pueden reservar'); }
       catch (err) { C.toast('⚠️ ' + err.message); e.target.checked = !e.target.checked; }
