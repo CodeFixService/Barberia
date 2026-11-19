@@ -1537,6 +1537,7 @@
         c.querySelector('[data-act-txt]').textContent = on ? ' · activo (al guardar)' : '';
       });
     });
+    if (window.CodeFixVitrina && CodeFixVitrina.transferencia) CodeFixVitrina.transferencia($('tTransf'));  // G117: datos de banco por campos
     $('bGuardarL').onclick = (ev) => C.accion(ev.target, async () => {
       const caja = (n) => z.querySelector('[data-pago="' + n + '"]');
       const leer = (n) => ({ monto: caja(n).querySelector('[data-pm]').value, link: caja(n).querySelector('[data-pl]').value, texto: caja(n).querySelector('[data-px]').value });
