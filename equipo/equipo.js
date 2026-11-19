@@ -725,6 +725,7 @@
       ['giftcards', '🎁', 'Gift cards', 'Tarjetas de regalo con código'],
       ['membresias', '🔁', 'Membresías', 'Plan mensual de cortes'],
       ...(window.CFX_ANUNCIOS && CFX_ANUNCIOS.promos ? [['promos', '📣', 'Promo destacada', 'Tarjeta al abrir la app de tus clientes']] : []),
+      ...(window.CFX_ESTUDIO ? [['estudio', '🎬', 'Estudio de contenido', 'Ideas para tus redes listas para copiar']] : []),  // G112 d (núcleo)
       ['invitar', '🤝', 'Invita una barbería', K.regla('dias_referido') ? 'Gana ' + K.regla('dias_referido') + ' días de Premium' : 'Comparte la app'],
       ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
       ...(bar().modulos ? [['modulos', '🧩', 'Módulos', premium() ? 'Incluidos + nuevos con -20%' : 'Activa solo lo que necesitas']] : []),
@@ -799,6 +800,7 @@
       respaldo: secRespaldo, modulos: secModulos, caja, boleta: secBoleta, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
       portafolio: secPortafolio, redes: secRedes, productos: secProductos, giftcards: secGiftcards, membresias: secMembresias,
       promos: () => CFX_ANUNCIOS.promos(seccion('📣 Promo destacada'), { rpc: K.rpc, probar: (k) => P.upsell('Promo destacada', k) }),  // G96 b (núcleo)
+      estudio: () => CFX_ESTUDIO.montar(seccion('🎬 Estudio de contenido'), { rpc: K.rpc, probar: (k) => P.upsell('Estudio de contenido', k), nombre: (bar() || {}).nombre || '' }),  // G112 d (núcleo)
       milink: () => P.compartir({ el: seccion('🔳 Mi link y QR'), link: K.linkBarberia(bar().codigo, yo.id), archivo: 'qr-' + primerNombre(yo.nombre),
         texto: 'Con este link o QR tus clientes reservan <b>directo contigo</b> en ' + esc(bar().nombre) + ' (sin cuenta o con su cuenta).',
         mensaje: '💈 Reserva tu hora conmigo en ' + bar().nombre }), plan: () => P.plan(seccion('💎 Mi plan')),
