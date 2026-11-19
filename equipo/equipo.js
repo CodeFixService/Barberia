@@ -1038,6 +1038,32 @@
         (s.barberos && s.barberos.length ? ' · solo ' + s.barberos.map((id) => (barbero(id) || {}).nombre || '').join(', ') : '') + '</span></div>' +
         '<div style="text-align:right"><div class="precio-s">' + C.plata(s.precio) + '</div><div class="orden"><button class="gris" data-up="' + i + '"' + (i ? '' : ' disabled') + '>↑</button> <button class="gris" data-ed="' + s.id + '">✏️</button></div></div></div>').join('')
       : '<div class="card empty"><span class="ico">✂️</span>Agrega tu primer servicio: corte, barba, cejas…</div>');
+    // G118 📊 Planilla única (núcleo CFX_RESPALDO.planilla): crea o ACTUALIZA servicios por nombre; el servidor valida cada uno (guardar_servicio).
+    z.insertAdjacentHTML('beforeend', '<div class="card"><details><summary style="cursor:pointer;font-weight:700">📊 Cargar o actualizar muchos (planilla)</summary><div id="planSer" style="margin-top:8px"></div></details></div>');
+    if (window.CFX_RESPALDO && CFX_RESPALDO.planilla) {
+      const mismo = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+      CFX_RESPALDO.planilla($('planSer'), { que: 'servicios', archivo: 'planilla-servicios', max: 200, rubro: 'barbería', clave: 'nombre',
+        cols: [{ k: 'nombre', t: 'Nombre', req: true, max: 60, al: /^(servicio|corte)/ }, { k: 'precio', t: 'Precio', tipo: 'plata', req: true, tope: 1000000, al: /^valor/ },
+          { k: 'duracion', t: 'Duración (min)', tipo: 'entero', req: true, tope: 480, al: /^(duracion|minutos|tiempo)/, ayuda: 'minutos, entre 5 y 480' },
+          { k: 'categoria', t: 'Categoría', max: 30, al: /^tipo/ }, { k: 'descripcion', t: 'Descripción', max: 200, al: /^detalle/ }, { k: 'visible', t: 'Visible', tipo: 'si_no', ayuda: 'sí = lo ven tus clientes' }],
+        ejemplos: [{ nombre: 'Corte clásico', precio: 10000, duracion: 30, categoria: 'Cortes', descripcion: 'Tijera y máquina', visible: 'sí' },
+          { nombre: 'Degradado (fade)', precio: 12000, duracion: 40, categoria: 'Cortes', visible: 'sí' }, { nombre: 'Perfilado de barba', precio: 6000, duracion: 20, categoria: 'Barba', visible: 'sí' },
+          { nombre: 'Corte + barba', precio: 15000, duracion: 50, categoria: 'Combos', visible: 'sí' }],
+        existe: (f) => B.servicios.some((s) => mismo(s.nombre, f.nombre)),
+        guardar: async (filas) => {
+          let creados = 0, actualizados = 0; const errores = [];
+          for (const f of filas) {
+            const s = B.servicios.find((x) => mismo(x.nombre, f.nombre));
+            const p = s ? { id: s.id, nombre: s.nombre, precio: s.precio, duracion: s.duracion, categoria: s.categoria, descripcion: s.descripcion, visible: s.visible, barberos: s.barberos || [] }
+              : { nombre: f.nombre, visible: true, barberos: [] };
+            ['precio', 'duracion', 'categoria', 'descripcion', 'visible'].forEach((k) => { if (f[k] != null) p[k] = f[k]; });
+            try { await K.rpc('guardar_servicio', { p }); if (s) actualizados++; else creados++; } catch (e) { errores.push({ fila: f._fila, msg: e.message }); }
+          }
+          await cargarBarberia();
+          return { creados, actualizados, errores };
+        },
+        listo: (r) => { if (!(r.errores || []).length) secServicios().then(() => C.toast('✅ ' + r.creados + ' creados · ' + r.actualizados + ' actualizados')); } });
+    }
     $('bFabSer').onclick = (ev) => C.accion(ev.target, async () => {
       const n = await K.rpc('servicios_fabrica');
       C.toast(n ? '✨ Se agregaron ' + n + ': ajusta tus precios' : '✨ Ya tienes todos los de fábrica');
