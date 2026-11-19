@@ -70,3 +70,4 @@ Auto-actualizar compara con `bd` de version.json (antes con `version` → se rei
 - G113 (núcleo 3.21): ☰ Más en páginas que se deslizan de lado (pestañas + ⇅ ordenar/renombrar por persona), ≥ 900 px opciones en grilla pareja, 🗂️ CFX_CAJA y CFX_DIALOGO { lista } disponibles para elegir entre muchas opciones / mostrar listas.
 - 🗂️ G117 (3.45): Más → 💳 Links → datos de transferencia por campos (núcleo CodeFixVitrina.transferencia sobre #tTransf; se guarda el mismo texto barberias.datos_transferencia).
 - 📊 G118 (3.46): Más → Servicios → 📊 Cargar o actualizar muchos (núcleo CFX_RESPALDO.planilla; guardar_servicio por fila; conserva foto y barberos).
+- 🖼️ G122 (3.47 · bd 3.18): Core.elegirImagen('vitrina'/'portada') sube a Storage (núcleo CFX_NUBE); img_ok (plpgsql) acepta la URL; Core.fondo/esFoto y b.js la muestran. Viejas (portada, servicios, ofertas, portafolio) pasan solas al entrar el equipo (cfx_fotos_viejas/cfx_foto_pasar).

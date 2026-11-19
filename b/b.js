@@ -104,11 +104,11 @@
     // Ofertas
     if (V.ofertas.length) {
       html += '<div class="sec-tit">🏷️ Ofertas</div>' + V.ofertas.map((o) => '<div class="card oferta"><h2>' + esc(o.titulo) + (o.precio ? ' <span class="pill ok">' + esc(o.precio) + '</span>' : '') + '</h2>' +
-        (o.detalle ? '<p style="margin:0;white-space:pre-line">' + esc(o.detalle) + '</p>' : '') + (o.imagen && /^data:image\//.test(o.imagen) ? '<img src="' + o.imagen + '" alt="">' : '') + '</div>').join('');
+        (o.detalle ? '<p style="margin:0;white-space:pre-line">' + esc(o.detalle) + '</p>' : '') + (o.imagen && C.esFoto(o.imagen) ? '<img src="' + o.imagen + '" alt="">' : '') + '</div>').join('');
     }
     // G53b 🖼️ Portafolio (módulo): fotos de los mejores cortes
     if (V.portafolio && V.portafolio.length) {
-      html += '<div class="sec-tit">🖼️ Nuestros cortes</div><div class="pf-grid">' + V.portafolio.filter((f) => /^data:image\//.test(f.foto)).map((f) =>
+      html += '<div class="sec-tit">🖼️ Nuestros cortes</div><div class="pf-grid">' + V.portafolio.filter((f) => C.esFoto(f.foto)).map((f) =>
         '<figure><img src="' + f.foto + '" alt="' + esc(f.titulo || 'Corte') + '" loading="lazy">' + (f.titulo ? '<figcaption>' + esc(f.titulo) + '</figcaption>' : '') + '</figure>').join('') + '</div>';
     }
     // Equipo y datos

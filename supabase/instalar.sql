@@ -18,7 +18,7 @@ create or replace function public.tz() returns text
 language sql immutable as $$ select 'America/Santiago'::text $$;
 
 create or replace function public.db_version() returns text
-language sql immutable as $$ select '3.17'::text $$;
+language sql immutable as $$ select '3.18'::text $$;
 
 -- Lo nuevo de esta versión (llega en el push a todos al actualizar).
 create or replace function public.notas_version() returns text
@@ -2998,9 +2998,10 @@ begin
 end $$;
 
 create or replace function public.img_ok(t text, maxlen int) returns boolean
-language sql immutable as $$
-  select t is null or t = '' or (t ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' and length(t) <= maxlen)
-$$;
+language plpgsql immutable as $$
+begin -- G122: o una foto de la nube (Storage, núcleo fotos.sql)
+  return t is null or t = '' or (t ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' and length(t) <= maxlen) or public.cfx_foto_nube(t);
+end $$;
 
 create or replace function public.guardar_barberia(p jsonb) returns jsonb
 language plpgsql security definer set search_path = '' as $$
@@ -4224,6 +4225,39 @@ begin
   delete from public.bar_portafolio where id = p_id and barberia_id = me.barberia_id and (me.role = 'owner' or autor = me.id);
   if not found then raise exception 'Solo el dueño o quien la subió puede borrarla'; end if;
 end $$;
+
+-- G122 🖼️ Fotos viejas (base64) de la barbería → Storage: núcleo fotos.js (CFX_NUBE.pasarViejas) pide 10 y las cambia por su URL.
+-- Solo el equipo de esa barbería; solo si la foto sigue igual (mismo largo) y la URL nueva es de SU carpeta. Si algo falla, queda igual.
+create or replace function public.cfx_fotos_viejas() returns table (t text, id text, i int, foto text)
+language plpgsql stable security definer set search_path = '' as $$
+declare me public.profiles; b uuid;
+begin
+  begin me := public.yo_activo(); exception when others then return; end;
+  if me.id is null or not public.es_staff(me) then return; end if;
+  b := me.barberia_id;
+  return query select * from (
+    select 'portada'::text, x.id::text, -1, x.portada from public.barberias x where x.id = b and x.portada like 'data:image/%'
+    union all select 'servicio', x.id::text, -1, x.foto from public.servicios x where x.barberia_id = b and x.foto like 'data:image/%'
+    union all select 'oferta', x.id::text, -1, x.imagen from public.ofertas x where x.barberia_id = b and x.imagen like 'data:image/%'
+    union all select 'portafolio', x.id::text, -1, x.foto from public.bar_portafolio x where x.barberia_id = b and x.foto like 'data:image/%') z limit 10;
+end $$;
+create or replace function public.cfx_foto_pasar(p_t text, p_id text, p_i int, p_largo int, p_nueva text) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare me public.profiles; b uuid; k uuid;
+begin
+  begin me := public.yo_activo(); exception when others then return false; end;
+  if me.id is null or not public.es_staff(me) or not public.cfx_foto_nube(p_nueva, auth.uid()) then return false; end if;
+  b := me.barberia_id;
+  begin k := p_id::uuid; exception when others then return false; end;
+  if p_t = 'portada' then update public.barberias set portada = p_nueva where id = b and id = k and portada like 'data:image/%' and length(portada) = p_largo;
+  elsif p_t = 'servicio' then update public.servicios set foto = p_nueva where barberia_id = b and id = k and foto like 'data:image/%' and length(foto) = p_largo;
+  elsif p_t = 'oferta' then update public.ofertas set imagen = p_nueva where barberia_id = b and id = k and imagen like 'data:image/%' and length(imagen) = p_largo;
+  elsif p_t = 'portafolio' then update public.bar_portafolio set foto = p_nueva where barberia_id = b and id = k and foto like 'data:image/%' and length(foto) = p_largo;
+  else return false; end if;
+  return found;
+end $$;
+revoke all on function public.cfx_fotos_viejas(), public.cfx_foto_pasar(text, text, int, int, text) from public, anon;
+grant execute on function public.cfx_fotos_viejas(), public.cfx_foto_pasar(text, text, int, int, text) to authenticated;
 
 -- 🎁 Gift cards: el dueño las vende (entra a la Caja) y el equipo las canjea con el código hasta agotar el saldo.
 create table if not exists public.bar_giftcards (
@@ -10048,6 +10082,38 @@ end $$;
 revoke all on function public.cfx_estudio_negocio(), public.cfx_estudio_puede(uuid), public.cfx_estudio_fila(public.cfx_estudio) from public, anon, authenticated;
 revoke all on function public.cfx_estudio_mio(), public.cfx_estudio_guardar(jsonb), public.cfx_estudio_borrar(uuid[]) from public, anon;
 grant execute on function public.cfx_estudio_mio(), public.cfx_estudio_guardar(jsonb), public.cfx_estudio_borrar(uuid[]) to authenticated;
+-- ===================== G122 🖼️ Fotos a Storage (núcleo) =====================
+-- Bucket público 'vitrina': cada uno sube SOLO a su carpeta (<su id>/<uuid>.webp), hasta 700 KB, solo imágenes. Nadie lista lo ajeno.
+-- Las apps aceptan en sus fotos de vitrina el texto base64 de siempre O una URL de este bucket (cfx_foto_ok). Lo viejo sigue igual.
+do $$ begin
+  if to_regclass('storage.buckets') is not null then
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('vitrina', 'vitrina', true, 716800, array['image/webp', 'image/jpeg', 'image/png'])
+    on conflict (id) do update set public = true, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+    drop policy if exists cfx_vitrina_subir on storage.objects;
+    drop policy if exists cfx_vitrina_ver on storage.objects;
+    drop policy if exists cfx_vitrina_borrar on storage.objects;
+    create policy cfx_vitrina_subir on storage.objects for insert to authenticated
+      with check (bucket_id = 'vitrina' and (storage.foldername(name))[1] = (select auth.uid())::text);
+    create policy cfx_vitrina_ver on storage.objects for select to authenticated
+      using (bucket_id = 'vitrina' and (storage.foldername(name))[1] = (select auth.uid())::text);
+    create policy cfx_vitrina_borrar on storage.objects for delete to authenticated
+      using (bucket_id = 'vitrina' and (storage.foldername(name))[1] = (select auth.uid())::text);
+  end if;
+end $$;
+
+-- ¿Es una foto de la nube (bucket vitrina de Supabase)? Con p_uid: además, ¿la subió esa persona?
+create or replace function public.cfx_foto_nube(t text, p_uid uuid default null) returns boolean
+language sql immutable set search_path = '' as $$
+  select coalesce(t, '') ~ '^https://[a-z0-9-]+\.supabase\.co/storage/v1/object/public/vitrina/[0-9a-f-]{36}/[0-9a-f-]{36}\.(webp|jpg|png)$'
+    and (p_uid is null or split_part(split_part(t, '/vitrina/', 2), '/', 1) = p_uid::text)
+$$;
+-- Foto de vitrina válida: vacía, base64 liviano (≤ maxlen) o de la nube.
+create or replace function public.cfx_foto_ok(t text, maxlen int) returns boolean
+language sql immutable set search_path = '' as $$
+  select coalesce(t, '') = '' or (t ~ '^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$' and length(t) <= maxlen) or public.cfx_foto_nube(t)
+$$;
+grant execute on function public.cfx_foto_nube(text, uuid), public.cfx_foto_ok(text, int) to authenticated, anon;
 -- <<< CFX núcleo
 
 -- G95 🎁 Prueba por botón: quien ya tuvo su prueba (o el regalo al crear la barbería) queda anotado por correo (no se borra).

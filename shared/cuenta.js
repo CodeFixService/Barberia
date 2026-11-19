@@ -8,6 +8,7 @@
   const sb = listo ? global.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
     auth: { persistSession: true, autoRefreshToken: true, storageKey: 'barb-auth', detectSessionInUrl: true }  // G32 f: el enlace del correo abre la sesión
   }) : null;
+  if (sb) global.CFX_NUBE_SB = sb; // G122 🖼️ fotos de vitrina a Storage (núcleo fotos.js)
   // G32 d/f · 🔑 Entrar con QR y 🔒 clave pausada tras 3 intentos (núcleo qr.js). En las demás páginas se carga solo.
   const qrIni = () => global.CFX_QR.iniciar({ sb, funcion: 'enviar', qrLib: C.raiz() + 'shared/vendor/qrcode.js' });
   if (sb && global.CFX_QR) qrIni(); else if (sb) { const q = document.createElement('script'); q.src = C.raiz() + 'shared/qr.js'; q.onload = qrIni; document.head.appendChild(q); }

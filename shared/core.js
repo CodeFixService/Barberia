@@ -8,7 +8,7 @@
     location.replace(cfg.SITIO + location.pathname.replace(/^\/Barberia\//i, '') + location.search + location.hash);
   }
   const ZONA = cfg.ZONA || 'America/Santiago';
-  const VERSION = '3.46';
+  const VERSION = '3.47';
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -189,18 +189,21 @@
   }
   // Abre la cámara/galería y devuelve la imagen comprimida.
   function elegirImagen(maxLado, calidad, camara) {
-    let maxLargo = 0;
+    let maxLargo = 0; const tipo = typeof maxLado === 'string' ? maxLado : '';
     if (typeof maxLado === 'string') { const f = FOTO(maxLado); maxLado = f.lado; calidad = f.calidad; maxLargo = f.kb * 1400; } // elegirImagen('vitrina')
     return new Promise((ok) => {
       const i = document.createElement('input');
       i.type = 'file'; i.accept = 'image/*';
       if (camara) i.capture = 'environment';
-      i.onchange = async () => { if (!i.files[0]) return ok(null); try { ok(await imagen(i.files[0], maxLado, calidad, maxLargo)); } catch (e) { toast(errorTxt(e)); ok(null); } };
+      const nube = tipo === 'vitrina' || tipo === 'portada'; // G122 🖼️ fotos que se muestran → Storage (si no se puede, quedan en base64)
+      i.onchange = async () => { if (!i.files[0]) return ok(null); try { const d = await imagen(i.files[0], maxLado, calidad, maxLargo); ok(nube && global.CFX_NUBE ? await global.CFX_NUBE.subir(d) : d); } catch (e) { toast(errorTxt(e)); ok(null); } };
       i.click();
     });
   }
   // Solo imágenes en base64 (las valida el servidor), así no se puede inyectar nada en el estilo.
-  const fondo = (dataUrl) => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl || '') ? "background-image:url('" + dataUrl + "')" : '';
+  // G122: o una foto de la nube (Storage de la app; URL fija sin comillas ni espacios: CFX_NUBE.es).
+  const esFoto = (u) => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u || '') || !!(global.CFX_NUBE && global.CFX_NUBE.es(u));
+  const fondo = (dataUrl) => esFoto(dataUrl) ? "background-image:url('" + dataUrl + "')" : '';
   function avatar(p, clase) {
     const f = p && p.foto;
     return '<span class="av ' + (clase || '') + '" style="' + fondo(f) + '">' + (f ? '' : esc((p && p.avatar) || '🙂')) + '</span>';
@@ -290,7 +293,7 @@
   global.Core = {
     $, esc, plata, pad, toast, errorTxt, partes, fechaDe, horaDe, minutosDe, hoy, sumarDias, dow, instante, aMin, aHHMM,
     DIAS, DIAS_LARGO, MESES, diaCorto, fechaLarga, cuando, hace, conexion, relativoDia, hoja, confirmar, pedir, accion, wa, numeroWsp,
-    imagen, elegirImagen, fondo, avatar, COLORES, COLORES_LIBRES, EMOJIS, EMOJIS_LIBRES, aplicarColor, aplicarTema, tinta,
+    imagen, elegirImagen, fondo, esFoto, avatar, COLORES, COLORES_LIBRES, EMOJIS, EMOJIS_LIBRES, aplicarColor, aplicarTema, tinta,
     registrarSW, raiz, marca, copiar, guardar, leer, ics, googleCal, qr, version: VERSION, ZONA
   };
 })(window);
