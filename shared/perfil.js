@@ -55,10 +55,13 @@
         ? '<p>Esto es parte de <b>Premium</b>. Por <b>' + C.plata(precio()) + ' al mes</b> desbloqueas:</p><ul class="feat">' +
           beneficios(esDueno ? 'owner' : 'client').map((b) => '<li>' + esc(b) + '</li>').join('') + '</ul>' +
           '<div class="btns"><button class="oro full" data-ir>⭐ Ver Premium</button></div>' +
-          (vende ? '<div class="btns"><button class="gris full" data-mod>🧩 O activa solo esta función</button></div>' : '')
+          (vende ? '<div class="btns" data-cfx-prueba></div><div class="btns"><button class="gris full" data-mod>🧩 O activa solo esta función</button></div>' : '')
         : '<p>Esta función está disponible cuando tu barbería es <b>Premium</b>. Pídele al dueño que la active.</p>'));
     const b = h.q('[data-ir]');
     if (b) b.onclick = () => { h.cerrar(); K.irA('plan'); };
+    // G142 a: 🎁 Probar ese módulo 7 días al tiro (igual que en las 5; si ese correo ya lo probó, lo dice).
+    const zp = h.q('[data-cfx-prueba]');
+    if (zp) global.CFX_MODULOS_TIENDA.prueba(zp, mod, { rpc: K.rpc, alCambiar: () => { h.cerrar(); setTimeout(() => location.reload(), 1200); } }).then((x) => { if (!x) zp.remove(); });
     const m = h.q('[data-mod]');
     if (m) m.onclick = () => { h.cerrar(); global.CFX_MODULOS_TIENDA.probar(mod, { rpc: K.rpc, alCambiar: () => setTimeout(() => location.reload(), 1500) }); };
   }

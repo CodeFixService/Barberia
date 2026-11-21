@@ -115,7 +115,7 @@
     // Equipo y datos
     html += '<div class="sec-tit">💈 Nuestro equipo</div><div class="card"><ul class="list">' + V.barberos.map((x) =>
       '<li>' + C.avatar(x) + '<div class="grow"><b>' + esc(x.nombre) + '</b>' + (x.descripcion ? '<div class="sub">' + esc(x.descripcion) + '</div>' : '') +
-      (!x.reservable ? '<div class="sub">🔴 Agenda llena por ahora</div>' : '') + '</div></li>').join('') + '</ul></div>';
+      (!x.reservable ? '<div class="sub">🔴 Agenda llena por ahora</div>' : '') + '<div data-redes-p="' + esc(x.id) + '" hidden></div></div></li>').join('') + '</ul></div>';
     html += '<div class="sec-tit">📍 La barbería</div><div class="card">' + (V.direccion ? '<p style="margin-top:0">📍 ' + esc(V.direccion) + '</p>' : '') +
       '<table class="tabla">' + (V.horario || []).map((d, i) => '<tr><td>' + C.DIAS_LARGO[i] + '</td><td>' + esc(A.horarioTxt(d)) + '</td></tr>').join('') + '</table>' +
       '<div class="btns">' + (V.whatsapp ? '<a class="btn wsp" target="_blank" rel="noopener" href="' + C.wa(V.whatsapp, 'Hola 👋') + '">💬 WhatsApp</a>' : '') +
@@ -124,6 +124,7 @@
     mostrarApp(html);
     C.marca(true);
     if (window.CodeFixVitrina && CodeFixVitrina.redes) CodeFixVitrina.redes.publico($('bRedes'), { rpc: (f, x) => K.rpc(f, x), llave: V.codigo, titulo: '', solo: true });
+    if (window.CodeFixVitrina && CodeFixVitrina.redes && CodeFixVitrina.redes.equipo) CodeFixVitrina.redes.equipo(document.body, { rpc: (f, x) => K.rpc(f, x), llave: V.codigo });  // G142 c: redes de cada barbero
     if ($('bIrReservar')) $('bIrReservar').onclick = () => $('reservar').scrollIntoView({ behavior: 'smooth' });
     if ($('bCuenta')) $('bCuenta').onclick = crearCuenta;
     app.querySelectorAll('[data-t]').forEach((li) => li.onclick = () => { location.href = '../r/?t=' + li.dataset.t; });
