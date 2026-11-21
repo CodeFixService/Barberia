@@ -145,7 +145,7 @@
         [!!b.direccion, '📍 Pon tu dirección', 'negocio']
       ];
       const pend = falta.filter((x) => !x[0]).length;
-      if (pend) html += '<div class="card"><h2>🧩 Lo que te falta configurar <span class="grow"></span><span class="pill warn">' + pend + '</span></h2>' +
+      if (pend) html += '<div class="card"><h2>🧩 Lo que te falta configurar <span class="grow"></span><span class="pill warn cfx-num">' + pend + '</span></h2>' +
         '<p class="muted chico" style="margin-top:-6px">' + esc(K.texto('bienvenida_barberia', '')) + '</p><ul class="list checklist">' + falta.map((x) =>
         '<li class="' + (x[0] ? 'hecho' : 'tap') + '"' + (x[0] ? '' : ' data-ir="' + x[2] + '"') + '><span class="ok">' + (x[0] ? '✓' : '○') + '</span><span class="t grow">' + x[1] + '</span>' + (x[0] ? '' : '<span>›</span>') + '</li>').join('') + '</ul></div>';
     }

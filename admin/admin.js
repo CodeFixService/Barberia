@@ -98,11 +98,8 @@
       (esAdmin ? '' : '. Las que entren con tu link quedan a tu nombre') + (K.regla('registro_barberias') ? '' : ' · ⚠️ el registro está cerrado (Ajustes → Reglas)') + '.</div></div><span>›</span></div></div>';
     html += '<div id="cVencer"></div>';
     // Servidor
-    // El uso del servidor se ve en el Centro de Mando (carrusel de servidores); aquí queda la limpieza.
-    html += '<div class="card"><h2>🧹 Limpieza</h2>' +
-      '<p class="muted chico">Fotos guardadas: ' + uso.comprobantes + ' comprobante(s) y ' + uso.fotos_chat + ' foto(s) del chat. Se borran solas a los ' + K.regla('dias_comprobantes') + ' días; nunca se borra un comprobante en revisión.</p>' +
-      (permiso('eliminar') ? '<div class="btns"><button class="small gris" data-limpiar="comprobantes">🧾 Comprobantes de +7 días</button><button class="small gris" data-limpiar="fotos_chat">🖼️ Fotos del chat de +7 días</button>' +
-      '<button class="small gris" data-limpiar="avisos">🔔 Avisos de +2 días</button><button class="small gris" data-limpiar="anuladas">❌ Horas anuladas de +7 días</button></div>' : '') + '</div>';
+    // G144 a: la limpieza se hace solo en el Centro de Mando → Apps (aquí queda el aviso).
+    html += '<p class="muted chico">🧹 Limpieza y respaldo: en el Centro de Mando → Apps.</p>';
     if (rep.length) html += '<div class="card"><h2>🚩 Reportes (' + rep.length + ')</h2><ul class="list">' + rep.map((r) => '<li><div class="grow"><b>' + esc(r.de) + ' reportó a ' + esc(r.contra) + '</b><div class="sub">' + esc(r.reason) + ' · "' + esc(r.excerpt || '') + '"</div></div>' +
       '<button class="small gris" data-rok="' + r.id + '">Ignorar</button><button class="small danger" data-rsus="' + r.id + '">Suspender</button></li>').join('') + '</ul></div>';
     const top = barberias.slice().sort((a, b) => b.ventas - a.ventas);
@@ -116,10 +113,6 @@
     if ($('bPush')) $('bPush').onclick = (ev) => C.accion(ev.target, async () => { await K.activarPush(); resumen(); }, '🔔 Activadas');
     $('cQrReg').onclick = qrRegistro;
     porVencer();
-    el.querySelectorAll('[data-limpiar]').forEach((b) => b.onclick = async (ev) => {
-      if (!await C.confirmar('Se borrará: ' + b.textContent.trim() + '. Lo que está en revisión no se toca. No se puede deshacer.', { si: 'Limpiar', peligro: true })) return;
-      C.accion(ev.target, async () => { const r = await K.rpc('admin_limpiar', { p_que: b.dataset.limpiar }); C.toast('🧹 Listo: ' + (r.borrados || 0) + ' elemento(s)'); resumen(); });
-    });
     el.querySelectorAll('[data-rok]').forEach((b) => b.onclick = async () => { await K.rpc('admin_resolver_reporte', { p_id: b.dataset.rok, p_suspender: false }); resumen(); });
     if (!permiso('cuentas')) el.querySelectorAll('[data-rsus]').forEach((b) => b.remove());
     el.querySelectorAll('[data-rsus]').forEach((b) => b.onclick = async () => { if (await C.confirmar('¿Suspender la cuenta reportada?', { si: 'Suspender', peligro: true })) { await K.rpc('admin_resolver_reporte', { p_id: b.dataset.rsus, p_suspender: true }); resumen(); } });

@@ -123,7 +123,7 @@
     html += '<p class="muted chico centro">' + esc(K.texto('terminos', '')) + ' <a href="../legal.html">Términos</a></p>';
     mostrarApp(html);
     C.marca(true);
-    if (window.CodeFixVitrina && CodeFixVitrina.redes) CodeFixVitrina.redes.publico($('bRedes'), { rpc: (f, x) => K.rpc(f, x), llave: V.codigo, titulo: '', solo: true });
+    if (window.CodeFixVitrina && CodeFixVitrina.redes) CodeFixVitrina.redes.publico($('bRedes'), { rpc: (f, x) => K.rpc(f, x), llave: V.codigo, titulo: '', solo: true, viejo: document.querySelector('a.btn.wsp') });  // G144 d
     if (window.CodeFixVitrina && CodeFixVitrina.redes && CodeFixVitrina.redes.equipo) CodeFixVitrina.redes.equipo(document.body, { rpc: (f, x) => K.rpc(f, x), llave: V.codigo });  // G142 c: redes de cada barbero
     if ($('bIrReservar')) $('bIrReservar').onclick = () => $('reservar').scrollIntoView({ behavior: 'smooth' });
     if ($('bCuenta')) $('bCuenta').onclick = crearCuenta;
