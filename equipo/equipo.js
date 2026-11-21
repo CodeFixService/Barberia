@@ -59,7 +59,7 @@
     if (v === 'agenda' && q.get('r')) { mostrar('agenda'); abrirReserva(q.get('r'), true); return; }
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
-    if (['portafolio', 'redes', 'productos', 'giftcards', 'membresias', 'plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo', 'modulos', 'promos'].includes(v)) {
+    if (['misredes', 'portafolio', 'redes', 'productos', 'giftcards', 'membresias', 'plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo', 'modulos', 'promos'].includes(v)) {
       mostrar('mas'); abrirSeccion(v === 'ajustes' ? 'negocio' : v); return;
     }
     mostrar(VISTAS[v] ? v : 'hoy');
@@ -710,6 +710,7 @@
     const el = $('v-mas');
     const items = dueno() ? [
       ['negocio', '🏪', 'Perfil de la barbería', 'Logo, datos, colores'],
+      ...(window.CodeFixVitrina && CodeFixVitrina.redes ? [['misredes', '📱', 'Mis redes', 'Instagram, TikTok… con ícono en tu link']] : []),  // G141 a (núcleo)
       ['horario', '🕐', 'Horario', 'Lunes a domingo y bloqueos'],
       ['tiempos', '⏱️', 'Mis tiempos', 'Cuánto dura cada corte y tu descanso'],
       ['servicios', '✂️', 'Servicios y precios', 'Tu catálogo'],
@@ -803,6 +804,7 @@
     if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); mas(); }
     const F = { equipo: secEquipo, servicios: secServicios, ofertas: secOfertas, estadisticas: secEstadisticas, negocio: secNegocio, horario: secHorario, links: secLinks,
       respaldo: secRespaldo, modulos: secModulos, caja, boleta: secBoleta, tiempos: secTiempos, calificaciones: secCalificaciones, enlace: enlaceClientes, resumen: secResumen, volver: secVolver, invitar: secInvitar,
+      misredes: () => CodeFixVitrina.redes.editor(seccion('📱 Mis redes'), { rpc: K.rpc }),  // G141 a (núcleo)
       portafolio: secPortafolio, redes: secRedes, productos: secProductos, giftcards: secGiftcards, membresias: secMembresias,
       promos: () => CFX_ANUNCIOS.promos(seccion('📣 Promo destacada'), { rpc: K.rpc, probar: (k) => P.upsell('Promo destacada', k) }),  // G96 b (núcleo)
       estudio: () => CFX_ESTUDIO.montar(seccion('🎬 Estudio de contenido'), { rpc: K.rpc, probar: (k) => P.upsell('Estudio de contenido', k), nombre: (bar() || {}).nombre || '' }),  // G112 d (núcleo)

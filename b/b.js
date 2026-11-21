@@ -80,7 +80,8 @@
     if (V.portada) html += '<div class="portada" style="' + C.fondo(V.portada) + '"></div>';
     html += '<div class="card hero"><div class="logo-grande' + (V.logo ? ' img' : '') + '" style="' + C.fondo(V.logo) + '">' + (V.logo ? '' : '💈') + '</div>' +
       '<h1>' + esc(V.nombre) + '</h1>' + (V.calificacion && V.calificacion.total ? '<div>' + nota(V.calificacion) + ' <span class="muted chico">promedio de sus clientes</span></div>' : '') +
-      '<p class="muted" style="margin:6px 0 0">' + esc(V.bienvenida || K.texto('vista_bienvenida', 'Elige tu corte, tu barbero y tu hora.')) + '</p>';
+      '<p class="muted" style="margin:6px 0 0">' + esc(V.bienvenida || K.texto('vista_bienvenida', 'Elige tu corte, tu barbero y tu hora.')) + '</p>' +
+      '<div id="bRedes" data-cfx-redes-centro hidden style="margin-top:10px"></div>';  // G141 a 🔗 redes con ícono
     // 1) Lo principal: la cuenta (entrar o crearla). Con cuenta perteneces a esta barbería.
     if (yo) {
       html += '<div class="btns" style="justify-content:center"><a class="btn grande" href="../' + K.paginaDe(yo.role) + '">📲 Abrir mi app</a></div>' +
@@ -122,6 +123,7 @@
     html += '<p class="muted chico centro">' + esc(K.texto('terminos', '')) + ' <a href="../legal.html">Términos</a></p>';
     mostrarApp(html);
     C.marca(true);
+    if (window.CodeFixVitrina && CodeFixVitrina.redes) CodeFixVitrina.redes.publico($('bRedes'), { rpc: (f, x) => K.rpc(f, x), llave: V.codigo, titulo: '', solo: true });
     if ($('bIrReservar')) $('bIrReservar').onclick = () => $('reservar').scrollIntoView({ behavior: 'smooth' });
     if ($('bCuenta')) $('bCuenta').onclick = crearCuenta;
     app.querySelectorAll('[data-t]').forEach((li) => li.onclick = () => { location.href = '../r/?t=' + li.dataset.t; });
