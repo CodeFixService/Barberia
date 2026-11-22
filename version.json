@@ -1,6 +1,6 @@
 {
-  "version": "3.60",
+  "version": "3.61",
   "bd": "3.26",
-  "notas": "🛡️ G144 (núcleo 3.40): sin botón \"Panel de administración\" ni limpieza dentro de las apps (todo en el CM → Apps) · ❤️ favorito rojo y redondo · contadores e íconos redondos = círculo perfecto · 🎤 y ⬜ ahora son íconos de línea · 💬 el WhatsApp del registro pasa solo a 📱 Mis redes (uno solo; el botón antiguo se oculta) · 🧹 archivos internos fuera de la página publicada.",
+  "notas": "🛒 G146 (núcleo 3.41): la barra de servicios elegidos sube y baja con el menú de abajo y el ↑ queda encima (nada se tapa). · 🛡️ G144 (núcleo 3.40): sin botón \"Panel de administración\" ni limpieza dentro de las apps (todo en el CM → Apps) · ❤️ favorito rojo y redondo · contadores e íconos redondos = círculo perfecto · 🎤 y ⬜ ahora son íconos de línea · 💬 el WhatsApp del registro pasa solo a 📱 Mis redes (uno solo; el botón antiguo se oculta) · 🧹 archivos internos fuera de la página publicada.",
   "funcion": "1.4"
 }
