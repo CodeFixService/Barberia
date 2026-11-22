@@ -1,5 +1,5 @@
 {
-  "version": "3.63",
+  "version": "3.64",
   "bd": "3.26",
   "notas": "🙂 G148 (núcleo 3.43): los perfiles ya no usan ícono: sale tu foto o, si no tienes, la primera letra de tu nombre. · 📱 G147: bajo el QR de tu barbería y de 🔳 Mi link sale \"Síguenos: Instagram @… · TikTok @…\" (primero las redes del barbero). · 🛒 G146 (núcleo 3.41): la barra de servicios elegidos sube y baja con el menú de abajo y el ↑ queda encima (nada se tapa). · 🛡️ G144 (núcleo 3.40): sin botón \"Panel de administración\" ni limpieza dentro de las apps (todo en el CM → Apps) · ❤️ favorito rojo y redondo · contadores e íconos redondos = círculo perfecto · 🎤 y ⬜ ahora son íconos de línea · 💬 el WhatsApp del registro pasa solo a 📱 Mis redes (uno solo; el botón antiguo se oculta) · 🧹 archivos internos fuera de la página publicada.",
   "funcion": "1.4"
