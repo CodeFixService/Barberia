@@ -8,7 +8,7 @@
     location.replace(cfg.SITIO + location.pathname.replace(/^\/Barberia\//i, '') + location.search + location.hash);
   }
   const ZONA = cfg.ZONA || 'America/Santiago';
-  const VERSION = '3.62';
+  const VERSION = '3.63';
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -206,7 +206,7 @@
   const fondo = (dataUrl) => esFoto(dataUrl) ? "background-image:url('" + dataUrl + "')" : '';
   function avatar(p, clase) {
     const f = p && p.foto;
-    return '<span class="av ' + (clase || '') + '" style="' + fondo(f) + '">' + (f ? '' : esc((p && p.avatar) || '🙂')) + '</span>';
+    return '<span class="av ' + (clase || '') + '" style="' + fondo(f) + '">' + (f ? '' : esc(((p && p.nombre) || '?').trim().charAt(0).toUpperCase() || '?'))  // G148: foto o letra del nombre (sin ícono) + '</span>';
   }
 
   /* ---------- Colores ---------- */
