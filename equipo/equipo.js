@@ -810,7 +810,7 @@
       estudio: () => CFX_ESTUDIO.montar(seccion('🎬 Estudio de contenido'), { rpc: K.rpc, probar: (k) => P.upsell('Estudio de contenido', k), nombre: (bar() || {}).nombre || '' }),  // G112 d (núcleo)
       milink: () => P.compartir({ el: seccion('🔳 Mi link y QR'), link: K.linkBarberia(bar().codigo, yo.id), archivo: 'qr-' + primerNombre(yo.nombre),
         texto: 'Con este link o QR tus clientes reservan <b>directo contigo</b> en ' + esc(bar().nombre) + ' (sin cuenta o con su cuenta).',
-        mensaje: '💈 Reserva tu hora conmigo en ' + bar().nombre }), plan: () => P.plan(seccion('💎 Mi plan')),
+        mensaje: '💈 Reserva tu hora conmigo en ' + bar().nombre, redes: { rpc: K.rpc, persona: true } }), plan: () => P.plan(seccion('💎 Mi plan')),
       perfil: () => window.CFX_PERFIL.abrir() };
     if (F[s]) F[s]();
   }
@@ -1675,11 +1675,13 @@
     const link = linkClientes();
     const z = vistaActual === 'mas' ? seccion('🔗 Enlace y QR') : null;
     const html = '<div class="card centro"><p>Comparte este enlace o el QR con tus clientes: <b>reservan sin cuenta</b> (con nombre y WhatsApp) o se crean su cuenta.</p>' +
-      '<img class="qr-img" src="' + C.qr(link, 440) + '" alt="QR"><input readonly value="' + esc(link) + '" style="text-align:center">' +
+      '<img class="qr-img" src="' + C.qr(link, 440) + '" alt="QR"><p class="sub" data-siguenos hidden style="margin:4px 0 8px"></p><input readonly value="' + esc(link) + '" style="text-align:center">' +
       '<div class="btns" style="justify-content:center"><button data-c>📋 Copiar</button><a class="btn gris" download="qr-' + esc(bar().codigo) + '.png" href="' + C.qr(link, 900) + '">⬇️ Descargar QR</a>' +
       '<a class="btn wsp" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent('💈 Reserva tu hora en ' + bar().nombre + ': ' + link) + '">💬 Compartir</a></div></div>';
     if (z) { z.innerHTML = html; z.querySelector('[data-c]').onclick = () => C.copiar(link); }
     else { const h = C.hoja('<h2>🔗 Enlace para clientes</h2>' + html); h.q('[data-c]').onclick = () => C.copiar(link); }
+    const sg = z ? z.querySelector('[data-siguenos]') : [...document.querySelectorAll('[data-siguenos]')].pop();  // G147 📱
+    if (window.CodeFixVitrina && CodeFixVitrina.redes.bajoQR) CodeFixVitrina.redes.bajoQR(sg, { rpc: K.rpc });
   }
 
   const pasos = () => dueno() ? [

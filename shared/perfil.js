@@ -90,6 +90,7 @@
     const msg = (o.mensaje || '') + (o.mensaje ? ': ' : '') + o.link;
     const html = '<div class="card centro">' + (o.texto ? '<p style="margin-top:0">' + o.texto + '</p>' : '') +
       '<img class="qr-img" src="' + C.qr(o.link, 440) + '" alt="QR" style="width:220px;max-width:70%;display:block;margin:10px auto;border-radius:12px">' +
+      '<p class="sub" data-siguenos hidden style="margin:4px 0 8px"></p>' +
       '<input readonly value="' + esc(o.link) + '" style="text-align:center">' +
       '<div class="btns" style="justify-content:center"><button data-copiar>📋 Copiar</button>' +
       '<a class="btn gris" download="' + esc(o.archivo || 'qr') + '.png" href="' + C.qr(o.link, 900) + '">⬇️ Descargar QR</a>' +
@@ -98,6 +99,8 @@
     const z = o.el || C.hoja('<h2>' + esc(o.titulo || '🔳 Compartir') + '</h2><div data-z></div>').q('[data-z]');
     z.innerHTML = html + (o.extra || '');
     z.querySelector('[data-copiar]').onclick = () => C.copiar(o.link);
+    // G147 📱 "Síguenos" bajo el QR (o.redes = { rpc, persona }: primero las del barbero, si no las de la barbería).
+    if (o.redes && window.CodeFixVitrina && CodeFixVitrina.redes.bajoQR) CodeFixVitrina.redes.bajoQR(z.querySelector('[data-siguenos]'), o.redes);
     if (z.querySelector('[data-share]')) z.querySelector('[data-share]').onclick = () => navigator.share({ title: o.titulo || '', text: o.mensaje || '', url: o.link }).catch(() => {});
     return z;
   }
