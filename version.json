@@ -1,6 +1,6 @@
 {
-  "version": "3.73",
+  "version": "3.74",
   "bd": "3.27",
-  "notas": "🐞 G158 (núcleo 3.53): el Centro de Mando también puede reportar fallas y su ⚙️ Ajustes quedó ordenado como el de las apps. 🔎 G157: barra Buscar + filtros (fecha, tipo, orden) en el núcleo.",
+  "notas": "🐞 G159 (núcleo 3.54): un selector tipo \"Producto…\" ahora muestra lo que elegiste (antes parecía que no se agregaba).",
   "funcion": "1.4"
 }
