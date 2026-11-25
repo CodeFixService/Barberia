@@ -1,6 +1,6 @@
 {
-  "version": "3.77",
-  "bd": "3.29",
-  "notas": "🐞 Túnel (núcleo 3.57): un solo botón ↺ Volver todo a lo de fábrica, con aire arriba.",
+  "version": "3.78",
+  "bd": "3.30",
+  "notas": "🐞 G165 (núcleo 3.58): un solo botón ↺ Volver todo a lo de fábrica, con aire arriba. 🧩 G163 (núcleo 3.57): en 🧩 Módulos, lo que todavía no funciona se ve 🔜 deshabilitado con su nota (no se compra ni se prueba). Lo que ya tienes sigue a la vista.",
   "funcion": "1.4"
 }
