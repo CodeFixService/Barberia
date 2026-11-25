@@ -337,6 +337,7 @@ ul.feat li::before { content: '⭐'; margin-right: 8px; }
 .tl .ahora { position: absolute; left: 0; right: 0; border-top: 2px solid var(--bad); z-index: 1; }
 .tl .libre { position: absolute; left: 3px; right: 3px; border-radius: 8px; cursor: pointer; }
 .tl .libre:hover { background: var(--brand-soft); }
+.tl .fuera.toca { cursor: pointer; } /* G168: el equipo agenda fuera de horario */
 
 .mes { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .mes .cab { text-align: center; font-size: 11.5px; font-weight: 700; color: var(--muted); padding: 4px 0; }

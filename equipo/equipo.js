@@ -339,7 +339,8 @@
       zona.innerHTML = '<div id="tl"></div>';
       A.timeline($('tl'), { cols, datos, horarios: horarios(), staff: true, verAnuladas, ancho: lista.length > 1 ? 120 : 200,
         alBloque: abrirReserva, alBloqueo: borrarBloqueo,
-        alLibre: (c, m) => { if (!dueno() && c.barbero !== yo.id) return; nuevaHora(c.barbero, c.f, C.aHHMM(m)); } });
+        alLibre: (c, m) => { if (!dueno() && c.barbero !== yo.id) return; nuevaHora(c.barbero, c.f, C.aHHMM(m)); },
+        alFuera: (c, m) => { if (!dueno() && c.barbero !== yo.id) return; nuevaHora(c.barbero, c.f, C.aHHMM(m), null, true); } });
     } else if (vista === 'semana') {
       $('cTit').textContent = C.diaCorto(desde) + ' – ' + C.diaCorto(hasta);
       const id = quien === '*' ? yo.id : quien;
@@ -348,7 +349,8 @@
       zona.innerHTML = (quien === '*' ? '<p class="muted chico">Semana de ' + esc(barbero(id).nombre) + '. Elige un barbero arriba para ver la suya.</p>' : '') + '<div id="tl"></div>';
       A.timeline($('tl'), { cols, datos, horarios: horarios(), staff: true, verAnuladas, ancho: 96, px: 0.9,
         alBloque: abrirReserva, alBloqueo: borrarBloqueo,
-        alLibre: (c, m) => { if (!dueno() && c.barbero !== yo.id) return; nuevaHora(c.barbero, c.f, C.aHHMM(m)); } });
+        alLibre: (c, m) => { if (!dueno() && c.barbero !== yo.id) return; nuevaHora(c.barbero, c.f, C.aHHMM(m)); },
+        alFuera: (c, m) => { if (!dueno() && c.barbero !== yo.id) return; nuevaHora(c.barbero, c.f, C.aHHMM(m), null, true); } });
     } else if (vista === 'mes') {
       const [y, m] = desde.split('-').map(Number);
       $('cTit').textContent = C.MESES[m - 1][0].toUpperCase() + C.MESES[m - 1].slice(1) + ' ' + y;
@@ -495,7 +497,7 @@
   }
 
   // Hora creada por la barbería (cliente que escribió, llamó o llegó).
-  async function nuevaHora(barberoId, f, hhmm, pre) {
+  async function nuevaHora(barberoId, f, hhmm, pre, fuera) {
     if (!dueno() && barberoId !== yo.id) barberoId = yo.id;
     try { await cargarClientes(); } catch (e) { clientes = []; }
     const carro = new Set();
@@ -506,6 +508,8 @@
       '<label>WhatsApp <span class="opc">(si no tiene cuenta)</span></label><input data-tel inputmode="tel" placeholder="+56 9…">' +
       (dueno() ? '<label>Barbero</label><select data-b>' + B.barberos.map((b) => '<option value="' + b.id + '"' + (b.id === barberoId ? ' selected' : '') + '>' + esc(b.nombre) + '</option>').join('') + '</select>' : '') +
       '<div class="row"><div><label>Día</label><input type="date" data-f value="' + f + '"></div><div><label>Hora</label><input type="time" step="900" data-h value="' + (hhmm || '') + '"></div></div>' +
+      // G168 · #7: el equipo puede agendar a cualquier hora (00:00 incluida), aunque la barbería esté cerrada; los clientes no.
+      '<p class="muted chico">' + (fuera ? '🌙 Fuera del horario: igual queda agendada (solo el equipo puede).' : 'Puedes elegir cualquier hora, también fuera del horario.') + '</p>' +
       '<label>Servicios</label><div class="chips" style="flex-wrap:wrap" data-servs>' + B.servicios.map((s) => '<button type="button" class="chip" data-s="' + s.id + '">' + esc(s.nombre) + ' · ' + s.duracion + "'" + '</button>').join('') + '</div>' +
       '<label>Duración (min)</label><input type="number" min="5" max="480" step="5" data-min placeholder="Se calcula con los servicios">' +
       '<label>Nota <span class="opc">(opcional)</span></label><input data-nota maxlength="200" placeholder="Ej: acordado por chat">' +
@@ -536,7 +540,8 @@
         return n;
       } });
     h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
-      if (!h.q('[data-h]').value) throw new Error('Elige la hora');
+      // G168 · #7: sin hora no hay error: se abre el selector de hora (00:00 vale).
+      if (!h.q('[data-h]').value) { C.toast('🕐 Elige la hora'); const hi = h.q('[data-h]'); hi.focus(); try { hi.showPicker(); } catch (e) { /* sin selector: queda el foco */ } return; }
       const c = cliDe();
       const r = await K.rpc('crear_hora', {
         p_barbero: h.q('[data-b]') ? h.q('[data-b]').value : yo.id, p_inicio: C.instante(h.q('[data-f]').value, h.q('[data-h]').value).toISOString(),
@@ -760,12 +765,17 @@
     ];
     // Menú Más común del núcleo (CFX_MENU): lista por grupos; cada sección se abre en una hoja desde abajo (seccion()).
     // Mi cuenta (perfil) y Soporte ya vienen en el menú común (Configuración y Cuenta y ayuda).
-    const G = dueno() ? { negocio: 'Tu barbería', horario: 'Tu barbería', tiempos: 'Tu barbería', servicios: 'Tu barbería', links: 'Tu barbería', ofertas: 'Tu barbería', equipo: 'Tu barbería', enlace: 'Tu barbería',
-      portafolio: 'Tu barbería', redes: 'Tu barbería', productos: 'Ventas y clientes', giftcards: 'Ventas y clientes', membresias: 'Ventas y clientes', promos: 'Ventas y clientes',
-      caja: 'Ventas y clientes', boleta: 'Ventas y clientes', estadisticas: 'Ventas y clientes', resumen: 'Ventas y clientes', volver: 'Ventas y clientes', calificaciones: 'Ventas y clientes',
+    // G168 · #4: grupos claros (nada cae en "Tu trabajo", que es del barbero) y en orden: barbería → ventas → vender más → plan → configuración.
+    const G = dueno() ? { negocio: 'Tu barbería', misredes: 'Tu barbería', horario: 'Tu barbería', tiempos: 'Tu barbería', servicios: 'Tu barbería', equipo: 'Tu barbería',
+      enlace: 'Tu barbería', portafolio: 'Tu barbería',
+      caja: 'Ventas y clientes', boleta: 'Ventas y clientes', links: 'Ventas y clientes', productos: 'Ventas y clientes', giftcards: 'Ventas y clientes', membresias: 'Ventas y clientes',
+      recurrentes: 'Ventas y clientes', estadisticas: 'Ventas y clientes', resumen: 'Ventas y clientes', volver: 'Ventas y clientes', calificaciones: 'Ventas y clientes',
+      ofertas: 'Vender más', promos: 'Vender más', redes: 'Vender más', estudio: 'Vender más',
       plan: 'Tu plan', modulos: 'Tu plan', invitar: 'Tu plan', verificar: 'Tu plan', respaldo: 'Configuración' } : {};
+    const ORDEN_G = ['Tu barbería', 'Ventas y clientes', 'Vender más', 'Tu trabajo', 'Tu plan', 'Configuración'];
+    const pos = (i) => { const k = ORDEN_G.indexOf(G[i[0]] || 'Tu trabajo'); return k < 0 ? ORDEN_G.length : k; };
     const K2 = { plan: 'premium', invitar: 'invitar' };
-    const L = items.filter((i) => i[0] !== 'perfil' && i[0] !== 'soporte').map((i) => ({ k: K2[i[0]] || i[0], ico: i[1], t: i[2], d: i[3], grupo: G[i[0]] || 'Tu trabajo', accion: () => abrirSeccion(i[0]) }))
+    const L = items.filter((i) => i[0] !== 'perfil' && i[0] !== 'soporte').map((i, n) => [i, n]).sort((a, b) => pos(a[0]) - pos(b[0]) || a[1] - b[1]).map((x) => x[0]).map((i) => ({ k: K2[i[0]] || i[0], ico: i[1], t: i[2], d: i[3], grupo: G[i[0]] || 'Tu trabajo', accion: () => abrirSeccion(i[0]) }))
       .concat([{ k: 'tour', ico: '🧭', t: 'Ver el recorrido', grupo: 'Cuenta y ayuda', accion: () => P.tour(pasos(), true) }]);
     if (!el.querySelector('.cfx-aj-w')) el.innerHTML = '';
     window.CFX_MENU.montar(el, L, { perfil: { alGuardar: () => { yo = K.cuenta; } } });
@@ -1017,6 +1027,27 @@
   // Editor de horario semanal (lunes a domingo): Abierto / Cerrado, horas y colación.
   function editorHorario(el, h) {
     h = JSON.parse(JSON.stringify(h || []));
+    // G168 · #3: el MISMO editor de horario que Despega (núcleo vitrina.js: ⚡ Rápido / 📅 Día por día, 2.º tramo = colación).
+    //   Barbería guarda { e, i, f, ci, cf } por día: se traduce ida y vuelta (nada se pierde; sin cambios queda el horario de antes).
+    const V = window.CodeFixVitrina;
+    if (V && V.horario && V.horarioTexto && V.horarioLeer) {
+      const tramos = h.map((d) => (!d || d.e === 'x' ? null : d.ci && d.cf ? [[d.i, d.ci], [d.cf, d.f]] : [[d.i || '10:00', d.f || '20:00']]));
+      while (tramos.length < 7) tramos.push(null);
+      el.innerHTML = '<input type="text" data-horario-txt hidden>';
+      const campo = el.querySelector('[data-horario-txt]');
+      campo.value = V.horarioTexto(tramos);
+      V.horario(campo);
+      return () => {
+        const t = V.horarioLeer(campo.value);
+        if (!t) return h.length ? h : tramos.map(() => ({ e: 'x', i: '10:00', f: '20:00' }));
+        return t.map((d, i) => {
+          if (!d) { const v = h[i] || {}; return { e: 'x', i: v.i || '10:00', f: v.f || '20:00' }; }
+          const o = { e: 'a', i: d[0][0], f: d[d.length - 1][1] };
+          if (d.length > 1) { o.ci = d[0][1]; o.cf = d[1][0]; }
+          return o;
+        });
+      };
+    }
     el.innerHTML = C.DIAS_LARGO.map((n, i) => {
       const d = h[i] || { e: 'x', i: '10:00', f: '20:00' };
       return '<div class="horario-dia" data-d="' + i + '"><div><b>' + n.slice(0, 3) + '</b><select data-e style="margin-top:4px">' +

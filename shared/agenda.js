@@ -174,6 +174,10 @@
     el.querySelectorAll('.bloque[data-id]').forEach((b) => { if (b.dataset.id && o.alBloque) b.onclick = (e) => { e.stopPropagation(); o.alBloque(b.dataset.id); }; });
     el.querySelectorAll('.bloque[data-bq]').forEach((b) => { if (o.alBloqueo) b.onclick = (e) => { e.stopPropagation(); o.alBloqueo(b.dataset.bq); }; });
     el.querySelectorAll('.libre').forEach((b) => b.onclick = () => { const c = o.cols[+b.dataset.ci]; o.alLibre(c, +b.dataset.m); });
+    // G168 · Barbería #7: el equipo también agenda FUERA de horario (como el sobrecupo de BiciTaller): tocar el rayado abre "Agendar" con esa hora.
+    if (o.alFuera) el.querySelectorAll('.col').forEach((col) => col.querySelectorAll('.fuera').forEach((z) => {
+      z.classList.add('toca'); z.onclick = (e) => { const r = col.getBoundingClientRect(); const m = Math.floor(((e.clientY - r.top - TOP) / PX + min) / 15) * 15; o.alFuera(o.cols[+col.dataset.ci], Math.max(0, Math.min(24 * 60 - 15, m))); };
+    }));
     // Lleva la vista cerca de la hora actual o del inicio.
     const tl = el.querySelector('.tl');
     const ahora = C.minutosDe(new Date());
