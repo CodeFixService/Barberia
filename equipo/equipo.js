@@ -1036,7 +1036,7 @@
     const z = seccion('✂️ Servicios y precios');
     await cargarBarberia();
     const lim = K.limite('servicios', premium());
-    z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + B.servicios.length + ' / ' + (lim >= 100 ? '∞' : lim) + ' servicios</b><div class="muted chico">Los clientes los ven con precio y duración</div></div>' +
+    z.innerHTML = '<div class="card"><div class="flex"><div class="grow"><b>' + B.servicios.length + ' / ' + (lim >= 100 ? '∞' : lim) + ' servicios</b>' + (window.CFX_TIPO ? ' ' + CFX_TIPO.chip('servicio') : '') + '<div class="muted chico">Los clientes los ven con precio y duración</div></div>' +
       '<button id="bNuevoSer">+ Nuevo</button></div>' +
       '<p class="muted chico" style="margin:8px 0 0">Vienen los cortes más pedidos: toca ✏️ para cambiar el precio u ocultarlo.</p>' +
       '<div class="btns"><button class="gris" id="bFabSer">✨ Servicios de fábrica</button></div></div>' + (B.servicios.length ? B.servicios.map((s, i) =>
@@ -1309,7 +1309,7 @@
   // 🛍️ Productos y stock (dueño: crea y repone · equipo: vende en la caja).
   async function secProductos() {
     const z = seccion('🛍️ Productos y stock');
-    z.innerHTML = '<p class="muted">' + (dueno() ? 'Pomadas, ceras, shampoo… Al vender, entra a la caja y el stock baja solo.' : 'Vende un producto: entra a tu caja y el stock baja solo.') + '</p>' +
+    z.innerHTML = '<p class="muted">' + (window.CFX_TIPO ? CFX_TIPO.chip('producto') + ' ' : '') + (dueno() ? 'Pomadas, ceras, shampoo… Al vender, entra a la caja y el stock baja solo.' : 'Vende un producto: entra a tu caja y el stock baja solo.') + '</p>' +
       '<div id="prZona"><p class="muted">Cargando…</p></div>' + (dueno() ? '<div class="btns"><button class="grande full" id="bPrNuevo">+ Agregar producto</button><button class="gris full" id="bPrFab">✨ Productos típicos</button></div>' : '');
     if ($('bPrFab')) $('bPrFab').onclick = (ev) => C.accion(ev.target, async () => {
       const n = await K.rpc('productos_fabrica');
