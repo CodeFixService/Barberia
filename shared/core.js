@@ -8,7 +8,7 @@
     location.replace(cfg.SITIO + location.pathname.replace(/^\/Barberia\//i, '') + location.search + location.hash);
   }
   const ZONA = cfg.ZONA || 'America/Santiago';
-  const VERSION = '3.78';
+  const VERSION = '3.79';
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -206,7 +206,8 @@
   const fondo = (dataUrl) => esFoto(dataUrl) ? "background-image:url('" + dataUrl + "')" : '';
   function avatar(p, clase) {
     const f = p && p.foto;
-    return '<span class="av ' + (clase || '') + '" style="' + fondo(f) + '">' + (f ? '' : esc(((p && p.nombre) || '?').trim().charAt(0).toUpperCase() || '?'))  // G148: foto o letra del nombre (sin ícono) + '</span>';
+    // G148: foto o letra del nombre (sin ícono). G167: el comentario estaba al medio y se comía el cierre </span> (la foto se tragaba el "Hola,").
+    return '<span class="av ' + (clase || '') + '" style="' + fondo(f) + '">' + (f ? '' : esc(((p && p.nombre) || '?').trim().charAt(0).toUpperCase() || '?')) + '</span>';
   }
 
   /* ---------- Colores ---------- */

@@ -172,7 +172,7 @@ button.grande { padding: 16px 20px; font-size: 17px; border-radius: 16px; }
 
 /* ---------- Avatares ---------- */
 .av {
-  width: 44px; height: 44px; border-radius: 14px; flex: none; display: grid; place-items: center; font-size: 22px;
+  width: 44px; height: 44px; border-radius: 14px; flex: none; aspect-ratio: 1; display: grid; place-items: center; font-size: 22px;
   background: var(--brand-soft); background-size: cover; background-position: center; overflow: hidden; position: relative;
 }
 .av.lg { width: 72px; height: 72px; border-radius: 22px; font-size: 36px; }

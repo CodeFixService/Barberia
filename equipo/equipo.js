@@ -151,12 +151,13 @@
     }
     // 4. Hoy
     html += '<div class="sec-tit">📅 Hoy</div>';
+    // G167: el botón va dentro de la tarjeta de Hoy (no suelto entre la taza y el link).
+    const bHoy = '<div class="btns" style="justify-content:center;margin-top:10px"><button class="alt" id="bHoraHoy">+ Agendar una hora</button></div>';
     html += deHoy.length ? '<div class="card"><ul class="list">' + deHoy.map((r) =>
       '<li class="tap" data-ver="' + r.id + '"><div style="width:52px;font-weight:800;font-variant-numeric:tabular-nums">' + C.horaDe(r.inicio) + '</div>' +
       '<div class="grow"><b>' + esc(r.cliente) + (r.lista_negra ? ' ⚠️' : '') + '</b><div class="sub">' + esc(r.servicios.map((s) => s.nombre).join(' + ') || r.nota || '') +
-      (dueno() && B.barberos.length > 1 ? ' · ' + esc((barbero(r.barbero_id) || {}).nombre || '') : '') + '</div></div>' + A.estadoPill(r.estado) + '</li>').join('') + '</ul></div>'
-      : '<div class="card empty"><span class="ico">☕</span>No hay horas para hoy.</div>';
-    html += '<div class="btns"><button class="alt" id="bHoraHoy">+ Agendar una hora</button></div>';
+      (dueno() && B.barberos.length > 1 ? ' · ' + esc((barbero(r.barbero_id) || {}).nombre || '') : '') + '</div></div>' + A.estadoPill(r.estado) + '</li>').join('') + '</ul>' + bHoy + '</div>'
+      : '<div class="card empty"><span class="ico">☕</span>No hay horas para hoy.' + bHoy + '</div>';
     // 5. Link, QR y plan (dueño)
     if (dueno()) {
       html += '<div class="card"><h2>🔗 Tu link para clientes</h2><p class="muted chico" style="margin-top:-6px">Con este link o el QR tus clientes reservan sin cuenta o se crean la cuenta.</p>' +
@@ -691,14 +692,20 @@
         if (r.propina && h.q('[data-prop]')) { h.q('[data-prop]').value = r.propina; n++; }
         return n;
       } });
-    h.q('[data-ok]').onclick = (ev) => C.accion(ev.target, async () => {
+    h.q('[data-ok]').onclick = (ev) => {
+      // G167 (Barbería #1-#5): sin servicio no se manda (antes saltaba "Falta el servicio" del servidor como error).
+      const sv = h.q('[data-serv]');
+      if (!sv.value.trim()) { C.toast('✂️ Elige o escribe el servicio'); sv.setAttribute('aria-invalid', 'true'); sv.focus(); return; }
+      sv.removeAttribute('aria-invalid');
+      return C.accion(ev.target, async () => {
       const cli = clientes.find((c) => c.id && c.nombre.toLowerCase() === h.q('[data-cli]').value.trim().toLowerCase());
       const p = { id: k ? k.id : '', servicio: h.q('[data-serv]').value, servicio_id: servId, medio,
         cliente_id: cli ? cli.id : '', cliente_nombre: h.q('[data-cli]').value, nota: h.q('[data-nota]').value, barbero_id: h.q('[data-b]') ? h.q('[data-b]').value : '' };
       if (plata) { p.monto = h.q('[data-monto]').value === '' ? -1 : +h.q('[data-monto]').value; p.propina = +h.q('[data-prop]').value || 0; }
       await K.rpc('anotar_corte', { p });
       h.cerrar(); caja();
-    }, '💵 Anotado');
+    }, '💵 Anotado')
+    };
     if (h.q('[data-del]')) h.q('[data-del]').onclick = async () => {
       if (!await C.confirmar('¿Borrar este movimiento de la caja?', { si: 'Borrar', peligro: true })) return;
       await K.rpc('borrar_corte', { p_id: k.id }); h.cerrar(); caja();
