@@ -59,7 +59,7 @@
     if (v === 'agenda' && q.get('r')) { mostrar('agenda'); abrirReserva(q.get('r'), true); return; }
     if (v === 'chat' && q.get('con')) { mostrar('chat'); Chat.abrir(q.get('con')); return; }
     if (v === 'avisos') { Avisos.abrir(); return; }
-    if (['misredes', 'portafolio', 'redes', 'productos', 'giftcards', 'membresias', 'plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo', 'modulos', 'promos'].includes(v)) {
+    if (['misredes', 'portafolio', 'redes', 'productos', 'giftcards', 'membresias', 'plan', 'perfil', 'equipo', 'servicios', 'ajustes', 'estadisticas', 'ofertas', 'caja', 'links', 'horario', 'negocio', 'calificaciones', 'enlace', 'tiempos', 'resumen', 'volver', 'invitar', 'milink', 'respaldo', 'modulos', 'promos', 'recurrentes'].includes(v)) {
       mostrar('mas'); abrirSeccion(v === 'ajustes' ? 'negocio' : v); return;
     }
     mostrar(VISTAS[v] ? v : 'hoy');
@@ -732,6 +732,7 @@
       ['membresias', '🔁', 'Membresías', 'Plan mensual de cortes'],
       ...(window.CFX_ANUNCIOS && CFX_ANUNCIOS.promos ? [['promos', '📣', 'Promo destacada', 'Tarjeta al abrir la app de tus clientes']] : []),
       ...(window.CFX_ESTUDIO ? [['estudio', '🎬', 'Estudio de contenido', 'Ideas para tus redes listas para copiar']] : []),  // G112 d (núcleo)
+      ...(window.CFX_RECURRENTE && dueno() ? [['recurrentes', '🔁', 'Compras recurrentes', 'Lo que tu cliente compra fijo: se avisa y se cobra solo']] : []),  // G162 (núcleo)
       ['invitar', '🤝', 'Invita una barbería', K.regla('dias_referido') ? 'Gana ' + K.regla('dias_referido') + ' días de Premium' : 'Comparte la app'],
       ['plan', '💎', 'Mi plan', premium() ? '⭐ Premium' : 'Free · Hazte Premium'],
       ...(bar().modulos ? [['modulos', '🧩', 'Módulos', premium() ? 'Incluidos + nuevos con -20%' : 'Activa solo lo que necesitas']] : []),
@@ -798,7 +799,7 @@
     if (s === 'soporte') { if (window.CFX_AYUDA) window.CFX_AYUDA.chat(); return; }  // chat común de soporte (llega al Centro de Mando)
     if (s === 'clientes') { mostrar('clientes'); return; }
     if (s === 'verificar') { CFX_VERIFICAR.abrir({ rpc: K.rpc }); return; }
-    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'modulos', 'resumen', 'invitar', 'respaldo', 'redes', 'boleta', 'promos'];
+    const soloDueno = ['negocio', 'horario', 'servicios', 'links', 'ofertas', 'equipo', 'calificaciones', 'enlace', 'plan', 'modulos', 'resumen', 'invitar', 'respaldo', 'redes', 'boleta', 'promos', 'recurrentes'];
     if (!dueno() && soloDueno.includes(s)) { mas(); return; }
     if (MOD53[s] && !tiene(MOD53[s][0])) { P.upsell(MOD53[s][1], MOD53[s][0]); return; }
     if (vistaActual !== 'mas') { vistaActual = 'mas'; document.querySelectorAll('.view').forEach((x) => x.classList.toggle('on', x.id === 'v-mas')); document.querySelectorAll('nav.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === 'mas')); mas(); }
@@ -808,6 +809,11 @@
       portafolio: secPortafolio, redes: secRedes, productos: secProductos, giftcards: secGiftcards, membresias: secMembresias,
       promos: () => CFX_ANUNCIOS.promos(seccion('📣 Promo destacada'), { rpc: K.rpc, probar: (k) => P.upsell('Promo destacada', k) }),  // G96 b (núcleo)
       estudio: () => CFX_ESTUDIO.montar(seccion('🎬 Estudio de contenido'), { rpc: K.rpc, probar: (k) => P.upsell('Estudio de contenido', k), nombre: (bar() || {}).nombre || '' }),  // G112 d (núcleo)
+      // G162 🔁 Compras recurrentes (núcleo): sus clientes con cuenta + servicios y productos de la barbería.
+      recurrentes: () => CFX_RECURRENTE.montar(seccion('🔁 Compras recurrentes'), { rpc: K.rpc, probar: (k) => P.upsell('Compras recurrentes', k),
+        clientes: async () => (((await K.rpc('mis_clientes')) || []).filter((c) => !c.invitado).map((c) => ({ cuenta: c.id, nombre: c.nombre, whatsapp: c.telefono || '', correo: c.email || '' }))),
+        productos: async () => (B.servicios || []).map((x) => ({ clave: 's:' + x.id, nombre: x.nombre, precio: x.precio, tipo: 'servicio' }))
+          .concat(((await K.rpc('productos_lista').catch(() => [])) || []).filter((x) => x.activo && x.precio != null).map((x) => ({ clave: 'p:' + x.id, nombre: x.nombre, precio: x.precio, tipo: 'producto' }))) }),
       milink: () => P.compartir({ el: seccion('🔳 Mi link y QR'), link: K.linkBarberia(bar().codigo, yo.id), archivo: 'qr-' + primerNombre(yo.nombre),
         texto: 'Con este link o QR tus clientes reservan <b>directo contigo</b> en ' + esc(bar().nombre) + ' (sin cuenta o con su cuenta).',
         mensaje: '💈 Reserva tu hora conmigo en ' + bar().nombre, redes: { rpc: K.rpc, persona: true } }), plan: () => P.plan(seccion('💎 Mi plan')),

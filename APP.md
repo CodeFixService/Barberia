@@ -79,3 +79,4 @@ Auto-actualizar compara con `bd` de version.json (antes con `version` → se rei
 - G146 (3.61): #carroBarra (b/ y cliente/) con data-cfx-sobre-menu y bottom var(--cfx-carro-b, 76px): sigue al menú (núcleo ui.js) y ↑ va encima.
 - G147 (3.62): 📱 "Síguenos" bajo el QR: perfil.js compartir({ redes: { rpc, persona } }) en 🔳 Mi link + equipo.js 🔗 Enlace y QR (núcleo redes.bajoQR).
 - 🙂 G148 (3.63, núcleo 3.43): perfiles sin ícono → foto o la letra del nombre (el ícono guardado se conserva, no se muestra).
+- 🔁 G162 (3.76 · bd 3.29, núcleo 3.56): módulo 'suscripciones' (bar_nuevos) = 🔁 Compras recurrentes del NÚCLEO (recurrente.js): Más (dueño) con clientes (mis_clientes) + servicios + productos; cliente: "Tus compras recurrentes" en el inicio (#recurrentes). Ganchos cfx_negocio_nombre_app / cfx_recurrente_cliente_app. Prueba g162b.js.

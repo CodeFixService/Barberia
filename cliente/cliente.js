@@ -98,7 +98,7 @@
       html += '<div class="sec-tit">Tus próximas horas</div>' + prox.slice(0, 3).map((h) => tarjetaHora(h, true)).join('');
     }
     if (yo.saldo > 0) html += '<div class="card"><div class="flex"><span style="font-size:28px">💰</span><div class="grow"><b>Tienes ' + C.plata(yo.saldo) + ' a favor</b><div class="sub muted">Se usa solo como abono en tu próxima reserva.</div></div></div></div>';
-    html += '<div id="membresia"></div><div id="sellos"></div>';
+    html += '<div id="membresia"></div><div id="recurrentes" class="card" hidden></div><div id="sellos"></div>';
     // v2.1: regalo de cumpleaños (vale 7 días desde el cumpleaños).
     if (yo.cumple && b.regalo_cumple && (K.tiene('barberia', 'cumpleanos', !!b.premium) || !!(b.modulos && b.modulos.campanas))) {
       const cf = C.hoy().slice(0, 4) + yo.cumple.slice(4);
@@ -145,6 +145,7 @@
     activarTarjetas(el);
     // Sellos (si la barbería es Premium)
     // G53b 🔁 Membresía (solo si su barbería tiene el módulo y le armó un plan)
+    if (window.CFX_RECURRENTE && $('recurrentes')) CFX_RECURRENTE.mias($('recurrentes'), { rpc: K.rpc }).catch(() => {});  // G162 🔁 (núcleo)
     if (K.barberiaTiene('membresia')) K.rpc('mi_membresia').then((m) => {
       if (!m || !$('membresia')) return;
       $('membresia').innerHTML = '<div class="card"><h2>🔁 Tu membresía <span class="grow"></span><span class="pill">' + (m.vigente ? m.quedan + ' / ' + m.cortes : 'vencida') + '</span></h2>' +
