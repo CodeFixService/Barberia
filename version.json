@@ -1,6 +1,6 @@
 {
-  "version": "3.80",
+  "version": "3.81",
   "bd": "3.30",
-  "notas": "🌙 G168: el equipo agenda fuera de horario (toca el rayado de la agenda; las 00:00 valen) y sin hora se abre el selector, sin error. 🕐 El horario usa el mismo editor de Despega (⚡ Rápido / 📅 Día por día). Más agrupado: Tu barbería, Ventas y clientes, Vender más y Tu plan. 📌 G168 (núcleo 3.60): en Personalizar → Barra de abajo eliges tus 3 «Accesos directos» (el + y el Más quedan fijos). El último botón de la barra se ve igual en todas las apps: ⋯ y la palabra «Más».",
+  "notas": "🕐 G169: al «Agendar una hora», el selector de hora parte en la hora de apertura del barbero ese día y marca las horas abiertas; fuera de horario se puede elegir igual.",
   "funcion": "1.4"
 }

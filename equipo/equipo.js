@@ -514,6 +514,12 @@
       '<label>Duración (min)</label><input type="number" min="5" max="480" step="5" data-min placeholder="Se calcula con los servicios">' +
       '<label>Nota <span class="opc">(opcional)</span></label><input data-nota maxlength="200" placeholder="Ej: acordado por chat">' +
       '<div class="btns"><button class="full" data-ok>Agendar</button></div>');
+    // G169 · #7: el selector de hora abre en el horario del barbero ese día (horas abiertas marcadas); fuera de horario se puede elegir igual.
+    const marcarHorario = () => {
+      const d = A.diaHorario((barbero(h.q('[data-b]') ? h.q('[data-b]').value : barberoId) || {}).horario, h.q('[data-f]').value || f), ih = h.q('[data-h]');
+      if (d.e === 'x' || !d.i || !d.f) { delete ih.dataset.desde; delete ih.dataset.hasta; } else { ih.dataset.desde = d.i; ih.dataset.hasta = d.f; }
+    };
+    marcarHorario(); h.q('[data-f]').addEventListener('change', marcarHorario); if (h.q('[data-b]')) h.q('[data-b]').addEventListener('change', marcarHorario);
     const buscar = h.q('[data-buscar]');
     const cliDe = () => clientes.find((c) => c.id && c.nombre.toLowerCase() === buscar.value.trim().toLowerCase());
     if (pre) { buscar.value = pre.nombre || ''; if (pre.invitado) h.q('[data-tel]').value = pre.telefono || ''; }
