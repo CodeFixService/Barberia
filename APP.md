@@ -80,3 +80,6 @@ Auto-actualizar compara con `bd` de version.json (antes con `version` → se rei
 - G147 (3.62): 📱 "Síguenos" bajo el QR: perfil.js compartir({ redes: { rpc, persona } }) en 🔳 Mi link + equipo.js 🔗 Enlace y QR (núcleo redes.bajoQR).
 - 🙂 G148 (3.63, núcleo 3.43): perfiles sin ícono → foto o la letra del nombre (el ícono guardado se conserva, no se muestra).
 - 🔁 G162 (3.76 · bd 3.29, núcleo 3.56): módulo 'suscripciones' (bar_nuevos) = 🔁 Compras recurrentes del NÚCLEO (recurrente.js): Más (dueño) con clientes (mis_clientes) + servicios + productos; cliente: "Tus compras recurrentes" en el inicio (#recurrentes). Ganchos cfx_negocio_nombre_app / cfx_recurrente_cliente_app. Prueba g162b.js.
+
+## 📱 G164 (3.82 · bd 3.31, núcleo 3.62)
+- Máx. equipos por cuenta (tope del CM → Control → 📱 Equipos, por defecto 3): núcleo equipos.js en el <head> + sql/equipos.sql (bloque núcleo de instalar.sql). Sin código propio de la app. Mi perfil → Avanzado → 📱 Mis equipos. Prueba SaaS/pruebas/g164.js.
